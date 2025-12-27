@@ -9,12 +9,15 @@ Date: 2024-12-27
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 
 from config import TrendSignalConfig, get_config
 from sentiment_analyzer import NewsItem
-from multilingual_sentiment import MultilingualSentimentAnalyzer
+
+# Type hints only
+if TYPE_CHECKING:
+    from multilingual_sentiment import MultilingualSentimentAnalyzer
 
 
 # ==========================================
@@ -44,6 +47,9 @@ class NewsCollector:
         Returns:
             List of NewsItem objects with sentiment analysis
         """
+        # Import at runtime to avoid circular dependency
+        from multilingual_sentiment import MultilingualSentimentAnalyzer
+        
         all_news = []
         
         # Initialize ticker-aware multilingual sentiment analyzer
@@ -76,7 +82,7 @@ class NewsCollector:
         ticker_symbol: str,
         company_name: str,
         lookback_hours: int,
-        sentiment_analyzer: SentimentAnalyzer
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer'
     ) -> List[NewsItem]:
         """Collect news from NewsAPI"""
         url = "https://newsapi.org/v2/everything"
@@ -132,7 +138,7 @@ class NewsCollector:
         self,
         ticker_symbol: str,
         lookback_hours: int,
-        sentiment_analyzer: SentimentAnalyzer
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer'
     ) -> List[NewsItem]:
         """Collect news from Alpha Vantage"""
         url = "https://www.alphavantage.co/query"
