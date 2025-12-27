@@ -26,6 +26,17 @@ if not ALPHAVANTAGE_KEY:
 
 
 # ==========================================
+# SENTIMENT ANALYSIS CONFIGURATION
+# ==========================================
+
+# Toggle between FinBERT (real) and Mock (keyword-based)
+USE_FINBERT = True  # Set False to use mock keyword-based sentiment
+
+# FinBERT device
+FINBERT_DEVICE = None  # None = auto-detect (cuda if available, else cpu)
+
+
+# ==========================================
 # SENTIMENT DECAY MODEL (✅ 24H WINDOW)
 # ==========================================
 
