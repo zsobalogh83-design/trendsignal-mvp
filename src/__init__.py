@@ -16,6 +16,7 @@ from .sentiment_analyzer import SentimentAnalyzer, SentimentAggregator
 from .technical_analyzer import TechnicalAnalyzer
 from .signal_generator import SignalGenerator, TradingSignal
 from .hungarian_news import HungarianNewsCollector, EnhancedNewsCollector
+from .ticker_keywords import TICKER_INFO, get_ticker_keywords, calculate_relevance_score
 
 __all__ = [
     'TrendSignalConfig',
@@ -28,4 +29,7 @@ __all__ = [
     'TradingSignal',
     'HungarianNewsCollector',
     'EnhancedNewsCollector',
+    'TICKER_INFO',
+    'get_ticker_keywords',
+    'calculate_relevance_score',
 ]

@@ -25,7 +25,6 @@ class NewsCollector:
     
     def __init__(self, config: Optional[TrendSignalConfig] = None):
         self.config = config or get_config()
-        self.sentiment_analyzer = SentimentAnalyzer(config)
     
     def collect_news(
         self,
@@ -46,17 +45,20 @@ class NewsCollector:
         """
         all_news = []
         
+        # Initialize ticker-aware sentiment analyzer
+        sentiment_analyzer = SentimentAnalyzer(self.config, ticker_symbol)
+        
         # Collect from NewsAPI
         if self.config.newsapi_key and self.config.newsapi_key != "YOUR_NEWSAPI_KEY_HERE":
             newsapi_items = self._collect_from_newsapi(
-                ticker_symbol, company_name, lookback_hours
+                ticker_symbol, company_name, lookback_hours, sentiment_analyzer
             )
             all_news.extend(newsapi_items)
         
         # Collect from Alpha Vantage
         if self.config.alphavantage_key and self.config.alphavantage_key != "YOUR_ALPHAVANTAGE_KEY_HERE":
             alphavantage_items = self._collect_from_alphavantage(
-                ticker_symbol, lookback_hours
+                ticker_symbol, lookback_hours, sentiment_analyzer
             )
             all_news.extend(alphavantage_items)
         
@@ -72,7 +74,8 @@ class NewsCollector:
         self,
         ticker_symbol: str,
         company_name: str,
-        lookback_hours: int
+        lookback_hours: int,
+        sentiment_analyzer: SentimentAnalyzer
     ) -> List[NewsItem]:
         """Collect news from NewsAPI"""
         url = "https://newsapi.org/v2/everything"
@@ -97,9 +100,9 @@ class NewsCollector:
             
             news_items = []
             for article in data.get('articles', []):
-                # Analyze sentiment
+                # Analyze sentiment (ticker-aware)
                 text = f"{article.get('title', '')}. {article.get('description', '')}"
-                sentiment = self.sentiment_analyzer.analyze_text(text)
+                sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
                 
                 # Create NewsItem
                 news_item = NewsItem(
@@ -127,7 +130,8 @@ class NewsCollector:
     def _collect_from_alphavantage(
         self,
         ticker_symbol: str,
-        lookback_hours: int
+        lookback_hours: int,
+        sentiment_analyzer: SentimentAnalyzer
     ) -> List[NewsItem]:
         """Collect news from Alpha Vantage"""
         url = "https://www.alphavantage.co/query"
@@ -158,9 +162,9 @@ class NewsCollector:
                 if time_published < cutoff_time:
                     continue
                 
-                # Analyze sentiment
+                # Analyze sentiment (ticker-aware)
                 text = f"{item.get('title', '')}. {item.get('summary', '')}"
-                sentiment = self.sentiment_analyzer.analyze_text(text)
+                sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
                 
                 # Create NewsItem
                 news_item = NewsItem(
