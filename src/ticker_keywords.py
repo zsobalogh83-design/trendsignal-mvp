@@ -312,11 +312,15 @@ SECTOR_KEYWORDS = {
     
     'financial': {
         'positive': ['profit', 'revenue growth', 'loan growth', 'deposit growth',
-                    'npl decrease', 'capital strength', 'dividend increase'],
+                    'npl decrease', 'capital strength', 'dividend increase',
+                    'interest rate', 'rate hike', 'banking sector', 'financial sector'],
         'negative': ['credit loss', 'npl increase', 'provision', 'capital shortage',
                     'bad loans', 'regulatory fine', 'money laundering'],
-        'hu_positive': ['nyereség', 'hitel növekedés', 'tőkeerő', 'osztalék emelés'],
-        'hu_negative': ['hitelezési veszteség', 'rossz hitelek', 'bírság', 'céltartalék']
+        'hu_positive': ['nyereség', 'hitel növekedés', 'tőkeerő', 'osztalék emelés',
+                       'kamat', 'kamatemelés', 'bankszektor', 'pénzügyi szektor',
+                       'betétállomány', 'hitelportfólió', 'bank', 'bankok'],
+        'hu_negative': ['hitelezési veszteség', 'rossz hitelek', 'bírság', 'céltartalék',
+                       'kamatcsökkentés', 'veszteség', 'hitelveszteség']
     },
     
     'energy': {
