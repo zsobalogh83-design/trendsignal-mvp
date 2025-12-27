@@ -24,20 +24,22 @@ class SentimentAnalyzer:
     Sentiment analyzer using FinBERT
     
     Note: FinBERT will be loaded in Phase 2 (requires transformers library)
-    For MVP/PoC: Using mock sentiment or simple keyword-based approach
+    For MVP: Enhanced keyword-based with ticker-specific context
     """
     
-    def __init__(self, config: Optional[TrendSignalConfig] = None):
+    def __init__(self, config: Optional[TrendSignalConfig] = None, ticker_symbol: Optional[str] = None):
         self.config = config or get_config()
         self.model = None  # Will be loaded in Phase 2
         self.tokenizer = None
+        self.ticker_symbol = ticker_symbol  # For ticker-specific sentiment
     
-    def analyze_text(self, text: str) -> Dict[str, float]:
+    def analyze_text(self, text: str, ticker_symbol: Optional[str] = None) -> Dict[str, float]:
         """
         Analyze sentiment of text using FinBERT
         
         Args:
             text: News title or description
+            ticker_symbol: Optional ticker for context-aware sentiment
         
         Returns:
             {
@@ -52,18 +54,19 @@ class SentimentAnalyzer:
         # self.tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
         # self.model = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert")
         
-        # For now: Mock implementation (replace with FinBERT in Phase 2)
-        return self._mock_sentiment_analysis(text)
+        # For now: Enhanced mock with ticker context
+        ticker = ticker_symbol or self.ticker_symbol
+        return self._mock_sentiment_analysis(text, ticker)
     
-    def _mock_sentiment_analysis(self, text: str) -> Dict[str, float]:
+    def _mock_sentiment_analysis(self, text: str, ticker_symbol: Optional[str] = None) -> Dict[str, float]:
         """
-        Mock sentiment analysis (placeholder for FinBERT)
+        Mock sentiment analysis with ticker-specific enhancement
         
         In production, this will be replaced with actual FinBERT inference
         """
         text_lower = text.lower()
         
-        # English + Hungarian keyword-based sentiment (temporary)
+        # Base keyword-based sentiment (English + Hungarian)
         positive_keywords = [
             # English
             'beat', 'exceed', 'growth', 'profit', 'upgrade', 'strong', 
@@ -73,7 +76,7 @@ class SentimentAnalyzer:
             'növekedés', 'nyereség', 'profit', 'erős', 'pozitív', 'emelkedés',
             'sikeres', 'rekord', 'javulás', 'bővülés', 'fellendülés', 'optimista',
             'felminősítés', 'felértékelés', 'túlteljesít', 'meghaladta',
-            'jó eredmény', 'pozitív', 'erősödik', 'felértékelődik'
+            'jó eredmény', 'erősödik', 'felértékelődik'
         ]
         negative_keywords = [
             # English
@@ -84,8 +87,18 @@ class SentimentAnalyzer:
             'csökkenés', 'veszteség', 'gyenge', 'negatív', 'esés', 'zuhanás',
             'válság', 'probléma', 'aggály', 'kockázat', 'rossz', 'bukás',
             'leminősítés', 'alulteljesít', 'figyelmeztetés', 'gond',
-            'visszaesés', 'gyengülés', 'leértékelés', 'romlás'
+            'visszaesés', 'gyengülés', 'leértékelés', 'romlás', 'csapda'
         ]
+        
+        # Add ticker-specific keywords if provided
+        if ticker_symbol:
+            try:
+                from ticker_keywords import get_sentiment_boost_keywords
+                ticker_sentiment = get_sentiment_boost_keywords(ticker_symbol)
+                positive_keywords.extend(ticker_sentiment.get('positive', []))
+                negative_keywords.extend(ticker_sentiment.get('negative', []))
+            except ImportError:
+                pass  # ticker_keywords not available, use base keywords
         
         pos_count = sum(1 for kw in positive_keywords if kw in text_lower)
         neg_count = sum(1 for kw in negative_keywords if kw in text_lower)

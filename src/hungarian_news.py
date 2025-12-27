@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from sentiment_analyzer import NewsItem, SentimentAnalyzer
 from config import TrendSignalConfig, get_config
+from ticker_keywords import calculate_relevance_score, get_all_relevant_keywords
 
 
 # ==========================================
@@ -173,13 +174,20 @@ class HungarianNewsCollector:
                 description = entry.get('description', '') or entry.get('summary', '')
                 url = entry.get('link', '')
                 
-                # Check relevance (simple keyword matching for now)
-                if not self._is_relevant(title, description, ticker_symbol, company_name):
+                # Check relevance using ticker-aware scoring
+                relevance_score = calculate_relevance_score(
+                    f"{title} {description}",
+                    ticker_symbol
+                )
+                
+                # Accept if relevance >= 0.5
+                if relevance_score < 0.5:
                     continue
                 
-                # Analyze sentiment
+                # Analyze sentiment (ticker-aware)
                 text = f"{title}. {description}"
-                sentiment = self.sentiment_analyzer.analyze_text(text)
+                sentiment_analyzer = SentimentAnalyzer(self.config, ticker_symbol)
+                sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
                 
                 # Create NewsItem
                 news_item = NewsItem(
