@@ -214,31 +214,71 @@ class HungarianNewsCollector:
         """
         Check if news is relevant to ticker
         
-        Simple keyword matching for MVP
+        Enhanced for BÉT tickers with broader matching
         Phase 2: NER + zero-shot classification
         """
         text = f"{title} {description}".lower()
-        
-        # Extract company name parts
-        # e.g., "OTP Bank" → ["otp", "bank"]
-        company_parts = company_name.lower().split()
         
         # Extract ticker without suffix
         # e.g., "OTP.BD" → "otp"
         ticker_base = ticker_symbol.split('.')[0].lower()
         
-        # Check for ticker or company name
+        # Direct ticker mention (highest relevance)
         if ticker_base in text:
             return True
         
-        # Check for company name (at least 1 significant part)
-        # Ignore generic words like "Nyrt", "Ltd", "Inc"
-        generic_words = {'nyrt', 'zrt', 'kft', 'inc', 'ltd', 'corp', 'corporation'}
-        significant_parts = [p for p in company_parts if p not in generic_words and len(p) > 2]
+        # Check for full company name
+        if company_name.lower() in text:
+            return True
         
-        for part in significant_parts:
-            if part in text:
-                return True
+        # Extract company name significant parts
+        company_parts = company_name.lower().split()
+        
+        # For BÉT tickers, be more lenient
+        if '.BD' in ticker_symbol.upper():
+            # Hungarian ticker - accept broader matches
+            
+            # Generic words to still ignore
+            generic_words = {'nyrt', 'zrt', 'kft', 'inc', 'ltd', 'corp', 'corporation', 'plc'}
+            significant_parts = [p for p in company_parts if p not in generic_words and len(p) > 2]
+            
+            # Accept if ANY significant part matches
+            for part in significant_parts:
+                if part in text:
+                    return True
+            
+            # Special handling for banking/finance sector
+            if ticker_base in ['otp', 'k&h', 'erste', 'mkb']:
+                # Accept general banking news with high relevance indicators
+                banking_indicators = ['bank', 'hitel', 'betét', 'kamat', 'jegybank', 'mnb']
+                finance_indicators = ['befektetés', 'tőzsde', 'részvény', 'portfolio', 'pénzügy']
+                
+                has_banking = any(ind in text for ind in banking_indicators)
+                has_finance = any(ind in text for ind in finance_indicators)
+                
+                if has_banking and has_finance:
+                    return True  # Relevant financial/banking news
+            
+            # Special handling for energy sector
+            if ticker_base in ['mol', 'mvm']:
+                energy_indicators = ['olaj', 'gáz', 'energia', 'üzemanyag', 'benzin']
+                if any(ind in text for ind in energy_indicators):
+                    return True
+            
+            # Special handling for pharma
+            if ticker_base in ['richter', 'egis']:
+                pharma_indicators = ['gyógyszer', 'pharma', 'klinikai', 'fda', 'vakcina']
+                if any(ind in text for ind in pharma_indicators):
+                    return True
+        
+        else:
+            # US/International ticker - stricter matching
+            generic_words = {'nyrt', 'zrt', 'kft', 'inc', 'ltd', 'corp', 'corporation', 'plc'}
+            significant_parts = [p for p in company_parts if p not in generic_words and len(p) > 3]
+            
+            for part in significant_parts:
+                if part in text:
+                    return True
         
         return False
     

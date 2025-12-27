@@ -63,11 +63,29 @@ class SentimentAnalyzer:
         """
         text_lower = text.lower()
         
-        # Simple keyword-based sentiment (temporary)
-        positive_keywords = ['beat', 'exceed', 'growth', 'profit', 'upgrade', 'strong', 
-                            'positive', 'gain', 'rally', 'bullish', 'record']
-        negative_keywords = ['miss', 'decline', 'loss', 'downgrade', 'weak', 'negative',
-                            'fall', 'drop', 'bearish', 'concern', 'risk']
+        # English + Hungarian keyword-based sentiment (temporary)
+        positive_keywords = [
+            # English
+            'beat', 'exceed', 'growth', 'profit', 'upgrade', 'strong', 
+            'positive', 'gain', 'rally', 'bullish', 'record', 'success',
+            'improve', 'rise', 'surge', 'boom', 'optimistic', 'outperform',
+            # Hungarian
+            'növekedés', 'nyereség', 'profit', 'erős', 'pozitív', 'emelkedés',
+            'sikeres', 'rekord', 'javulás', 'bővülés', 'fellendülés', 'optimista',
+            'felminősítés', 'felértékelés', 'túlteljesít', 'meghaladta',
+            'jó eredmény', 'pozitív', 'erősödik', 'felértékelődik'
+        ]
+        negative_keywords = [
+            # English
+            'miss', 'decline', 'loss', 'downgrade', 'weak', 'negative',
+            'fall', 'drop', 'bearish', 'concern', 'risk', 'crisis',
+            'disappoint', 'underperform', 'warning', 'trouble',
+            # Hungarian
+            'csökkenés', 'veszteség', 'gyenge', 'negatív', 'esés', 'zuhanás',
+            'válság', 'probléma', 'aggály', 'kockázat', 'rossz', 'bukás',
+            'leminősítés', 'alulteljesít', 'figyelmeztetés', 'gond',
+            'visszaesés', 'gyengülés', 'leértékelés', 'romlás'
+        ]
         
         pos_count = sum(1 for kw in positive_keywords if kw in text_lower)
         neg_count = sum(1 for kw in negative_keywords if kw in text_lower)
