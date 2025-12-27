@@ -183,9 +183,11 @@ class HungarianNewsCollector:
                 )
                 
                 # Stricter threshold for BÉT tickers (reduce false positives)
-                min_relevance = 0.70 if '.BD' in ticker_symbol else 0.50
+                min_relevance = 0.80 if '.BD' in ticker_symbol else 0.60
                 
                 if relevance_score < min_relevance:
+                    # Debug: uncomment to see rejected items
+                    # print(f"  ⊘ Rejected (score {relevance_score:.2f}): {title[:50]}")
                     continue
                 
                 # Additional filter: exclude obviously irrelevant topics
