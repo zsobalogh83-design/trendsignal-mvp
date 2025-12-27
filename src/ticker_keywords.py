@@ -112,7 +112,7 @@ TICKER_KEYWORDS = {
     'OTP.BD': {
         'primary': ['otp', 'otp bank', 'otp group'],
         'leadership': ['csányi sándor', 'bencsik lászló'],
-        'products': ['bankszámla', 'hitel', 'jelzálog', 'takarék', 'otp mobil'],
+        'products': ['bankszámla', 'hitel', 'jelzálog', 'otp mobil'],  # 'takarék' removed (too generic)
         'markets': ['magyarország', 'bulgária', 'románia', 'szerbia', 'közép-kelet-európa'],
         'financial': ['éves jelentés', 'osztalék', 'tőkemegfelelés', 'hitelportfólió'],
         'en_keywords': ['otp', 'otp bank', 'otp group', 'hungarian bank'],
