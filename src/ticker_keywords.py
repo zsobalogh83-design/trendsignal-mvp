@@ -455,6 +455,21 @@ def calculate_relevance_score(
     text_lower = text.lower()
     score = 0.0
     
+    # 0. FILTER: Irrelevant topics (auto-reject)
+    irrelevant_topics = [
+        'időjárás', 'időjárás előrejelzés', 'weather forecast', 'climate',
+        'sport', 'football', 'soccer', 'foci', 'labdarúgás', 'meccs',
+        'celebrity', 'celeb', 'sztár', 'híresség', 'színész',
+        'recipe', 'recept', 'főzés', 'gasztro', 'étterem',
+        'horoscope', 'horoszkóp', 'asztrológia',
+        'astrology', 'zodiac', 'csillagjegy'
+    ]
+    
+    # If contains irrelevant topic, return 0.0 immediately
+    for topic in irrelevant_topics:
+        if topic in text_lower:
+            return 0.0
+    
     # 1. Direct ticker mention (1.0)
     ticker_base = ticker_symbol.split('.')[0].lower()
     if ticker_base in text_lower:
