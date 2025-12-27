@@ -8,6 +8,7 @@ Date: 2024-12-27
 
 import sys
 from pathlib import Path
+from typing import Optional, List, Dict
 
 # Add src to path
 src_path = Path(__file__).parent / 'src'
