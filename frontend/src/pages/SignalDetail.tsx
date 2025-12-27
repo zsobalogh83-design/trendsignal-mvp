@@ -1,12 +1,12 @@
-import { useParams, Link } from 'react-router-dom';
-import { useSignal, useSentiment, useTechnicalAnalysis } from '../../hooks';
+﻿import { useParams, Link } from 'react-router-dom';
+import { useSignal, useSentiment, useTechnicalAnalysis } from '../../hooks/useApi';
 import {
   formatPrice,
   formatPercent,
   formatTimeAgo,
   getSignalBadgeClass,
   getSignalIcon,
-} from '../../utils';
+} from '../../utils/helpers';
 import {
   FiArrowLeft,
   FiTrendingUp,
@@ -15,9 +15,10 @@ import {
 } from 'react-icons/fi';
 
 export function SignalDetail() {
-  const { tickerSymbol } = useParams<{ tickerSymbol: string }>();
+  const { } = useParams<{ tickerSymbol: string }>();
   
-  const tickerId = 1;
+  // Assuming we have a way to get ticker ID from symbol
+  const tickerId = 1; // This should be fetched from API or context
 
   const { data: signal, isLoading, error } = useSignal(tickerId);
   const { data: sentiment } = useSentiment(tickerId);
@@ -50,6 +51,7 @@ export function SignalDetail() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Header */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-8 py-6">
           <Link
@@ -78,7 +80,9 @@ export function SignalDetail() {
 
       <div className="max-w-7xl mx-auto px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Combined Score */}
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h2 className="text-xl font-semibold mb-4">Combined Score</h2>
               <div className="grid grid-cols-2 gap-6">
@@ -104,6 +108,7 @@ export function SignalDetail() {
               </div>
             </div>
 
+            {/* Score Breakdown */}
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h2 className="text-xl font-semibold mb-4">Score Breakdown</h2>
               <div className="space-y-4">
@@ -155,6 +160,7 @@ export function SignalDetail() {
               </div>
             </div>
 
+            {/* Sentiment Analysis */}
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h2 className="text-xl font-semibold mb-4">📰 Sentiment Analysis</h2>
               <div className="mb-4">
@@ -186,6 +192,7 @@ export function SignalDetail() {
               </div>
             </div>
 
+            {/* Technical Analysis */}
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h2 className="text-xl font-semibold mb-4">📈 Technical Analysis</h2>
               <div className="mb-4">
@@ -206,6 +213,7 @@ export function SignalDetail() {
               </div>
             </div>
 
+            {/* Risk Assessment */}
             {signal.reasoning.risk && (
               <div className="bg-white rounded-lg shadow-sm p-6">
                 <h2 className="text-xl font-semibold mb-4">🛡️ Risk Assessment</h2>
@@ -224,7 +232,9 @@ export function SignalDetail() {
             )}
           </div>
 
+          {/* Right Column */}
           <div className="space-y-6">
+            {/* Entry & Exit Levels */}
             <div className="bg-white rounded-lg shadow-sm p-6">
               <h2 className="text-xl font-semibold mb-4">💰 Entry & Exit Levels</h2>
               <div className="space-y-4">
@@ -264,6 +274,7 @@ export function SignalDetail() {
               </div>
             </div>
 
+            {/* Quick Stats */}
             {technical && (
               <div className="bg-white rounded-lg shadow-sm p-6">
                 <h2 className="text-xl font-semibold mb-4">Technical Indicators</h2>
@@ -301,3 +312,4 @@ export function SignalDetail() {
     </div>
   );
 }
+
