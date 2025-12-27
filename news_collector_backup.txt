@@ -12,17 +12,12 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 
-# FIXED IMPORT - Use absolute import with src prefix
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
-from src.config import TrendSignalConfig, get_config
-from src.sentiment_analyzer import NewsItem
+from config import TrendSignalConfig, get_config
+from sentiment_analyzer import NewsItem
 
 # Type hints only
 if TYPE_CHECKING:
-    from src.multilingual_sentiment import MultilingualSentimentAnalyzer
+    from multilingual_sentiment import MultilingualSentimentAnalyzer
 
 
 # ==========================================
@@ -53,7 +48,7 @@ class NewsCollector:
             List of NewsItem objects with sentiment analysis
         """
         # Import at runtime to avoid circular dependency
-        from src.multilingual_sentiment import MultilingualSentimentAnalyzer
+        from multilingual_sentiment import MultilingualSentimentAnalyzer
         
         all_news = []
         

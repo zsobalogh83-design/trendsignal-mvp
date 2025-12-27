@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useSignals } from '../hooks/useApi';
 import { FiRefreshCw, FiStar } from 'react-icons/fi';
 
@@ -75,12 +76,12 @@ export function Dashboard() {
           </div>
           
           <div style={{ display: 'flex', gap: '30px' }}>
-            <a href="#" style={{ color: '#60a5fa', textDecoration: 'none', fontSize: '14px', fontWeight: '600' }}>
+            <Link to="/" style={{ color: '#60a5fa', textDecoration: 'none', fontSize: '14px', fontWeight: '600' }}>
               Dashboard
-            </a>
-            <a href="#" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
+            </Link>
+            <Link to="/news" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
               📰 News
-            </a>
+            </Link>
             <a href="#" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
               ⚙️ Settings
             </a>
@@ -337,29 +338,34 @@ export function Dashboard() {
                   paddingTop: '16px',
                   borderTop: '1px solid rgba(51, 65, 85, 0.5)'
                 }}>
-                  <button style={{
-                    flex: 1,
-                    padding: '10px 16px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-                    color: 'white',
-                    transition: 'all 0.3s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 5px 20px rgba(59, 130, 246, 0.4)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
+                  <Link
+                    to={`/signal/${signal.id}`}
+                    style={{
+                      flex: 1,
+                      padding: '10px 16px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                      color: 'white',
+                      transition: 'all 0.3s',
+                      textDecoration: 'none',
+                      textAlign: 'center',
+                      display: 'block'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.boxShadow = '0 5px 20px rgba(59, 130, 246, 0.4)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
                   >
                     View Details
-                  </button>
+                  </Link>
                   <button style={{
                     flex: 1,
                     padding: '10px 16px',

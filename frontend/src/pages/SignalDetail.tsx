@@ -1,42 +1,39 @@
-﻿import { useParams, Link } from 'react-router-dom';
-import { useSignal, useSentiment, useTechnicalAnalysis } from '../../hooks/useApi';
-import {
-  formatPrice,
-  formatPercent,
-  formatTimeAgo,
-  getSignalBadgeClass,
-  getSignalIcon,
-} from '../../utils/helpers';
-import {
-  FiArrowLeft,
-  FiTrendingUp,
-  FiTrendingDown,
-  FiAlertCircle,
-} from 'react-icons/fi';
+import { useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { useSignal } from '../hooks/useApi';
+import { FiArrowLeft, FiBell, FiDownload } from 'react-icons/fi';
 
 export function SignalDetail() {
-  const { } = useParams<{ tickerSymbol: string }>();
+  const { tickerId } = useParams<{ tickerId: string }>();
+  const id = parseInt(tickerId || '1');
   
-  // Assuming we have a way to get ticker ID from symbol
-  const tickerId = 1; // This should be fetched from API or context
+  const { data: signal, isLoading, error } = useSignal(id);
+  
+  const [openSections, setOpenSections] = useState<string[]>(['overview', 'levels']);
 
-  const { data: signal, isLoading, error } = useSignal(tickerId);
-  const { data: sentiment } = useSentiment(tickerId);
-  const { data: technical } = useTechnicalAnalysis(tickerId);
+  const toggleSection = (section: string) => {
+    setOpenSections(prev => 
+      prev.includes(section) 
+        ? prev.filter(s => s !== section)
+        : [...prev, section]
+    );
+  };
+
+  const scoreToPercentage = (score: number) => ((score + 100) / 2);
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '48px', height: '48px', border: '4px solid rgba(59, 130, 246, 0.2)', borderTop: '4px solid #3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
       </div>
     );
   }
 
   if (error || !signal) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)', padding: '32px' }}>
+        <div style={{ maxWidth: '1280px', margin: '0 auto' }}>
+          <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '12px', padding: '20px', color: '#ef4444' }}>
             Error loading signal details
           </div>
         </div>
@@ -44,272 +41,430 @@ export function SignalDetail() {
     );
   }
 
-  const badgeClass = getSignalBadgeClass(signal.decision, signal.strength);
-  const icon = getSignalIcon(signal.decision);
-  const takeProfitChange = ((signal.take_profit - signal.entry_price) / signal.entry_price) * 100;
-  const stopLossChange = ((signal.stop_loss - signal.entry_price) / signal.entry_price) * 100;
-
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b">
-        <div className="max-w-7xl mx-auto px-8 py-6">
-          <Link
-            to="/"
-            className="inline-flex items-center text-blue-600 hover:text-blue-700 mb-4"
-          >
-            <FiArrowLeft className="mr-2" />
-            Back to Dashboard
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)', color: '#e0e7ff' }}>
+      {/* Sticky Header */}
+      <div style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 100,
+        background: 'linear-gradient(135deg, rgba(10, 14, 39, 0.98) 0%, rgba(26, 31, 58, 0.98) 100%)',
+        backdropFilter: 'blur(10px)',
+        borderBottom: '1px solid rgba(99, 102, 241, 0.2)',
+        padding: '16px 20px'
+      }}>
+        <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+          <Link to="/" style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            color: '#60a5fa',
+            textDecoration: 'none',
+            fontSize: '14px',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            background: 'rgba(59, 130, 246, 0.1)',
+            transition: 'all 0.3s'
+          }}>
+            <FiArrowLeft /> Dashboard
           </Link>
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">
-                {signal.ticker_symbol}
-              </h1>
-              <span className={`inline-flex items-center px-4 py-2 rounded-full text-base font-semibold ${badgeClass} mt-3`}>
-                <span className="mr-2">{icon}</span>
-                {signal.strength} {signal.decision} SIGNAL
-              </span>
-            </div>
+
+          <div style={{ flex: 1, textAlign: 'center' }}>
+            <span style={{
+              fontSize: '20px',
+              fontWeight: '700',
+              background: 'linear-gradient(135deg, #3b82f6 0%, #10b981 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text'
+            }}>
+              {signal.ticker_symbol}
+            </span>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 12px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              fontWeight: '600',
+              background: 'rgba(16, 185, 129, 0.2)',
+              color: '#10b981',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              marginLeft: '12px'
+            }}>
+              🟢 {signal.strength} {signal.decision}
+            </span>
           </div>
-          <div className="mt-4 text-sm text-gray-600">
-            Generated: {formatTimeAgo(signal.created_at)} | Expires: {formatTimeAgo(signal.expires_at)}
+
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              background: 'rgba(51, 65, 85, 0.5)',
+              color: '#cbd5e1',
+              transition: 'all 0.3s'
+            }}>
+              <FiBell style={{ marginRight: '6px' }} />
+            </button>
+            <button style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              border: 'none',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+              color: 'white',
+              transition: 'all 0.3s'
+            }}>
+              <FiDownload style={{ marginRight: '6px', display: 'inline' }} />
+              Export
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Combined Score */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">Combined Score</h2>
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <div className="text-5xl font-bold text-gray-900">
-                    {signal.combined_score > 0 ? '+' : ''}
-                    {signal.combined_score.toFixed(1)}
-                  </div>
-                  <div className="text-gray-600 mt-2">Score</div>
-                </div>
-                <div>
-                  <div className="text-5xl font-bold text-blue-600">
-                    {(signal.overall_confidence * 100).toFixed(0)}%
-                  </div>
-                  <div className="text-gray-600 mt-2">Confidence</div>
-                  <div className="w-full bg-gray-200 rounded-full h-3 mt-3">
-                    <div
-                      className="bg-blue-600 h-3 rounded-full"
-                      style={{ width: `${signal.overall_confidence * 100}%` }}
-                    />
-                  </div>
-                </div>
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '0 20px 40px 20px' }}>
+        {/* Quick Nav */}
+        <div style={{
+          position: 'sticky',
+          top: '73px',
+          zIndex: 90,
+          background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(99, 102, 241, 0.3)',
+          borderRadius: '12px',
+          padding: '12px 20px',
+          marginBottom: '24px',
+          display: 'flex',
+          gap: '12px',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
+        }}>
+          <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>Jump to:</span>
+          {['Overview', 'Sentiment', 'Technical', 'Risk'].map(section => (
+            <button
+              key={section}
+              onClick={() => toggleSection(section.toLowerCase())}
+              style={{
+                background: 'rgba(51, 65, 85, 0.5)',
+                border: '1px solid rgba(99, 102, 241, 0.2)',
+                color: '#cbd5e1',
+                padding: '6px 14px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                transition: 'all 0.3s'
+              }}
+            >
+              {section}
+            </button>
+          ))}
+        </div>
+
+        {/* Stats Grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '16px',
+          marginBottom: '24px'
+        }}>
+          {[
+            { label: 'Combined Score', value: `${signal.combined_score > 0 ? '+' : ''}${signal.combined_score.toFixed(1)}`, sub: 'Strong bullish' },
+            { label: 'Confidence', value: `${(signal.overall_confidence * 100).toFixed(0)}%`, sub: 'High reliability' },
+            { label: 'Risk/Reward', value: `1:${signal.risk_reward_ratio.toFixed(1)}`, sub: 'Favorable' },
+            { label: 'Entry Price', value: `${signal.entry_price.toFixed(2)}`, sub: signal.ticker_symbol.includes('.') ? 'HUF' : 'USD' }
+          ].map((stat, idx) => (
+            <div key={idx} style={{
+              background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              borderRadius: '12px',
+              padding: '20px',
+              transition: 'all 0.3s'
+            }}>
+              <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                {stat.label}
+              </div>
+              <div style={{
+                fontSize: '28px',
+                fontWeight: '700',
+                background: 'linear-gradient(135deg, #10b981 0%, #3b82f6 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                marginBottom: '6px'
+              }}>
+                {stat.value}
+              </div>
+              <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                {stat.sub}
               </div>
             </div>
+          ))}
+        </div>
 
-            {/* Score Breakdown */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">Score Breakdown</h2>
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between mb-2">
-                    <span className="font-medium">Sentiment</span>
-                    <span className="text-gray-600">
-                      {signal.sentiment_score > 0 ? '+' : ''}
-                      {signal.sentiment_score.toFixed(1)} (70% weight)
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-green-500 h-2 rounded-full"
-                      style={{ width: `${((signal.sentiment_score + 100) / 2)}%` }}
-                    />
-                  </div>
+        {/* Score Breakdown */}
+        <CollapsibleSection
+          id="overview"
+          icon="📊"
+          title="Score Breakdown"
+          badge={`${signal.combined_score.toFixed(1)}`}
+          summary={`Sentiment: ${signal.sentiment_score.toFixed(1)} · Technical: ${signal.technical_score.toFixed(1)} · Risk: ${signal.risk_score.toFixed(1)}`}
+          isOpen={openSections.includes('overview')}
+          onToggle={() => toggleSection('overview')}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', margin: '20px 0' }}>
+            {[
+              { label: 'Sentiment', score: signal.sentiment_score, weight: 70, color: '#10b981', contribution: signal.sentiment_score * 0.7 },
+              { label: 'Technical', score: signal.technical_score, weight: 20, color: '#3b82f6', contribution: signal.technical_score * 0.2 },
+              { label: 'Risk', score: signal.risk_score, weight: 10, color: '#f59e0b', contribution: signal.risk_score * 0.1 }
+            ].map((item, idx) => (
+              <div key={idx} style={{
+                background: 'rgba(15, 23, 42, 0.5)',
+                borderRadius: '10px',
+                padding: '16px',
+                borderLeft: `4px solid ${item.color}`
+              }}>
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>{item.label}</div>
+                <div style={{
+                  fontSize: '32px',
+                  fontWeight: '700',
+                  background: 'linear-gradient(135deg, #10b981 0%, #3b82f6 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  marginBottom: '6px'
+                }}>
+                  {item.score > 0 ? '+' : ''}{item.score.toFixed(1)}
                 </div>
-                <div>
-                  <div className="flex justify-between mb-2">
-                    <span className="font-medium">Technical</span>
-                    <span className="text-gray-600">
-                      {signal.technical_score > 0 ? '+' : ''}
-                      {signal.technical_score.toFixed(1)} (20% weight)
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-blue-500 h-2 rounded-full"
-                      style={{ width: `${((signal.technical_score + 100) / 2)}%` }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between mb-2">
-                    <span className="font-medium">Risk</span>
-                    <span className="text-gray-600">
-                      {signal.risk_score > 0 ? '+' : ''}
-                      {signal.risk_score.toFixed(1)} (10% weight)
-                    </span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-purple-500 h-2 rounded-full"
-                      style={{ width: `${((signal.risk_score + 100) / 2)}%` }}
-                    />
-                  </div>
+                <div style={{ fontSize: '13px', color: '#94a3b8' }}>Weight: {item.weight}%</div>
+                <div style={{ fontSize: '14px', color: '#10b981', fontWeight: '600', marginTop: '8px' }}>
+                  Contributes: {item.contribution > 0 ? '+' : ''}{item.contribution.toFixed(1)}
                 </div>
               </div>
+            ))}
+          </div>
+        </CollapsibleSection>
+
+        {/* Levels */}
+        <CollapsibleSection
+          id="levels"
+          icon="💰"
+          title="Entry & Exit Levels"
+          badge="Recommended"
+          isOpen={openSections.includes('levels')}
+          onToggle={() => toggleSection('levels')}
+        >
+          <div style={{ background: 'rgba(15, 23, 42, 0.5)', borderRadius: '12px', padding: '20px', margin: '20px 0' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+              {[
+                { type: '🎯 Take-Profit', price: signal.take_profit, change: ((signal.take_profit - signal.entry_price) / signal.entry_price * 100), style: 'take-profit', color: '#10b981' },
+                { type: '📍 Entry Price', price: signal.entry_price, change: 0, style: 'entry', color: '#3b82f6' },
+                { type: '🛡️ Stop-Loss', price: signal.stop_loss, change: ((signal.stop_loss - signal.entry_price) / signal.entry_price * 100), style: 'stop-loss', color: '#ef4444' }
+              ].map((level, idx) => (
+                <div key={idx} style={{
+                  textAlign: 'center',
+                  padding: '16px',
+                  borderRadius: '8px',
+                  background: 'rgba(30, 41, 59, 0.5)',
+                  border: `2px solid ${level.color}33`
+                }}>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>
+                    {level.type}
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: '700', marginBottom: '4px', color: level.color }}>
+                    {level.price.toFixed(2)} {signal.ticker_symbol.includes('.') ? 'HUF' : 'USD'}
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+                    {level.change !== 0 && `${level.change > 0 ? '+' : ''}${level.change.toFixed(1)}%`}
+                    {level.change === 0 && 'Current Price'}
+                  </div>
+                </div>
+              ))}
             </div>
+          </div>
+        </CollapsibleSection>
 
-            {/* Sentiment Analysis */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">📰 Sentiment Analysis</h2>
-              <div className="mb-4">
-                <p className="text-gray-700">{signal.reasoning.sentiment.summary}</p>
-              </div>
-              {sentiment && (
-                <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-                  <div>
-                    <div className="text-gray-600">Weighted Average</div>
-                    <div className="text-lg font-semibold">
-                      {sentiment.weighted_avg > 0 ? '+' : ''}
-                      {sentiment.weighted_avg.toFixed(2)}
-                    </div>
+        {/* Sentiment */}
+        <CollapsibleSection
+          id="sentiment"
+          icon="📰"
+          title="Sentiment Analysis"
+          badge={`${signal.sentiment_score.toFixed(1)} · ${(signal.overall_confidence * 100).toFixed(0)}% conf`}
+          summary={signal.reasoning.sentiment.summary}
+          isOpen={openSections.includes('sentiment')}
+          onToggle={() => toggleSection('sentiment')}
+        >
+          <div style={{ margin: '20px 0' }}>
+            <h4 style={{ fontSize: '14px', color: '#64748b', marginBottom: '12px', fontWeight: '600' }}>Key News</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {signal.reasoning.sentiment.key_news.map((news: string, idx: number) => (
+                <div key={idx} style={{
+                  background: 'rgba(15, 23, 42, 0.5)',
+                  borderRadius: '10px',
+                  padding: '16px',
+                  borderLeft: '4px solid #10b981'
+                }}>
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#f1f5f9', marginBottom: '6px' }}>
+                    🟢 {news}
                   </div>
-                  <div>
-                    <div className="text-gray-600">News Count</div>
-                    <div className="text-lg font-semibold">{sentiment.news_count}</div>
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                    Recent · High credibility
                   </div>
                 </div>
-              )}
-              <div className="space-y-2">
-                <h3 className="font-medium text-gray-900">Key News:</h3>
-                {signal.reasoning.sentiment.key_news.map((news: string, idx: number) => (
-                  <div key={idx} className="flex items-start text-sm">
-                    <span className="text-green-500 mr-2">•</span>
-                    <span className="text-gray-700">{news}</span>
+              ))}
+            </div>
+          </div>
+        </CollapsibleSection>
+
+        {/* Technical */}
+        <CollapsibleSection
+          id="technical"
+          icon="📈"
+          title="Technical Analysis"
+          badge={`${signal.technical_score.toFixed(1)}`}
+          summary={signal.reasoning.technical.summary}
+          isOpen={openSections.includes('technical')}
+          onToggle={() => toggleSection('technical')}
+        >
+          <div style={{ margin: '20px 0' }}>
+            <h4 style={{ fontSize: '14px', color: '#64748b', marginBottom: '12px', fontWeight: '600' }}>Key Signals</h4>
+            <ul style={{ listStyle: 'none' }}>
+              {signal.reasoning.technical.key_signals && signal.reasoning.technical.key_signals.map((sig: string, idx: number) => (
+                <li key={idx} style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '10px',
+                  padding: '10px 0',
+                  borderBottom: idx < signal.reasoning.technical.key_signals.length - 1 ? '1px solid rgba(51, 65, 85, 0.3)' : 'none'
+                }}>
+                  <span style={{ fontSize: '16px', marginTop: '2px' }}>✅</span>
+                  <span style={{ flex: 1, fontSize: '13px', color: '#cbd5e1', lineHeight: '1.5' }}>{sig}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </CollapsibleSection>
+
+        {/* Risk */}
+        {signal.reasoning.risk && (
+          <CollapsibleSection
+            id="risk"
+            icon="🛡️"
+            title="Risk Assessment"
+            badge={`${signal.risk_score.toFixed(1)}`}
+            summary={signal.reasoning.risk.summary}
+            isOpen={openSections.includes('risk')}
+            onToggle={() => toggleSection('risk')}
+          >
+            <div style={{ margin: '20px 0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '12px' }}>
+                {signal.reasoning.risk.factors.map((factor: string, idx: number) => (
+                  <div key={idx} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: 'rgba(15, 23, 42, 0.5)',
+                    padding: '10px 14px',
+                    borderRadius: '8px'
+                  }}>
+                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>{factor}</span>
                   </div>
                 ))}
               </div>
             </div>
-
-            {/* Technical Analysis */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">📈 Technical Analysis</h2>
-              <div className="mb-4">
-                <p className="text-gray-700">{signal.reasoning.technical.summary}</p>
-              </div>
-              <div className="space-y-2">
-                <h3 className="font-medium text-gray-900">Key Signals:</h3>
-                {signal.reasoning.technical.key_signals.map((sig: string, idx: number) => (
-                  <div key={idx} className="flex items-start text-sm">
-                    {signal.decision === 'BUY' ? (
-                      <FiTrendingUp className="mr-2 mt-0.5 text-green-500" />
-                    ) : (
-                      <FiTrendingDown className="mr-2 mt-0.5 text-red-500" />
-                    )}
-                    <span className="text-gray-700">{sig}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Risk Assessment */}
-            {signal.reasoning.risk && (
-              <div className="bg-white rounded-lg shadow-sm p-6">
-                <h2 className="text-xl font-semibold mb-4">🛡️ Risk Assessment</h2>
-                <div className="mb-4">
-                  <p className="text-gray-700">{signal.reasoning.risk.summary}</p>
-                </div>
-                <div className="space-y-2">
-                  {signal.reasoning.risk.factors.map((factor: string, idx: number) => (
-                    <div key={idx} className="flex items-start text-sm">
-                      <FiAlertCircle className="mr-2 mt-0.5 text-yellow-500" />
-                      <span className="text-gray-700">{factor}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right Column */}
-          <div className="space-y-6">
-            {/* Entry & Exit Levels */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold mb-4">💰 Entry & Exit Levels</h2>
-              <div className="space-y-4">
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-600 mb-1">Entry Price</div>
-                  <div className="text-2xl font-bold text-gray-900">
-                    {formatPrice(signal.entry_price)}
-                  </div>
-                </div>
-
-                <div className="bg-green-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-600 mb-1">Take-Profit</div>
-                  <div className="text-2xl font-bold text-green-600">
-                    {formatPrice(signal.take_profit)}
-                  </div>
-                  <div className="text-sm text-green-700 mt-1">
-                    {formatPercent(takeProfitChange)}
-                  </div>
-                </div>
-
-                <div className="bg-red-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-600 mb-1">Stop-Loss</div>
-                  <div className="text-2xl font-bold text-red-600">
-                    {formatPrice(signal.stop_loss)}
-                  </div>
-                  <div className="text-sm text-red-700 mt-1">
-                    {formatPercent(stopLossChange)}
-                  </div>
-                </div>
-
-                <div className="border-t pt-4">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Risk/Reward Ratio</span>
-                    <span className="font-semibold">1:{signal.risk_reward_ratio.toFixed(1)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Stats */}
-            {technical && (
-              <div className="bg-white rounded-lg shadow-sm p-6">
-                <h2 className="text-xl font-semibold mb-4">Technical Indicators</h2>
-                <div className="space-y-3 text-sm">
-                  {technical.indicators.sma_20 && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">SMA 20</span>
-                      <span className="font-medium">{formatPrice(technical.indicators.sma_20)}</span>
-                    </div>
-                  )}
-                  {technical.indicators.sma_50 && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">SMA 50</span>
-                      <span className="font-medium">{formatPrice(technical.indicators.sma_50)}</span>
-                    </div>
-                  )}
-                  {technical.indicators.rsi && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">RSI</span>
-                      <span className="font-medium">{technical.indicators.rsi.toFixed(1)}</span>
-                    </div>
-                  )}
-                  {technical.indicators.macd && (
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">MACD</span>
-                      <span className="font-medium">{technical.indicators.macd.toFixed(2)}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+          </CollapsibleSection>
+        )}
       </div>
+
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
 
+// Collapsible Section Component
+function CollapsibleSection({ 
+  id, 
+  icon, 
+  title, 
+  badge, 
+  summary, 
+  isOpen, 
+  onToggle, 
+  children 
+}: any) {
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+      border: '1px solid rgba(99, 102, 241, 0.3)',
+      borderRadius: '12px',
+      marginBottom: '16px',
+      overflow: 'hidden',
+      transition: 'all 0.3s'
+    }}>
+      <div
+        onClick={onToggle}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '20px 24px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          background: isOpen ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
+          borderBottom: isOpen ? '1px solid rgba(99, 102, 241, 0.2)' : 'none',
+          transition: 'all 0.3s'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '24px' }}>{icon}</span>
+          <div>
+            <span style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9' }}>{title}</span>
+            {badge && (
+              <span style={{
+                background: 'rgba(59, 130, 246, 0.2)',
+                color: '#60a5fa',
+                padding: '4px 12px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: '600',
+                marginLeft: '12px'
+              }}>
+                {badge}
+              </span>
+            )}
+            {summary && (
+              <div style={{ fontSize: '13px', color: '#94a3b8', marginTop: '8px' }}>
+                {summary}
+              </div>
+            )}
+          </div>
+        </div>
+        <span style={{
+          fontSize: '20px',
+          color: '#64748b',
+          transition: 'transform 0.3s',
+          transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)'
+        }}>
+          ▼
+        </span>
+      </div>
+      {isOpen && (
+        <div style={{ padding: '0 24px 24px 24px' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
