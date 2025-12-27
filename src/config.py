@@ -173,6 +173,7 @@ class TrendSignalConfig:
     # Technical parameters
     sma_periods: Dict[str, int] = None
     rsi_period: int = RSI_PERIOD
+    atr_period: int = ATR_PERIOD
     macd_params: Dict[str, int] = None
     
     # Risk management
