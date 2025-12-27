@@ -474,10 +474,41 @@ def calculate_relevance_score(
         if topic in text_lower:
             return 0.0
     
-    # 1. Direct ticker mention (1.0)
+    # 1. Direct ticker mention (1.0) - WITH CONTEXT AWARENESS
     ticker_base = ticker_symbol.split('.')[0].lower()
+    
     if ticker_base in text_lower:
-        return 1.0
+        # Special handling for OTP - distinguish between source and topic
+        if ticker_base == 'otp':
+            # Check if OTP is the SOURCE (analyst/author) or TOPIC (company news)
+            source_indicators = [
+                'elemzése', 'szerint', 'véleménye', 'elemző', 'elemzője',
+                'szakértője', 'közölte', 'nyilatkozata', 'szerint az otp',
+                'otp elemző', 'otp szakértő', 'otp elemzés'
+            ]
+            
+            topic_indicators = [
+                'otp bank', 'otp nyrt', 'otp részvény', 'otp árfolyam',
+                'otp eredmény', 'otp nyereség', 'otp bevétel', 'otp tőzsde',
+                'otp negyedév', 'otp jelentés', 'csányi sándor',
+                'otp növekedés', 'otp profit', 'otp hitel', 'otp betét'
+            ]
+            
+            is_source = any(ind in text_lower for ind in source_indicators)
+            is_topic = any(ind in text_lower for ind in topic_indicators)
+            
+            if is_topic:
+                # OTP is the topic - highly relevant!
+                return 1.0
+            elif is_source and not is_topic:
+                # OTP is just the source/analyst - low relevance
+                return 0.40
+            else:
+                # OTP mentioned but unclear context - moderate
+                return 0.85
+        else:
+            # Other tickers - simple direct match
+            return 1.0
     
     # 2. Company name mention (0.95)
     ticker_info = TICKER_INFO.get(ticker_symbol, {})
