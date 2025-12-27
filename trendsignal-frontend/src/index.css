@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #f9fafb;
+    color: #111827;
+  }
+}
+
+.card {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+  padding: 1.5rem;
+}
+
+.btn {
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  transition: background-color 0.2s;
+}
+
+.btn-primary {
+  background-color: #2563eb;
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: #1d4ed8;
+}
+
+.btn-secondary {
+  background-color: #e5e7eb;
+  color: #374151;
+}
+
+.btn-secondary:hover {
+  background-color: #d1d5db;
+}
+
+.signal-badge {
+  padding: 0.5rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.signal-badge-buy {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.signal-badge-sell {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.signal-badge-hold {
+  background-color: #f3f4f6;
+  color: #4b5563;
+}
