@@ -9,7 +9,7 @@ Date: 2024-12-27
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, asdict
 
 from config import TrendSignalConfig, get_config
