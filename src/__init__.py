@@ -15,6 +15,7 @@ from .news_collector import NewsCollector
 from .sentiment_analyzer import SentimentAnalyzer, SentimentAggregator
 from .technical_analyzer import TechnicalAnalyzer
 from .signal_generator import SignalGenerator, TradingSignal
+from .hungarian_news import HungarianNewsCollector, EnhancedNewsCollector
 
 __all__ = [
     'TrendSignalConfig',
@@ -25,4 +26,6 @@ __all__ = [
     'TechnicalAnalyzer',
     'SignalGenerator',
     'TradingSignal',
+    'HungarianNewsCollector',
+    'EnhancedNewsCollector',
 ]
