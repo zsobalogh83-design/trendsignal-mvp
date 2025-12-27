@@ -12,7 +12,8 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
-from sentiment_analyzer import NewsItem, SentimentAnalyzer
+from sentiment_analyzer import NewsItem
+from multilingual_sentiment import MultilingualSentimentAnalyzer
 from config import TrendSignalConfig, get_config
 from ticker_keywords import calculate_relevance_score, get_all_relevant_keywords
 
@@ -83,7 +84,8 @@ class HungarianNewsCollector:
     
     def __init__(self, config: Optional[TrendSignalConfig] = None):
         self.config = config or get_config()
-        self.sentiment_analyzer = SentimentAnalyzer(config)
+        # Use multilingual analyzer (auto-switches based on language)
+        self.sentiment_analyzer = MultilingualSentimentAnalyzer(config)
         self.sources = HUNGARIAN_RSS_SOURCES
     
     def collect_news(
@@ -184,10 +186,9 @@ class HungarianNewsCollector:
                 if relevance_score < 0.5:
                     continue
                 
-                # Analyze sentiment (ticker-aware)
+                # Analyze sentiment (multilingual auto-detect)
                 text = f"{title}. {description}"
-                sentiment_analyzer = SentimentAnalyzer(self.config, ticker_symbol)
-                sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
+                sentiment = self.sentiment_analyzer.analyze_text(text, ticker_symbol)
                 
                 # Create NewsItem
                 news_item = NewsItem(

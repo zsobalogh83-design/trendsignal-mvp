@@ -13,7 +13,8 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 from config import TrendSignalConfig, get_config
-from sentiment_analyzer import NewsItem, SentimentAnalyzer
+from sentiment_analyzer import NewsItem
+from multilingual_sentiment import MultilingualSentimentAnalyzer
 
 
 # ==========================================
@@ -45,8 +46,8 @@ class NewsCollector:
         """
         all_news = []
         
-        # Initialize ticker-aware sentiment analyzer
-        sentiment_analyzer = SentimentAnalyzer(self.config, ticker_symbol)
+        # Initialize ticker-aware multilingual sentiment analyzer
+        sentiment_analyzer = MultilingualSentimentAnalyzer(self.config, ticker_symbol)
         
         # Collect from NewsAPI
         if self.config.newsapi_key and self.config.newsapi_key != "YOUR_NEWSAPI_KEY_HERE":
