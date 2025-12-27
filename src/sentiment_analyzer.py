@@ -2,7 +2,7 @@
 TrendSignal MVP - Sentiment Analysis Module
 FinBERT-based sentiment analysis with corrected formula
 
-Version: 1.0
+Version: 2.0 (FinBERT Integration)
 Date: 2024-12-27
 """
 
@@ -12,7 +12,24 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
-from config import TrendSignalConfig, get_config
+from config import TrendSignalConfig, get_config, USE_FINBERT
+
+
+# ==========================================
+# CONDITIONAL FINBERT/MOCK LOADING
+# ==========================================
+
+if USE_FINBERT:
+    try:
+        from finbert_analyzer import SentimentAnalyzerFinBERT as _SentimentEngine
+        print("🧠 Using FinBERT sentiment analysis")
+    except ImportError as e:
+        print(f"⚠️ FinBERT not available ({e}), falling back to mock")
+        USE_FINBERT = False
+
+if not USE_FINBERT:
+    print("🔤 Using keyword-based sentiment (mock)")
+    _SentimentEngine = None  # Will use mock below
 
 
 # ==========================================
@@ -21,21 +38,29 @@ from config import TrendSignalConfig, get_config
 
 class SentimentAnalyzer:
     """
-    Sentiment analyzer using FinBERT
+    Sentiment analyzer with automatic FinBERT/Mock switching
     
-    Note: FinBERT will be loaded in Phase 2 (requires transformers library)
-    For MVP: Enhanced keyword-based with ticker-specific context
+    Controlled by config.USE_FINBERT flag
     """
     
     def __init__(self, config: Optional[TrendSignalConfig] = None, ticker_symbol: Optional[str] = None):
         self.config = config or get_config()
-        self.model = None  # Will be loaded in Phase 2
-        self.tokenizer = None
-        self.ticker_symbol = ticker_symbol  # For ticker-specific sentiment
+        self.ticker_symbol = ticker_symbol
+        
+        # Use FinBERT if available and enabled
+        if USE_FINBERT and _SentimentEngine is not None:
+            # Singleton pattern - share FinBERT instance across analyzers
+            if not hasattr(SentimentAnalyzer, '_finbert_instance'):
+                SentimentAnalyzer._finbert_instance = _SentimentEngine(config, ticker_symbol)
+            self.engine = SentimentAnalyzer._finbert_instance
+            self.use_finbert = True
+        else:
+            self.engine = None
+            self.use_finbert = False
     
     def analyze_text(self, text: str, ticker_symbol: Optional[str] = None) -> Dict[str, float]:
         """
-        Analyze sentiment of text using FinBERT
+        Analyze sentiment of text
         
         Args:
             text: News title or description
@@ -49,14 +74,13 @@ class SentimentAnalyzer:
                 'probabilities': {'positive': x, 'neutral': y, 'negative': z}
             }
         """
-        # Phase 2: Load FinBERT model
-        # from transformers import AutoTokenizer, AutoModelForSequenceClassification
-        # self.tokenizer = AutoTokenizer.from_pretrained("ProsusAI/finbert")
-        # self.model = AutoModelForSequenceClassification.from_pretrained("ProsusAI/finbert")
-        
-        # For now: Enhanced mock with ticker context
-        ticker = ticker_symbol or self.ticker_symbol
-        return self._mock_sentiment_analysis(text, ticker)
+        if self.use_finbert:
+            # Use real FinBERT
+            return self.engine.analyze_text(text, ticker_symbol)
+        else:
+            # Use mock keyword-based
+            ticker = ticker_symbol or self.ticker_symbol
+            return self._mock_sentiment_analysis(text, ticker)
     
     def _mock_sentiment_analysis(self, text: str, ticker_symbol: Optional[str] = None) -> Dict[str, float]:
         """
