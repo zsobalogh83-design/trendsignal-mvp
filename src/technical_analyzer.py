@@ -8,7 +8,7 @@ Date: 2024-12-27
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Any
 from dataclasses import dataclass
 
 from config import TrendSignalConfig, get_config
