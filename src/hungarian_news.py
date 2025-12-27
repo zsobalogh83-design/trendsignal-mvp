@@ -182,8 +182,23 @@ class HungarianNewsCollector:
                     ticker_symbol
                 )
                 
-                # Accept if relevance >= 0.5
-                if relevance_score < 0.5:
+                # Stricter threshold for BÉT tickers (reduce false positives)
+                min_relevance = 0.70 if '.BD' in ticker_symbol else 0.50
+                
+                if relevance_score < min_relevance:
+                    continue
+                
+                # Additional filter: exclude obviously irrelevant topics
+                irrelevant_topics = [
+                    'időjárás', 'weather', 'climate forecast',
+                    'sport', 'football', 'foci', 'labdarúgás',
+                    'celebrity', 'celeb', 'sztár', 'híresség',
+                    'recipe', 'recept', 'főzés', 'gasztro',
+                    'horoscope', 'horoszkóp', 'asztrológia'
+                ]
+                
+                text_check = f"{title} {description}".lower()
+                if any(topic in text_check for topic in irrelevant_topics):
                     continue
                 
                 # Analyze sentiment (multilingual auto-detect)
