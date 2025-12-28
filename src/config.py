@@ -1,4 +1,4 @@
-"""
+﻿"""
 TrendSignal MVP - Configuration Module
 Centralized configuration for all components
 
@@ -20,9 +20,9 @@ ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")
 
 # For development/testing (replace with your keys)
 if not NEWSAPI_KEY:
-    NEWSAPI_KEY = "YOUR_NEWSAPI_KEY_HERE"
+    NEWSAPI_KEY = "c042824059404c8e9da37ef7cd4088b6"
 if not ALPHAVANTAGE_KEY:
-    ALPHAVANTAGE_KEY = "YOUR_ALPHAVANTAGE_KEY_HERE"
+    ALPHAVANTAGE_KEY = "Q3R3ZCIBFDJI8BU9"
 
 
 # ==========================================
@@ -295,3 +295,4 @@ if __name__ == "__main__":
     config = get_config()
     config.display()
     config.validate()
+
