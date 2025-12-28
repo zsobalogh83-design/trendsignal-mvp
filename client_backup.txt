@@ -92,17 +92,16 @@ class ApiClient {
 
   // News
   async getNews(params: {
-    ticker_symbol?: string;
-    sentiment?: string;
+    ticker_id?: number;
     limit?: number;
-  } = {}): Promise<{ news: any[]; total: number }> {
+    offset?: number;
+  }): Promise<PaginatedResponse<NewsItem>> {
     const query = new URLSearchParams();
-    if (params.ticker_symbol) query.append('ticker_symbol', params.ticker_symbol);
-    if (params.sentiment) query.append('sentiment', params.sentiment);
+    if (params.ticker_id) query.append('ticker_id', params.ticker_id.toString());
     if (params.limit) query.append('limit', params.limit.toString());
+    if (params.offset) query.append('offset', params.offset.toString());
 
-    const queryString = query.toString();
-    return this.request(`/news${queryString ? `?${queryString}` : ''}`);
+    return this.request(`/news?${query}`);
   }
 
   async getNewsItem(id: number): Promise<NewsItem> {

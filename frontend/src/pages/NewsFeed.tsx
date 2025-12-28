@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useNews } from '../hooks/useApi';
 import { FiArrowLeft, FiRefreshCw, FiExternalLink } from 'react-icons/fi';
@@ -13,6 +13,11 @@ export function NewsFeed() {
     sentiment: sentimentFilter === 'all' ? undefined : sentimentFilter,
     limit: 50 
   });
+
+  // Refetch when sentiment filter changes
+  useEffect(() => {
+    refetch();
+  }, [sentimentFilter, refetch]);
 
   const newsItems = data?.news || [];
   

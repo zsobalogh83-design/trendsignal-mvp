@@ -1,14 +1,16 @@
-﻿"""
+"""
 TrendSignal MVP - Configuration Module
 Centralized configuration for all components
 
-Version: 1.0
-Date: 2024-12-27
+Version: 1.1 - Dynamic Config Support
+Date: 2024-12-28
 """
 
 from typing import Dict, Any
 from dataclasses import dataclass
 import os
+import json
+from pathlib import Path
 
 
 # ==========================================
@@ -31,6 +33,7 @@ if not ALPHAVANTAGE_KEY:
 
 # Toggle between FinBERT (real) and Mock (keyword-based)
 USE_FINBERT = True  # Set False to use mock keyword-based sentiment
+USE_MULTILINGUAL = True  # Use multilingual model for non-English
 
 # FinBERT device
 FINBERT_DEVICE = None  # None = auto-detect (cuda if available, else cpu)
@@ -151,6 +154,67 @@ CONFIDENCE_WEIGHTS = {
 
 
 # ==========================================
+# PERZISZTENCIA - Config fájl kezelés
+# ==========================================
+
+CONFIG_FILE = Path(__file__).parent.parent / "config.json"
+
+def save_config_to_file(config_instance):
+    """Save current configuration to JSON file for persistence"""
+    try:
+        config_dict = {
+            "SENTIMENT_WEIGHT": config_instance.sentiment_weight,
+            "TECHNICAL_WEIGHT": config_instance.technical_weight,
+            "RISK_WEIGHT": config_instance.risk_weight,
+            "STRONG_BUY_SCORE": config_instance.strong_buy_score,
+            "STRONG_BUY_CONFIDENCE": config_instance.strong_buy_confidence,
+            "MODERATE_BUY_SCORE": config_instance.moderate_buy_score,
+            "MODERATE_BUY_CONFIDENCE": config_instance.moderate_buy_confidence,
+            "STRONG_SELL_SCORE": config_instance.strong_sell_score,
+            "STRONG_SELL_CONFIDENCE": config_instance.strong_sell_confidence,
+            "MODERATE_SELL_SCORE": config_instance.moderate_sell_score,
+            "MODERATE_SELL_CONFIDENCE": config_instance.moderate_sell_confidence,
+        }
+        
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config_dict, f, indent=2)
+        
+        print(f"✅ Configuration saved to {CONFIG_FILE}")
+        return True
+    except Exception as e:
+        print(f"❌ Error saving config: {e}")
+        return False
+
+def load_config_from_file():
+    """Load configuration from JSON file"""
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                print(f"✅ Configuration loaded from {CONFIG_FILE}")
+                return config
+        except Exception as e:
+            print(f"⚠️ Error loading config: {e}, using defaults")
+    else:
+        print(f"Config file not found at {CONFIG_FILE}, using defaults")
+    return None
+
+def update_config_values(config_instance, updates: dict):
+    """Update configuration values and save to file"""
+    for key, value in updates.items():
+        # Use lowercase attribute names (dataclass convention)
+        attr_name = key.lower()
+        if hasattr(config_instance, attr_name):
+            setattr(config_instance, attr_name, value)
+            print(f"  ✓ Updated {key} = {value}")
+    
+    save_config_to_file(config_instance)
+    print(f"✅ Configuration updated with {len(updates)} changes")
+    return config_instance
+
+
+# ==========================================
 # CONFIGURATION DATACLASS
 # ==========================================
 
@@ -192,7 +256,24 @@ class TrendSignalConfig:
     risk_reward_ratio: float = RISK_REWARD_RATIO
     
     def __post_init__(self):
-        """Initialize nested dictionaries"""
+        """Initialize nested dictionaries and load from file if exists"""
+        # Load from file if exists - CRITICAL FIX!
+        saved_config = load_config_from_file()
+        if saved_config:
+            self.sentiment_weight = saved_config.get("SENTIMENT_WEIGHT", SENTIMENT_WEIGHT)
+            self.technical_weight = saved_config.get("TECHNICAL_WEIGHT", TECHNICAL_WEIGHT)
+            self.risk_weight = saved_config.get("RISK_WEIGHT", RISK_WEIGHT)
+            self.strong_buy_score = saved_config.get("STRONG_BUY_SCORE", STRONG_BUY_SCORE)
+            self.strong_buy_confidence = saved_config.get("STRONG_BUY_CONFIDENCE", STRONG_BUY_CONFIDENCE)
+            self.moderate_buy_score = saved_config.get("MODERATE_BUY_SCORE", MODERATE_BUY_SCORE)
+            self.moderate_buy_confidence = saved_config.get("MODERATE_BUY_CONFIDENCE", MODERATE_BUY_CONFIDENCE)
+            self.strong_sell_score = saved_config.get("STRONG_SELL_SCORE", STRONG_SELL_SCORE)
+            self.strong_sell_confidence = saved_config.get("STRONG_SELL_CONFIDENCE", STRONG_SELL_CONFIDENCE)
+            self.moderate_sell_score = saved_config.get("MODERATE_SELL_SCORE", MODERATE_SELL_SCORE)
+            self.moderate_sell_confidence = saved_config.get("MODERATE_SELL_CONFIDENCE", MODERATE_SELL_CONFIDENCE)
+            print("📝 Config loaded from file with custom weights")
+        
+        # Initialize nested dicts
         if self.decay_weights is None:
             self.decay_weights = DECAY_WEIGHTS.copy()
         
@@ -209,6 +290,80 @@ class TrendSignalConfig:
                 'slow': MACD_SLOW,
                 'signal': MACD_SIGNAL
             }
+    
+    # Uppercase property aliases for backward compatibility
+    @property
+    def SENTIMENT_WEIGHT(self):
+        return self.sentiment_weight
+    
+    @SENTIMENT_WEIGHT.setter
+    def SENTIMENT_WEIGHT(self, value):
+        self.sentiment_weight = value
+    
+    @property
+    def TECHNICAL_WEIGHT(self):
+        return self.technical_weight
+    
+    @TECHNICAL_WEIGHT.setter
+    def TECHNICAL_WEIGHT(self, value):
+        self.technical_weight = value
+    
+    @property
+    def RISK_WEIGHT(self):
+        return self.risk_weight
+    
+    @RISK_WEIGHT.setter
+    def RISK_WEIGHT(self, value):
+        self.risk_weight = value
+    
+    @property
+    def STRONG_BUY_SCORE(self):
+        return self.strong_buy_score
+    
+    @property
+    def STRONG_BUY_CONFIDENCE(self):
+        return self.strong_buy_confidence
+    
+    @property
+    def MODERATE_BUY_SCORE(self):
+        return self.moderate_buy_score
+    
+    @property
+    def MODERATE_BUY_CONFIDENCE(self):
+        return self.moderate_buy_confidence
+    
+    @property
+    def STRONG_SELL_SCORE(self):
+        return self.strong_sell_score
+    
+    @property
+    def STRONG_SELL_CONFIDENCE(self):
+        return self.strong_sell_confidence
+    
+    @property
+    def MODERATE_SELL_SCORE(self):
+        return self.moderate_sell_score
+    
+    @property
+    def MODERATE_SELL_CONFIDENCE(self):
+        return self.moderate_sell_confidence
+    
+    def reload(self):
+        """Reload configuration from file"""
+        saved_config = load_config_from_file()
+        if saved_config:
+            self.sentiment_weight = saved_config.get("SENTIMENT_WEIGHT", SENTIMENT_WEIGHT)
+            self.technical_weight = saved_config.get("TECHNICAL_WEIGHT", TECHNICAL_WEIGHT)
+            self.risk_weight = saved_config.get("RISK_WEIGHT", RISK_WEIGHT)
+            self.strong_buy_score = saved_config.get("STRONG_BUY_SCORE", STRONG_BUY_SCORE)
+            self.strong_buy_confidence = saved_config.get("STRONG_BUY_CONFIDENCE", STRONG_BUY_CONFIDENCE)
+            self.moderate_buy_score = saved_config.get("MODERATE_BUY_SCORE", MODERATE_BUY_SCORE)
+            self.moderate_buy_confidence = saved_config.get("MODERATE_BUY_CONFIDENCE", MODERATE_BUY_CONFIDENCE)
+            self.strong_sell_score = saved_config.get("STRONG_SELL_SCORE", STRONG_SELL_SCORE)
+            self.strong_sell_confidence = saved_config.get("STRONG_SELL_CONFIDENCE", STRONG_SELL_CONFIDENCE)
+            self.moderate_sell_score = saved_config.get("MODERATE_SELL_SCORE", MODERATE_SELL_SCORE)
+            self.moderate_sell_confidence = saved_config.get("MODERATE_SELL_CONFIDENCE", MODERATE_SELL_CONFIDENCE)
+            print("🔄 Config reloaded from file")
     
     def validate(self) -> bool:
         """Validate configuration"""
@@ -280,6 +435,44 @@ def get_config() -> TrendSignalConfig:
     """Get default configuration instance"""
     return default_config
 
+def reload_config():
+    """Reload configuration from file"""
+    default_config.reload()
+    return default_config
+
+def get_signal_weights():
+    """Get signal component weights as tuple"""
+    return (
+        default_config.SENTIMENT_WEIGHT,
+        default_config.TECHNICAL_WEIGHT,
+        default_config.RISK_WEIGHT
+    )
+
+def get_buy_thresholds():
+    """Get BUY thresholds"""
+    return {
+        "strong": {
+            "score": default_config.STRONG_BUY_SCORE,
+            "confidence": default_config.STRONG_BUY_CONFIDENCE
+        },
+        "moderate": {
+            "score": default_config.MODERATE_BUY_SCORE,
+            "confidence": default_config.MODERATE_BUY_CONFIDENCE
+        }
+    }
+
+def get_sell_thresholds():
+    """Get SELL thresholds"""
+    return {
+        "strong": {
+            "score": default_config.STRONG_SELL_SCORE,
+            "confidence": default_config.STRONG_SELL_CONFIDENCE
+        },
+        "moderate": {
+            "score": default_config.MODERATE_SELL_SCORE,
+            "confidence": default_config.MODERATE_SELL_CONFIDENCE
+        }
+    }
 
 def load_config_from_env() -> TrendSignalConfig:
     """Load configuration from environment variables"""
@@ -295,4 +488,3 @@ if __name__ == "__main__":
     config = get_config()
     config.display()
     config.validate()
-
