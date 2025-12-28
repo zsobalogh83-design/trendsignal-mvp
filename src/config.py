@@ -163,9 +163,11 @@ def save_config_to_file(config_instance):
     """Save current configuration to JSON file for persistence"""
     try:
         config_dict = {
+            # Signal weights
             "SENTIMENT_WEIGHT": config_instance.sentiment_weight,
             "TECHNICAL_WEIGHT": config_instance.technical_weight,
             "RISK_WEIGHT": config_instance.risk_weight,
+            # Thresholds
             "STRONG_BUY_SCORE": config_instance.strong_buy_score,
             "STRONG_BUY_CONFIDENCE": config_instance.strong_buy_confidence,
             "MODERATE_BUY_SCORE": config_instance.moderate_buy_score,
@@ -174,6 +176,8 @@ def save_config_to_file(config_instance):
             "STRONG_SELL_CONFIDENCE": config_instance.strong_sell_confidence,
             "MODERATE_SELL_SCORE": config_instance.moderate_sell_score,
             "MODERATE_SELL_CONFIDENCE": config_instance.moderate_sell_confidence,
+            # Decay weights - CRITICAL FIX!
+            "DECAY_WEIGHTS": config_instance.decay_weights,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -271,9 +275,12 @@ class TrendSignalConfig:
             self.strong_sell_confidence = saved_config.get("STRONG_SELL_CONFIDENCE", STRONG_SELL_CONFIDENCE)
             self.moderate_sell_score = saved_config.get("MODERATE_SELL_SCORE", MODERATE_SELL_SCORE)
             self.moderate_sell_confidence = saved_config.get("MODERATE_SELL_CONFIDENCE", MODERATE_SELL_CONFIDENCE)
+            # Decay weights - CRITICAL FIX!
+            if "DECAY_WEIGHTS" in saved_config:
+                self.decay_weights = saved_config["DECAY_WEIGHTS"]
             print("📝 Config loaded from file with custom weights")
         
-        # Initialize nested dicts
+        # Initialize nested dicts if not loaded
         if self.decay_weights is None:
             self.decay_weights = DECAY_WEIGHTS.copy()
         

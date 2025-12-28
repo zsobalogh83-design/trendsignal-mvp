@@ -6,10 +6,52 @@ import { FiRefreshCw, FiStar } from 'react-icons/fi';
 export function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<'active' | 'expired' | 'archived'>('active');
   const [activeFilter, setActiveFilter] = useState('all');
+  const [isGenerating, setIsGenerating] = useState(false);
   
   const { data, isLoading, error, refetch } = useSignals({ status: statusFilter, limit: 50 });
 
   const signals = data?.signals || [];
+
+  // ===== FILTER SIGNALS BASED ON ACTIVE FILTER =====
+  const filteredSignals = signals.filter((signal: any) => {
+    if (activeFilter === 'all') return true;
+    if (activeFilter === 'buy') return signal.decision === 'BUY';
+    if (activeFilter === 'sell') return signal.decision === 'SELL';
+    if (activeFilter === 'strong') return signal.strength === 'STRONG';
+    return true;
+  });
+
+  // ===== REFRESH SIGNALS - Generate + Fetch =====
+  const handleRefreshSignals = async () => {
+    setIsGenerating(true);
+    
+    try {
+      console.log('🎯 Triggering signal generation...');
+      
+      // Step 1: Generate new signals on backend
+      const generateResponse = await fetch('http://localhost:8000/api/v1/signals/generate', {
+        method: 'POST'
+      });
+      
+      if (!generateResponse.ok) {
+        throw new Error('Failed to generate signals');
+      }
+      
+      const result = await generateResponse.json();
+      console.log('✅ Signals generated:', result);
+      
+      // Step 2: Refetch the updated signals list
+      await refetch();
+      
+      console.log('✅ Dashboard refreshed');
+      
+    } catch (error) {
+      console.error('❌ Error refreshing signals:', error);
+      alert('Failed to refresh signals. Check console.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const getDecisionBadgeClass = (decision: string, strength: string) => {
     if (decision === 'BUY') {
@@ -113,26 +155,28 @@ export function Dashboard() {
           ))}
           
           <button
-            onClick={() => refetch()}
-            disabled={isLoading}
+            onClick={handleRefreshSignals}
+            disabled={isLoading || isGenerating}
             style={{
               marginLeft: 'auto',
-              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+              background: isGenerating 
+                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
               border: 'none',
               color: 'white',
               padding: '10px 20px',
               borderRadius: '8px',
-              cursor: 'pointer',
+              cursor: (isLoading || isGenerating) ? 'not-allowed' : 'pointer',
               fontSize: '14px',
               fontWeight: '600',
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              opacity: isLoading ? 0.5 : 1
+              opacity: (isLoading || isGenerating) ? 0.5 : 1
             }}
           >
-            <FiRefreshCw style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
-            Refresh
+            <FiRefreshCw style={{ animation: (isLoading || isGenerating) ? 'spin 1s linear infinite' : 'none' }} />
+            {isGenerating ? 'Generating...' : isLoading ? 'Loading...' : 'Refresh Signals'}
           </button>
         </div>
 
@@ -153,14 +197,14 @@ export function Dashboard() {
         )}
 
         {/* Signal Cards */}
-        {!isLoading && signals.length > 0 && (
+        {!isLoading && filteredSignals.length > 0 && (
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
             gap: '25px',
             marginTop: '30px'
           }}>
-            {signals.map((signal: any) => (
+            {filteredSignals.map((signal: any) => (
               <div
                 key={signal.id}
                 style={{
@@ -414,6 +458,19 @@ export function Dashboard() {
         )}
 
         {/* Empty State */}
+        {!isLoading && signals.length > 0 && filteredSignals.length === 0 && (
+          <div style={{ textAlign: 'center', paddingTop: '60px' }}>
+            <div style={{ fontSize: '60px', marginBottom: '16px' }}>🔍</div>
+            <h3 style={{ fontSize: '20px', fontWeight: '600', color: '#cbd5e1', marginBottom: '8px' }}>
+              No signals match your filter
+            </h3>
+            <p style={{ color: '#64748b' }}>
+              Try selecting a different filter or click "All Signals"
+            </p>
+          </div>
+        )}
+
+        {/* No Signals At All */}
         {!isLoading && signals.length === 0 && (
           <div style={{ textAlign: 'center', paddingTop: '60px' }}>
             <div style={{ fontSize: '60px', marginBottom: '16px' }}>📊</div>
@@ -421,7 +478,7 @@ export function Dashboard() {
               No signals found
             </h3>
             <p style={{ color: '#64748b' }}>
-              Try adjusting your filters or wait for new signals to be generated.
+              Click "Refresh Signals" to generate new trading signals
             </p>
           </div>
         )}

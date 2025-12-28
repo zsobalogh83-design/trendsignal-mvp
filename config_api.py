@@ -48,6 +48,20 @@ class SignalConfigResponse(BaseModel):
     moderate_sell_score: int
     moderate_sell_confidence: float
 
+class DecayWeightsUpdate(BaseModel):
+    """Model for updating decay weights (as percentages 0-100)"""
+    fresh_0_2h: Optional[int] = Field(None, ge=0, le=100)
+    strong_2_6h: Optional[int] = Field(None, ge=0, le=100)
+    intraday_6_12h: Optional[int] = Field(None, ge=0, le=100)
+    overnight_12_24h: Optional[int] = Field(None, ge=0, le=100)
+
+class DecayWeightsResponse(BaseModel):
+    """Response model for decay weights (as percentages)"""
+    fresh_0_2h: int
+    strong_2_6h: int
+    intraday_6_12h: int
+    overnight_12_24h: int
+
 # ===== ENDPOINTS =====
 
 @router.get("/signal", response_model=SignalConfigResponse)
@@ -207,3 +221,60 @@ async def reload_configuration():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+# ===== DECAY WEIGHTS ENDPOINTS =====
+
+@router.get("/decay", response_model=DecayWeightsResponse)
+async def get_decay_weights():
+    """Get current sentiment decay weights"""
+    try:
+        from src.config import get_config
+        config = get_config()
+        
+        # Convert from decimal (0-1) to percentage (0-100)
+        return DecayWeightsResponse(
+            fresh_0_2h=int(config.decay_weights.get('0-2h', 1.0) * 100),
+            strong_2_6h=int(config.decay_weights.get('2-6h', 0.85) * 100),
+            intraday_6_12h=int(config.decay_weights.get('6-12h', 0.60) * 100),
+            overnight_12_24h=int(config.decay_weights.get('12-24h', 0.35) * 100)
+        )
+    except Exception as e:
+        logger.error(f"Error getting decay weights: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.put("/decay", response_model=DecayWeightsResponse)
+async def update_decay_weights(updates: DecayWeightsUpdate):
+    """Update sentiment decay weights"""
+    try:
+        from src.config import get_config, save_config_to_file
+        
+        config = get_config()
+        
+        # Update decay_weights dict (convert percentage to decimal)
+        if updates.fresh_0_2h is not None:
+            config.decay_weights['0-2h'] = updates.fresh_0_2h / 100
+        if updates.strong_2_6h is not None:
+            config.decay_weights['2-6h'] = updates.strong_2_6h / 100
+        if updates.intraday_6_12h is not None:
+            config.decay_weights['6-12h'] = updates.intraday_6_12h / 100
+        if updates.overnight_12_24h is not None:
+            config.decay_weights['12-24h'] = updates.overnight_12_24h / 100
+        
+        # Save to file
+        save_config_to_file(config)
+        
+        logger.info(f"Decay weights updated: {config.decay_weights}")
+        
+        return await get_decay_weights()
+        
+    except Exception as e:
+        logger.error(f"Error updating decay weights: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+

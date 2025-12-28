@@ -172,11 +172,17 @@ class SignalGenerator:
         print(f"[{ticker_symbol}] COMBINED SCORE: {combined_score:.2f}")
         
         # ===== OVERALL CONFIDENCE =====
+        # Use actual risk confidence from risk_data
+        risk_confidence = risk_data.get("confidence", 0.5)
+        
         overall_confidence = (
             sentiment_confidence * sentiment_weight +
             technical_confidence * technical_weight +
-            0.5 * risk_weight
+            risk_confidence * risk_weight
         )
+        
+        print(f"[{ticker_symbol}] Confidences: S={sentiment_confidence:.2f}, T={technical_confidence:.2f}, R={risk_confidence:.2f}")
+        print(f"[{ticker_symbol}] OVERALL CONFIDENCE: {overall_confidence:.2%}")
         
         # ===== DETERMINE DECISION =====
         decision, strength = self._determine_decision(combined_score, overall_confidence)
@@ -421,15 +427,57 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
             weights_sum += final_weight
             confidences.append(news_item.sentiment_confidence)
     
-    # Calculate weighted average
+    # Calculate weighted average sentiment
     weighted_avg = sum(weighted_scores) / weights_sum if weights_sum > 0 else 0
-    avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
+    
+    # ===== IMPROVED SENTIMENT CONFIDENCE =====
+    # Component 1: FinBERT confidence (but capped to avoid over-confidence)
+    finbert_conf = sum(confidences) / len(confidences) if confidences else 0.5
+    finbert_conf_normalized = min(finbert_conf * 0.85, 0.90)  # Cap at 90%, reduce from ~93%
+    
+    # Component 2: News volume factor (more news = higher confidence)
+    news_count = len(news_items)
+    if news_count >= 10:
+        volume_factor = 1.0
+    elif news_count >= 5:
+        volume_factor = 0.85
+    elif news_count >= 3:
+        volume_factor = 0.70
+    elif news_count >= 2:
+        volume_factor = 0.55
+    else:
+        volume_factor = 0.40  # Single news = low confidence
+    
+    # Component 3: Sentiment consistency (all aligned = higher confidence)
+    positive_count = sum(1 for item in news_items if item.sentiment_score > 0.2)
+    negative_count = sum(1 for item in news_items if item.sentiment_score < -0.2)
+    neutral_count = news_count - positive_count - negative_count
+    
+    # Consistency: what % agrees with majority direction
+    if positive_count > negative_count:
+        consistency = positive_count / news_count if news_count > 0 else 0
+    elif negative_count > positive_count:
+        consistency = negative_count / news_count if news_count > 0 else 0
+    else:
+        consistency = 0.5  # Mixed signals
+    
+    # Aggregate confidence (weighted)
+    final_confidence = (
+        finbert_conf_normalized * 0.40 +  # FinBERT confidence (40%)
+        volume_factor * 0.35 +             # News volume (35%)
+        consistency * 0.25                 # Consistency (25%)
+    )
     
     return {
         "weighted_avg": weighted_avg,
-        "confidence": avg_confidence,
+        "confidence": final_confidence,
         "key_news": [item.title for item in news_items[:3]],
-        "news_count": len(news_items)
+        "news_count": len(news_items),
+        "confidence_breakdown": {
+            "finbert": finbert_conf_normalized,
+            "volume": volume_factor,
+            "consistency": consistency
+        }
     }
 
 
@@ -518,6 +566,41 @@ def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str) -> Dict:
                 tech_score -= 20
                 key_signals.append(f"RSI oversold ({rsi:.1f})")
         
+        # ADX - Trend Strength Indicator
+        adx = None
+        if high_col and low_col:
+            try:
+                # Calculate True Range
+                df['tr1'] = df[high_col] - df[low_col]
+                df['tr2'] = abs(df[high_col] - df[close_col].shift())
+                df['tr3'] = abs(df[low_col] - df[close_col].shift())
+                df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+                
+                # Calculate Directional Movement
+                df['up_move'] = df[high_col] - df[high_col].shift()
+                df['down_move'] = df[low_col].shift() - df[low_col]
+                
+                df['plus_dm'] = df['up_move'].where((df['up_move'] > df['down_move']) & (df['up_move'] > 0), 0)
+                df['minus_dm'] = df['down_move'].where((df['down_move'] > df['up_move']) & (df['down_move'] > 0), 0)
+                
+                # Smooth with 14-period
+                atr_14 = df['tr'].rolling(14).mean()
+                plus_di = 100 * (df['plus_dm'].rolling(14).mean() / atr_14)
+                minus_di = 100 * (df['minus_dm'].rolling(14).mean() / atr_14)
+                
+                # Calculate ADX
+                dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+                df['adx'] = dx.rolling(14).mean()
+                
+                adx = current['adx'] if pd.notna(current.get('adx')) else None
+                
+                if adx is not None:
+                    key_signals.append(f"ADX: {adx:.1f}")
+                    
+            except Exception as e:
+                print(f"  ⚠️ Could not calculate ADX: {e}")
+                adx = None
+        
         # ATR
         if high_col and low_col:
             high_low = df[high_col] - df[low_col]
@@ -535,9 +618,58 @@ def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str) -> Dict:
             nearest_support = current[close_col] * 0.97
             nearest_resistance = current[close_col] * 1.03
         
+        # ===== TECHNICAL CONFIDENCE =====
+        # Based on how many indicators agree
+        indicators_checked = 0
+        indicators_bullish = 0
+        indicators_bearish = 0
+        
+        # SMA trend indicators
+        if pd.notna(current.get('sma_20')) and pd.notna(current.get('sma_50')):
+            indicators_checked += 3
+            if current[close_col] > current['sma_20']:
+                indicators_bullish += 1
+            else:
+                indicators_bearish += 1
+                
+            if current[close_col] > current['sma_50']:
+                indicators_bullish += 1
+            else:
+                indicators_bearish += 1
+                
+            if current['sma_20'] > current['sma_50']:
+                indicators_bullish += 1
+            else:
+                indicators_bearish += 1
+        
+        # RSI
+        if pd.notna(current.get('rsi')):
+            indicators_checked += 1
+            if current['rsi'] > 55:
+                indicators_bullish += 1
+            elif current['rsi'] < 45:
+                indicators_bearish += 1
+        
+        # ADX (strong trend = higher confidence)
+        adx_boost = 0
+        if adx is not None:
+            if adx > 25:
+                adx_boost = 0.15  # Strong trend increases confidence
+            elif adx > 20:
+                adx_boost = 0.10
+        
+        # Calculate alignment (what % of indicators agree)
+        alignment = max(indicators_bullish, indicators_bearish) / indicators_checked if indicators_checked > 0 else 0.5
+        
+        # Base confidence from alignment
+        base_confidence = 0.50 + (alignment * 0.30)  # 50% to 80% range
+        
+        # Add ADX boost
+        technical_confidence = min(base_confidence + adx_boost, 0.90)  # Cap at 90%
+        
         result = {
             "score": max(-100, min(100, tech_score)),
-            "confidence": 0.70,
+            "confidence": technical_confidence,  # Now dynamic!
             "current_price": float(current[close_col]),
             "key_signals": key_signals,
             "atr": float(atr),
@@ -546,10 +678,12 @@ def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str) -> Dict:
             "nearest_resistance": nearest_resistance,
             "rsi": float(current['rsi']) if pd.notna(current['rsi']) else None,
             "sma_20": float(current['sma_20']) if pd.notna(current['sma_20']) else None,
-            "sma_50": float(current['sma_50']) if pd.notna(current['sma_50']) else None
+            "sma_50": float(current['sma_50']) if pd.notna(current['sma_50']) else None,
+            "adx": float(adx) if adx is not None else None
         }
         
-        print(f"  ✅ Technical: {tech_score:.1f} | RSI: {current['rsi']:.1f} | Price: ${current[close_col]:.2f}")
+        adx_str = f" | ADX: {adx:.1f}" if adx is not None else ""
+        print(f"  ✅ Technical: {tech_score:.1f} (Conf: {technical_confidence:.0%}) | RSI: {current['rsi']:.1f}{adx_str} | Price: ${current[close_col]:.2f}")
         
         return result
         
@@ -561,41 +695,115 @@ def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str) -> Dict:
 
 
 def calculate_risk_score(technical_data: Dict, ticker_symbol: str) -> Dict:
-    """Calculate risk score from technical data"""
+    """
+    Calculate multi-component risk score
+    
+    Components:
+    1. Volatility (ATR) - 40% weight
+    2. S/R Proximity - 35% weight  
+    3. Trend Strength (ADX) - 25% weight
+    
+    Returns risk score in range -50 to +50 (not -100 to +100!)
+    """
     try:
         atr_pct = technical_data.get("atr_pct", 2.0)
         current_price = technical_data["current_price"]
         nearest_support = technical_data.get("nearest_support", current_price * 0.97)
         nearest_resistance = technical_data.get("nearest_resistance", current_price * 1.03)
+        adx = technical_data.get("adx", None)  # Trend strength
         
-        # Risk score
-        risk_score = 50
-        
-        # Volatility
+        # ===== 1. VOLATILITY RISK (ATR-based) - 40% =====
         if atr_pct < 2.0:
-            risk_score += 30
-        elif atr_pct < 3.0:
-            risk_score += 15
-        elif atr_pct > 5.0:
-            risk_score -= 30
+            volatility_risk = +0.5  # Low volatility = low risk
+            vol_status = f"🟢 Low Vol"
+            vol_confidence = 0.90
+        elif atr_pct < 4.0:
+            volatility_risk = 0.0   # Moderate
+            vol_status = f"⚪ Moderate Vol"
+            vol_confidence = 0.75
+        else:
+            volatility_risk = -0.5  # High volatility = high risk
+            vol_status = f"🔴 High Vol"
+            vol_confidence = 0.60
         
-        # Distance from support
+        # ===== 2. S/R PROXIMITY RISK - 35% =====
         support_dist_pct = ((current_price - nearest_support) / current_price) * 100
-        if support_dist_pct < 3:
-            risk_score += 20
+        resistance_dist_pct = ((nearest_resistance - current_price) / current_price) * 100
+        min_distance = min(abs(support_dist_pct), abs(resistance_dist_pct))
         
-        print(f"  ✅ Risk: {risk_score:.1f} | ATR: {atr_pct:.2f}% | Supp dist: {support_dist_pct:.2f}%")
+        if support_dist_pct > 2.0 and resistance_dist_pct > 2.0:
+            proximity_risk = +0.5   # Safe zone (buffer on both sides)
+            proximity_status = f"🟢 Safe Zone"
+            proximity_confidence = 0.85
+        elif min_distance < 1.0:
+            proximity_risk = -0.3   # Too close to S or R
+            proximity_status = f"⚠️ Too Close"
+            proximity_confidence = 0.45
+        else:
+            proximity_risk = 0.0    # Neutral
+            proximity_status = f"⚪ Neutral"
+            proximity_confidence = 0.65
+        
+        # ===== 3. TREND STRENGTH (ADX) - 25% =====
+        if adx is not None:
+            if adx > 25:
+                trend_risk = +0.4   # Strong trend = lower risk (trend continuation likely)
+                trend_status = f"🟢 Strong Trend (ADX: {adx:.1f})"
+                trend_confidence = 0.85
+            elif adx > 20:
+                trend_risk = +0.2   # Moderate trend
+                trend_status = f"⚪ Moderate Trend (ADX: {adx:.1f})"
+                trend_confidence = 0.70
+            else:
+                trend_risk = -0.2   # Weak trend = higher risk (choppy market)
+                trend_status = f"🔴 Weak Trend (ADX: {adx:.1f})"
+                trend_confidence = 0.55
+        else:
+            # No ADX data - neutral
+            trend_risk = 0.0
+            trend_status = "⚪ No ADX data"
+            trend_confidence = 0.60
+        
+        # ===== AGGREGATE RISK SCORE =====
+        risk_score = (
+            volatility_risk * 0.40 +
+            proximity_risk * 0.35 +
+            trend_risk * 0.25
+        ) * 100  # Scale to -50 to +50 range
+        
+        # ===== RISK CONFIDENCE =====
+        risk_confidence = (
+            vol_confidence * 0.40 +
+            proximity_confidence * 0.35 +
+            trend_confidence * 0.25
+        )
+        
+        print(f"  ✅ Risk: {risk_score:+.1f} | ATR: {atr_pct:.2f}% | {vol_status} | {proximity_status} | {trend_status}")
+        print(f"     Components: Vol={volatility_risk:+.1f} (40%), Prox={proximity_risk:+.1f} (35%), Trend={trend_risk:+.1f} (25%)")
+        print(f"     Confidence: {risk_confidence:.0%}")
         
         return {
-            "score": max(-100, min(100, risk_score)),
+            "score": max(-100, min(100, risk_score)),  # Clamp for safety
+            "confidence": risk_confidence,
             "volatility": atr_pct,
             "nearest_support": nearest_support,
-            "nearest_resistance": nearest_resistance
+            "nearest_resistance": nearest_resistance,
+            "components": {
+                "volatility": {"risk": volatility_risk, "status": vol_status, "confidence": vol_confidence},
+                "proximity": {"risk": proximity_risk, "status": proximity_status, "confidence": proximity_confidence},
+                "trend_strength": {"risk": trend_risk, "status": trend_status, "confidence": trend_confidence}
+            }
         }
         
     except Exception as e:
         print(f"  ❌ Risk calculation error: {e}")
-        return {"score": 0, "volatility": 2.0, "nearest_support": None, "nearest_resistance": None}
+        return {
+            "score": 0,
+            "confidence": 0.50,
+            "volatility": 2.0,
+            "nearest_support": None,
+            "nearest_resistance": None
+        }
 
 
 # ==========================================
