@@ -1,4 +1,4 @@
-"""
+﻿"""
 TrendSignal MVP - Hungarian News Sources Module
 RSS feed collection from Portfolio.hu, Telex.hu, HVG.hu, Index.hu
 
@@ -8,7 +8,7 @@ Date: 2024-12-27
 
 import feedparser
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
@@ -152,7 +152,7 @@ class HungarianNewsCollector:
                 return []
             
             news_items = []
-            cutoff_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
             
             for entry in feed.entries:
                 # Parse publish date
@@ -471,3 +471,4 @@ if __name__ == "__main__":
     print("\n🎯 Usage:")
     print("  collector = EnhancedNewsCollector()")
     print("  news = collector.collect_all_news('OTP.BD', 'OTP Bank')")
+

@@ -1,18 +1,13 @@
 """
-TrendSignal MVP - Enhanced News Collection Module
-Collect news from NewsAPI, Alpha Vantage, AND Hungarian sources
-
-Version: 1.1
-Date: 2024-12-27
+TrendSignal MVP - Enhanced News Collector
+English + Hungarian news with timezone-aware datetime handling
 """
 
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, TYPE_CHECKING
-from dataclasses import dataclass
 
-# FIXED IMPORT
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -20,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.config import TrendSignalConfig, get_config
 from src.sentiment_analyzer import NewsItem
 
-# Import Hungarian news module
+# Import Hungarian collector
 try:
     from src.hungarian_news import HungarianNewsCollector
     HAS_HUNGARIAN = True
@@ -28,24 +23,24 @@ except ImportError:
     HAS_HUNGARIAN = False
     print("⚠️ Hungarian news module not available")
 
-# Type hints only
 if TYPE_CHECKING:
     from src.multilingual_sentiment import MultilingualSentimentAnalyzer
 
 
 class NewsCollector:
-    """Enhanced news collector with Hungarian support"""
+    """Enhanced collector with Hungarian support and timezone-aware datetimes"""
     
     def __init__(self, config: Optional[TrendSignalConfig] = None):
         self.config = config or get_config()
         
-        # Initialize Hungarian collector if available
+        # Initialize Hungarian collector
         if HAS_HUNGARIAN:
             try:
                 self.hungarian_collector = HungarianNewsCollector(config)
-                print("✅ Hungarian news collector initialized")
-            except:
+                print("✅ Hungarian news collector ready")
+            except Exception as e:
                 self.hungarian_collector = None
+                print(f"⚠️ Hungarian collector init failed: {e}")
         else:
             self.hungarian_collector = None
     
@@ -56,39 +51,42 @@ class NewsCollector:
         lookback_hours: int = 24
     ) -> List[NewsItem]:
         """
-        Collect news from ALL sources (English + Hungarian)
+        Collect news from all sources (English + Hungarian if applicable)
+        All datetimes are timezone-aware (UTC)
         """
         from src.multilingual_sentiment import MultilingualSentimentAnalyzer
         
         all_news = []
         sentiment_analyzer = MultilingualSentimentAnalyzer(self.config, ticker_symbol)
         
-        # Collect from NewsAPI (English)
+        # Collect English news (NewsAPI + AlphaVantage)
         if self.config.newsapi_key and self.config.newsapi_key != "YOUR_NEWSAPI_KEY_HERE":
             newsapi_items = self._collect_from_newsapi(
                 ticker_symbol, company_name, lookback_hours, sentiment_analyzer
             )
             all_news.extend(newsapi_items)
         
-        # Collect from Alpha Vantage (English)
         if self.config.alphavantage_key and self.config.alphavantage_key != "YOUR_ALPHAVANTAGE_KEY_HERE":
             alphavantage_items = self._collect_from_alphavantage(
                 ticker_symbol, lookback_hours, sentiment_analyzer
             )
             all_news.extend(alphavantage_items)
         
-        # Collect from Hungarian sources (if ticker is Hungarian)
+        # Collect Hungarian news for BÉT tickers
         if self.hungarian_collector and ticker_symbol.endswith('.BD'):
-            hungarian_items = self.hungarian_collector.collect_hungarian_news(
-                ticker_symbol, company_name, lookback_hours, sentiment_analyzer
+            print(f"🇭🇺 Collecting Hungarian news for {ticker_symbol}...")
+            hungarian_items = self.hungarian_collector.collect_news(
+                ticker_symbol=ticker_symbol,
+                company_name=company_name,
+                lookback_hours=lookback_hours
             )
             all_news.extend(hungarian_items)
-            print(f"🇭🇺 Added {len(hungarian_items)} Hungarian news items")
+            print(f"✅ Added {len(hungarian_items)} Hungarian news items")
         
-        # Remove duplicates
+        # Deduplicate
         all_news = self._deduplicate_news(all_news)
         
-        # Sort by published date
+        # Sort by date
         all_news.sort(key=lambda x: x.published_at, reverse=True)
         
         return all_news
@@ -100,10 +98,11 @@ class NewsCollector:
         lookback_hours: int,
         sentiment_analyzer: 'MultilingualSentimentAnalyzer'
     ) -> List[NewsItem]:
-        """Collect news from NewsAPI"""
+        """Collect from NewsAPI with timezone-aware datetimes"""
         url = "https://newsapi.org/v2/everything"
         
-        to_date = datetime.utcnow()
+        # FIXED: Use timezone-aware datetimes
+        to_date = datetime.now(timezone.utc)
         from_date = to_date - timedelta(hours=lookback_hours)
         
         params = {
@@ -125,13 +124,18 @@ class NewsCollector:
                 text = f"{article.get('title', '')}. {article.get('description', '')}"
                 sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
                 
+                # FIXED: Parse with timezone awareness
+                published_str = article.get('publishedAt', '')
+                if published_str:
+                    published_at = datetime.fromisoformat(published_str.replace('Z', '+00:00'))
+                else:
+                    published_at = datetime.now(timezone.utc)
+                
                 news_item = NewsItem(
                     title=article.get('title', ''),
                     description=article.get('description', ''),
                     url=article.get('url', ''),
-                    published_at=datetime.fromisoformat(
-                        article.get('publishedAt', '').replace('Z', '+00:00')
-                    ),
+                    published_at=published_at,
                     source='NewsAPI',
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
@@ -153,7 +157,7 @@ class NewsCollector:
         lookback_hours: int,
         sentiment_analyzer: 'MultilingualSentimentAnalyzer'
     ) -> List[NewsItem]:
-        """Collect news from Alpha Vantage"""
+        """Collect from Alpha Vantage with timezone-aware datetimes"""
         url = "https://www.alphavantage.co/query"
         
         params = {
@@ -169,14 +173,19 @@ class NewsCollector:
             data = response.json()
             
             news_items = []
-            cutoff_time = datetime.utcnow() - timedelta(hours=lookback_hours)
+            # FIXED: Timezone-aware cutoff
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
             
             for item in data.get('feed', []):
-                time_published = datetime.strptime(
-                    item.get('time_published', ''),
-                    '%Y%m%dT%H%M%S'
-                )
+                # FIXED: Parse and make timezone-aware
+                time_str = item.get('time_published', '')
+                if time_str:
+                    time_published = datetime.strptime(time_str, '%Y%m%dT%H%M%S')
+                    time_published = time_published.replace(tzinfo=timezone.utc)
+                else:
+                    time_published = datetime.now(timezone.utc)
                 
+                # FIXED: Both datetimes now timezone-aware
                 if time_published < cutoff_time:
                     continue
                 
@@ -204,7 +213,7 @@ class NewsCollector:
             return []
     
     def _deduplicate_news(self, news_items: List[NewsItem]) -> List[NewsItem]:
-        """Remove duplicate news items"""
+        """Remove duplicates"""
         seen_urls = set()
         seen_titles = set()
         unique_items = []
@@ -221,14 +230,15 @@ class NewsCollector:
             seen_titles.add(title_lower)
             unique_items.append(item)
         
-        removed_count = len(news_items) - len(unique_items)
-        if removed_count > 0:
-            print(f"🔄 Removed {removed_count} duplicate news items")
+        removed = len(news_items) - len(unique_items)
+        if removed > 0:
+            print(f"🔄 Removed {removed} duplicates")
         
         return unique_items
 
 
 if __name__ == "__main__":
-    print("✅ Enhanced News Collector Module")
-    print("📰 Sources: NewsAPI, Alpha Vantage, Hungarian sites")
-    print("🧠 Multi-language sentiment analysis")
+    print("✅ Enhanced News Collector")
+    print("🌍 English: NewsAPI + Alpha Vantage")
+    print("🇭🇺 Hungarian: Portfolio.hu + RSS feeds")
+    print("🕐 Timezone-aware datetime handling")
