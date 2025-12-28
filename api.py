@@ -5,6 +5,7 @@ All endpoints functional
 
 from fastapi import FastAPI, HTTPException
 from config_api import router as config_router
+from signals_api import router as signals_router
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from datetime import datetime, timedelta
@@ -32,6 +33,7 @@ app = FastAPI(title="TrendSignal API", version="0.1.0")
 
 # Config API endpoints
 app.include_router(config_router)
+app.include_router(signals_router)
 
 app.add_middleware(
     CORSMiddleware,

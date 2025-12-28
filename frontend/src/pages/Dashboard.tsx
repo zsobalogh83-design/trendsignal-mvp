@@ -266,9 +266,9 @@ export function Dashboard() {
                   </div>
                   
                   {[
-                    { label: 'Sentiment (70%)', value: signal.sentiment_score },
-                    { label: 'Technical (20%)', value: signal.technical_score },
-                    { label: 'Risk (10%)', value: signal.risk_score }
+                    { label: 'Sentiment', value: signal.sentiment_score },
+                    { label: 'Technical', value: signal.technical_score },
+                    { label: 'Risk', value: signal.risk_score }
                   ].map((item, idx) => (
                     <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                       <span style={{ fontSize: '13px', color: '#94a3b8' }}>{item.label}</span>
