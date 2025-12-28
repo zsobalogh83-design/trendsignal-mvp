@@ -1,8 +1,8 @@
 """
-TrendSignal MVP - News Collection Module
-Collect news from NewsAPI and Alpha Vantage
+TrendSignal MVP - Enhanced News Collection Module
+Collect news from NewsAPI, Alpha Vantage, AND Hungarian sources
 
-Version: 1.0
+Version: 1.1
 Date: 2024-12-27
 """
 
@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 
-# FIXED IMPORT - Use absolute import with src prefix
+# FIXED IMPORT
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -20,20 +20,34 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from src.config import TrendSignalConfig, get_config
 from src.sentiment_analyzer import NewsItem
 
+# Import Hungarian news module
+try:
+    from src.hungarian_news import HungarianNewsCollector
+    HAS_HUNGARIAN = True
+except ImportError:
+    HAS_HUNGARIAN = False
+    print("⚠️ Hungarian news module not available")
+
 # Type hints only
 if TYPE_CHECKING:
     from src.multilingual_sentiment import MultilingualSentimentAnalyzer
 
 
-# ==========================================
-# NEWS COLLECTOR
-# ==========================================
-
 class NewsCollector:
-    """Collect news from multiple sources"""
+    """Enhanced news collector with Hungarian support"""
     
     def __init__(self, config: Optional[TrendSignalConfig] = None):
         self.config = config or get_config()
+        
+        # Initialize Hungarian collector if available
+        if HAS_HUNGARIAN:
+            try:
+                self.hungarian_collector = HungarianNewsCollector(config)
+                print("✅ Hungarian news collector initialized")
+            except:
+                self.hungarian_collector = None
+        else:
+            self.hungarian_collector = None
     
     def collect_news(
         self,
@@ -42,42 +56,39 @@ class NewsCollector:
         lookback_hours: int = 24
     ) -> List[NewsItem]:
         """
-        Collect news from all enabled sources
-        
-        Args:
-            ticker_symbol: Stock ticker (e.g., 'AAPL')
-            company_name: Company name (e.g., 'Apple Inc.')
-            lookback_hours: How far back to look
-        
-        Returns:
-            List of NewsItem objects with sentiment analysis
+        Collect news from ALL sources (English + Hungarian)
         """
-        # Import at runtime to avoid circular dependency
         from src.multilingual_sentiment import MultilingualSentimentAnalyzer
         
         all_news = []
-        
-        # Initialize ticker-aware multilingual sentiment analyzer
         sentiment_analyzer = MultilingualSentimentAnalyzer(self.config, ticker_symbol)
         
-        # Collect from NewsAPI
+        # Collect from NewsAPI (English)
         if self.config.newsapi_key and self.config.newsapi_key != "YOUR_NEWSAPI_KEY_HERE":
             newsapi_items = self._collect_from_newsapi(
                 ticker_symbol, company_name, lookback_hours, sentiment_analyzer
             )
             all_news.extend(newsapi_items)
         
-        # Collect from Alpha Vantage
+        # Collect from Alpha Vantage (English)
         if self.config.alphavantage_key and self.config.alphavantage_key != "YOUR_ALPHAVANTAGE_KEY_HERE":
             alphavantage_items = self._collect_from_alphavantage(
                 ticker_symbol, lookback_hours, sentiment_analyzer
             )
             all_news.extend(alphavantage_items)
         
-        # Remove duplicates (by URL or title similarity)
+        # Collect from Hungarian sources (if ticker is Hungarian)
+        if self.hungarian_collector and ticker_symbol.endswith('.BD'):
+            hungarian_items = self.hungarian_collector.collect_hungarian_news(
+                ticker_symbol, company_name, lookback_hours, sentiment_analyzer
+            )
+            all_news.extend(hungarian_items)
+            print(f"🇭🇺 Added {len(hungarian_items)} Hungarian news items")
+        
+        # Remove duplicates
         all_news = self._deduplicate_news(all_news)
         
-        # Sort by published date (newest first)
+        # Sort by published date
         all_news.sort(key=lambda x: x.published_at, reverse=True)
         
         return all_news
@@ -92,7 +103,6 @@ class NewsCollector:
         """Collect news from NewsAPI"""
         url = "https://newsapi.org/v2/everything"
         
-        # Calculate date range
         to_date = datetime.utcnow()
         from_date = to_date - timedelta(hours=lookback_hours)
         
@@ -112,11 +122,9 @@ class NewsCollector:
             
             news_items = []
             for article in data.get('articles', []):
-                # Analyze sentiment (ticker-aware)
                 text = f"{article.get('title', '')}. {article.get('description', '')}"
                 sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
                 
-                # Create NewsItem
                 news_item = NewsItem(
                     title=article.get('title', ''),
                     description=article.get('description', ''),
@@ -128,7 +136,7 @@ class NewsCollector:
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
                     sentiment_label=sentiment['label'],
-                    credibility=0.85  # NewsAPI credibility
+                    credibility=0.85
                 )
                 news_items.append(news_item)
             
@@ -164,21 +172,17 @@ class NewsCollector:
             cutoff_time = datetime.utcnow() - timedelta(hours=lookback_hours)
             
             for item in data.get('feed', []):
-                # Parse timestamp
                 time_published = datetime.strptime(
                     item.get('time_published', ''),
                     '%Y%m%dT%H%M%S'
                 )
                 
-                # Skip if too old
                 if time_published < cutoff_time:
                     continue
                 
-                # Analyze sentiment (ticker-aware)
                 text = f"{item.get('title', '')}. {item.get('summary', '')}"
                 sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
                 
-                # Create NewsItem
                 news_item = NewsItem(
                     title=item.get('title', ''),
                     description=item.get('summary', ''),
@@ -188,7 +192,7 @@ class NewsCollector:
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
                     sentiment_label=sentiment['label'],
-                    credibility=0.80  # Alpha Vantage credibility
+                    credibility=0.80
                 )
                 news_items.append(news_item)
             
@@ -200,22 +204,15 @@ class NewsCollector:
             return []
     
     def _deduplicate_news(self, news_items: List[NewsItem]) -> List[NewsItem]:
-        """
-        Remove duplicate news items
-        
-        Simple deduplication by URL and title similarity
-        (Phase 2: TF-IDF + cosine similarity)
-        """
+        """Remove duplicate news items"""
         seen_urls = set()
         seen_titles = set()
         unique_items = []
         
         for item in news_items:
-            # Skip if URL already seen
             if item.url in seen_urls:
                 continue
             
-            # Skip if very similar title already seen
             title_lower = item.title.lower()
             if title_lower in seen_titles:
                 continue
@@ -231,12 +228,7 @@ class NewsCollector:
         return unique_items
 
 
-# ==========================================
-# USAGE EXAMPLE
-# ==========================================
-
 if __name__ == "__main__":
-    print("✅ News Collector Module Loaded")
-    print("📰 Sources: NewsAPI, Alpha Vantage")
-    print("🔄 Deduplication: URL + Title similarity")
-    print("🧠 Auto sentiment analysis with FinBERT")
+    print("✅ Enhanced News Collector Module")
+    print("📰 Sources: NewsAPI, Alpha Vantage, Hungarian sites")
+    print("🧠 Multi-language sentiment analysis")
