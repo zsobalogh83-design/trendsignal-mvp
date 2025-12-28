@@ -1,9 +1,10 @@
-"""
+﻿"""
 TrendSignal MVP - Complete Working API
 All endpoints functional
 """
 
 from fastapi import FastAPI, HTTPException
+from config_api import router as config_router
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from datetime import datetime, timedelta
@@ -28,6 +29,9 @@ except Exception as e:
 news_collector = None
 
 app = FastAPI(title="TrendSignal API", version="0.1.0")
+
+# Config API endpoints
+app.include_router(config_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -167,3 +171,4 @@ async def get_news(ticker_symbol: Optional[str] = None, sentiment: Optional[str]
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

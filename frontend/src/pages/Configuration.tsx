@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { FiArrowLeft, FiSave, FiEdit2, FiTrash2, FiPlus } from 'react-icons/fi';
 
 export function Configuration() {
   const [activeTab, setActiveTab] = useState(0);
   const [showTickerModal, setShowTickerModal] = useState(false);
+  const [saving, setSaving] = useState(false);
   
   // Mock data (later connect to API)
   const [tickers] = useState([
@@ -25,6 +26,86 @@ export function Configuration() {
     technical: 20,
     risk: 10,
   });
+
+  // ===== LOAD CONFIG FROM BACKEND ON MOUNT =====
+  useEffect(() => {
+    loadConfigFromBackend();
+  }, []);
+
+  const loadConfigFromBackend = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/config/signal');
+      if (response.ok) {
+        const config = await response.json();
+        
+        // Update component weights from backend
+        setComponentWeights({
+          sentiment: Math.round(config.sentiment_weight * 100),
+          technical: Math.round(config.technical_weight * 100),
+          risk: Math.round(config.risk_weight * 100),
+        });
+        
+        console.log('✅ Configuration loaded from backend:', config);
+      }
+    } catch (error) {
+      console.error('⚠️ Error loading config:', error);
+    }
+  };
+
+  const handleSaveAll = async () => {
+    setSaving(true);
+    
+    try {
+      // Validate weights sum to 100
+      const total = componentWeights.sentiment + componentWeights.technical + componentWeights.risk;
+      if (total !== 100) {
+        alert(`⚠️ Weights must sum to 100%, currently: ${total}%`);
+        setSaving(false);
+        return;
+      }
+      
+      // Convert percentages to decimals (0.7, 0.2, 0.1)
+      const payload = {
+        sentiment_weight: componentWeights.sentiment / 100,
+        technical_weight: componentWeights.technical / 100,
+        risk_weight: componentWeights.risk / 100,
+      };
+      
+      console.log('📤 Saving config to backend:', payload);
+      
+      const response = await fetch('http://localhost:8000/api/v1/config/signal', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Configuration saved successfully:', result);
+        
+        // Success notification
+        alert('✅ Configuration saved successfully!\n\nNew weights:\n' +
+              `Sentiment: ${componentWeights.sentiment}%\n` +
+              `Technical: ${componentWeights.technical}%\n` +
+              `Risk: ${componentWeights.risk}%`);
+        
+        // Reload config to verify
+        await loadConfigFromBackend();
+      } else {
+        const error = await response.json();
+        console.error('❌ Save failed:', error);
+        alert(`❌ Error saving configuration:\n${error.detail || 'Unknown error'}`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error saving config:', error);
+      alert('❌ Failed to save configuration.\nCheck console for details.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const tabs = [
     { id: 0, label: '📊 Tickers' },
@@ -108,17 +189,21 @@ export function Configuration() {
             border: 'none',
             fontSize: '14px',
             fontWeight: '600',
-            cursor: 'pointer',
-            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            cursor: saving ? 'not-allowed' : 'pointer',
+            background: saving 
+              ? 'rgba(100, 116, 139, 0.5)' 
+              : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
             color: 'white',
             transition: 'all 0.3s',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px'
+            gap: '8px',
+            opacity: saving ? 0.6 : 1
           }}
-          onClick={() => alert('Settings saved! (Will connect to API)')}
+          onClick={handleSaveAll}
+          disabled={saving}
           >
-            <FiSave /> Save All Changes
+            <FiSave /> {saving ? 'Saving...' : 'Save All Changes'}
           </button>
         </div>
 
