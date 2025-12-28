@@ -34,18 +34,29 @@ export function Configuration() {
 
   const loadConfigFromBackend = async () => {
     try {
+      // Load signal weights
       const response = await fetch('http://localhost:8000/api/v1/config/signal');
       if (response.ok) {
         const config = await response.json();
-        
-        // Update component weights from backend
         setComponentWeights({
           sentiment: Math.round(config.sentiment_weight * 100),
           technical: Math.round(config.technical_weight * 100),
           risk: Math.round(config.risk_weight * 100),
         });
-        
-        console.log('✅ Configuration loaded from backend:', config);
+        console.log('✅ Signal config loaded:', config);
+      }
+      
+      // Load decay weights
+      const decayResponse = await fetch('http://localhost:8000/api/v1/config/decay');
+      if (decayResponse.ok) {
+        const decayConfig = await decayResponse.json();
+        setSentimentWeights({
+          fresh_0_2h: decayConfig.fresh_0_2h,
+          strong_2_6h: decayConfig.strong_2_6h,
+          intraday_6_12h: decayConfig.intraday_6_12h,
+          overnight_12_24h: decayConfig.overnight_12_24h,
+        });
+        console.log('✅ Decay weights loaded:', decayConfig);
       }
     } catch (error) {
       console.error('⚠️ Error loading config:', error);
@@ -83,13 +94,37 @@ export function Configuration() {
       
       if (response.ok) {
         const result = await response.json();
-        console.log('✅ Configuration saved successfully:', result);
+        console.log('✅ Signal config saved:', result);
+        
+        // Save decay weights too
+        const decayPayload = {
+          fresh_0_2h: sentimentWeights.fresh_0_2h,
+          strong_2_6h: sentimentWeights.strong_2_6h,
+          intraday_6_12h: sentimentWeights.intraday_6_12h,
+          overnight_12_24h: sentimentWeights.overnight_12_24h,
+        };
+        
+        const decayResponse = await fetch('http://localhost:8000/api/v1/config/decay', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(decayPayload)
+        });
+        
+        if (decayResponse.ok) {
+          console.log('✅ Decay weights saved');
+        }
         
         // Success notification
-        alert('✅ Configuration saved successfully!\n\nNew weights:\n' +
+        alert('✅ Configuration saved successfully!\n\n' +
+              'Signal Weights:\n' +
               `Sentiment: ${componentWeights.sentiment}%\n` +
               `Technical: ${componentWeights.technical}%\n` +
-              `Risk: ${componentWeights.risk}%`);
+              `Risk: ${componentWeights.risk}%\n\n` +
+              'Decay Weights:\n' +
+              `0-2h: ${sentimentWeights.fresh_0_2h}%\n` +
+              `2-6h: ${sentimentWeights.strong_2_6h}%\n` +
+              `6-12h: ${sentimentWeights.intraday_6_12h}%\n` +
+              `12-24h: ${sentimentWeights.overnight_12_24h}%`);
         
         // Reload config to verify
         await loadConfigFromBackend();
