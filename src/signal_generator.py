@@ -769,7 +769,7 @@ def calculate_risk_score(technical_data: Dict, ticker_symbol: str) -> Dict:
             volatility_risk * 0.40 +
             proximity_risk * 0.35 +
             trend_risk * 0.25
-        ) * 100  # Scale to -50 to +50 range
+        ) * 200  # Scale to -100 to +100 range (was ×100 giving -50 to +50)
         
         # ===== RISK CONFIDENCE =====
         risk_confidence = (
@@ -783,7 +783,7 @@ def calculate_risk_score(technical_data: Dict, ticker_symbol: str) -> Dict:
         print(f"     Confidence: {risk_confidence:.0%}")
         
         return {
-            "score": max(-100, min(100, risk_score)),  # Clamp for safety
+            "score": max(-100, min(100, risk_score)),  # Clamp to -100...+100
             "confidence": risk_confidence,
             "volatility": atr_pct,
             "nearest_support": nearest_support,
