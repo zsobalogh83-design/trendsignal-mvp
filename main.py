@@ -17,7 +17,7 @@ sys.path.insert(0, str(src_path))
 from config import TrendSignalConfig, get_config
 from news_collector import NewsCollector
 from signal_generator import SignalGenerator, generate_signals_for_tickers
-from utils import fetch_price_data, display_dataframe_summary
+from utils import fetch_price_data, fetch_dual_timeframe, display_dataframe_summary
 
 
 # ==========================================
@@ -51,21 +51,58 @@ def run_analysis(
     print(f"   Collected {len(news_items)} news items")
     print()
     
-    # 2. Fetch price data
-    print("📊 Step 2: Fetching price data...")
-    price_df = fetch_price_data(ticker_symbol, interval='5m', period='5d')
+    # 2. Fetch price data (DUAL TIMEFRAME)
+    print("📊 Step 2: Fetching price data (dual timeframe)...")
+    price_data_dual = fetch_dual_timeframe(ticker_symbol)
     
-    if price_df is None or len(price_df) < 50:
-        print("❌ Insufficient price data, cannot generate signal")
+    price_df_5m = price_data_dual['intraday']
+    price_df_1h = price_data_dual['trend']
+    
+    if price_df_5m is None or len(price_df_5m) < 50:
+        print("❌ Insufficient intraday price data, cannot generate signal")
         return None
     
-    print(f"   Fetched {len(price_df)} candles")
+    print(f"   ✅ 5m: {len(price_df_5m)} candles | 1h: {len(price_df_1h) if price_df_1h else 0} candles")
     print()
     
     # 3. Generate signal
     print("🎯 Step 3: Generating trading signal...")
+    
+    # Import helper functions from signal_generator
+    from signal_generator import (
+        aggregate_sentiment_from_news, 
+        calculate_technical_score, 
+        calculate_risk_score
+    )
+    
+    # Aggregate sentiment from news
+    sentiment_data = aggregate_sentiment_from_news(news_items)
+    
+    # Calculate technical score from DUAL timeframe
+    technical_data = calculate_technical_score(price_df_5m, ticker_symbol, df_trend=price_df_1h)
+    
+    # Calculate risk score
+    if technical_data.get("current_price") and technical_data.get("atr_pct"):
+        risk_data = calculate_risk_score(technical_data, ticker_symbol)
+    else:
+        risk_data = {
+            "score": 0,
+            "confidence": 0.5,
+            "volatility": 2.0,
+            "nearest_support": None,
+            "nearest_resistance": None
+        }
+    
+    # Generate signal with new interface
     generator = SignalGenerator(config)
-    signal = generator.generate_signal(ticker_symbol, ticker_name, news_items, price_df)
+    signal = generator.generate_signal(
+        ticker_symbol=ticker_symbol,
+        ticker_name=ticker_name,
+        sentiment_data=sentiment_data,
+        technical_data=technical_data,
+        risk_data=risk_data,
+        news_count=len(news_items)
+    )
     print()
     
     # 4. Display result
@@ -116,9 +153,9 @@ def run_batch_analysis(
         news_items = collector.collect_news(symbol, name, lookback_hours=24)
         news_data[symbol] = news_items
         
-        # Price
-        prices = fetch_price_data(symbol, interval='5m', period='5d')
-        price_data[symbol] = prices
+        # Price - DUAL TIMEFRAME
+        dual_data = fetch_dual_timeframe(symbol)
+        price_data[symbol] = dual_data  # Now contains {'intraday': df_5m, 'trend': df_1h}
     
     print("\n" + "=" * 70)
     print("🎯 Generating signals...")

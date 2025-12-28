@@ -51,6 +51,7 @@ class TradingSignal:
     # Supporting data
     news_count: int = 0
     reasoning: Optional[Dict] = None
+    components: Optional[Dict] = None  # ✅ NEW: Weight and contribution breakdown
     
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
@@ -239,7 +240,36 @@ class SignalGenerator:
             take_profit=take_profit,
             risk_reward_ratio=rr_ratio,
             news_count=news_count,
-            reasoning=reasoning
+            reasoning=reasoning,
+            components={  # ✅ NEW: Include actual weights and contributions
+                "sentiment": {
+                    "score": round(sentiment_score, 2),
+                    "weight": sentiment_weight,
+                    "contribution": round(sentiment_contribution, 2),
+                    "confidence": round(sentiment_confidence, 2)
+                },
+                "technical": {
+                    "score": round(technical_score, 2),
+                    "weight": technical_weight,
+                    "contribution": round(technical_contribution, 2),
+                    "confidence": round(technical_confidence, 2),
+                    # ✅ ADD: Indicator values for UI display
+                    "rsi": technical_data.get("rsi"),
+                    "sma_20": technical_data.get("sma_20"),
+                    "sma_50": technical_data.get("sma_50"),
+                    "adx": technical_data.get("adx"),
+                    "atr": technical_data.get("atr"),
+                    "atr_pct": technical_data.get("atr_pct")
+                },
+                "risk": {
+                    "score": round(risk_score, 2),
+                    "weight": risk_weight,
+                    "contribution": round(risk_contribution, 2),
+                    "confidence": round(risk_data.get("confidence", 0.5), 2),
+                    # ✅ ADD: Risk component breakdown for UI
+                    "components": risk_data.get("components", {})
+                }
+            }
         )
         
         return signal
@@ -351,7 +381,21 @@ def generate_signals_for_tickers(
             # ===== TECHNICAL CALCULATION =====
             technical_data_raw = technical_data_dict.get(ticker_symbol, {})
             
-            if isinstance(technical_data_raw, pd.DataFrame) and len(technical_data_raw) > 50:
+            # Handle dual timeframe data (dict with 'intraday' and 'trend' keys)
+            if isinstance(technical_data_raw, dict) and 'intraday' in technical_data_raw:
+                df_5m = technical_data_raw['intraday']
+                df_1h = technical_data_raw.get('trend')
+                
+                if df_5m is not None and len(df_5m) >= 50:
+                    print(f"📊 [{ticker_symbol}] Calculating technical (dual timeframe)...")
+                    print(f"     Intraday: {len(df_5m)} candles (5m) | Trend: {len(df_1h) if df_1h else 0} candles (1h)")
+                    technical_data = calculate_technical_score(df_5m, ticker_symbol, df_trend=df_1h)
+                else:
+                    technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
+                    print(f"  ⚠️ Insufficient intraday data")
+                    
+            # Handle single DataFrame (backward compatibility)
+            elif isinstance(technical_data_raw, pd.DataFrame) and len(technical_data_raw) > 50:
                 print(f"📊 [{ticker_symbol}] Calculating technical from {len(technical_data_raw)} candles...")
                 technical_data = calculate_technical_score(technical_data_raw, ticker_symbol)
             elif isinstance(technical_data_raw, dict) and 'score' in technical_data_raw:
@@ -471,7 +515,14 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
     return {
         "weighted_avg": weighted_avg,
         "confidence": final_confidence,
-        "key_news": [item.title for item in news_items[:3]],
+        "key_news": [
+            {
+                "title": item.title,
+                "url": item.url,
+                "published_at": item.published_at.isoformat() if hasattr(item.published_at, 'isoformat') else str(item.published_at)
+            }
+            for item in news_items[:3]
+        ],
         "news_count": len(news_items),
         "confidence_breakdown": {
             "finbert": finbert_conf_normalized,
@@ -481,12 +532,28 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
     }
 
 
-def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str) -> Dict:
-    """Calculate technical score from price DataFrame - ROBUST version"""
+def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str, df_trend: Optional[pd.DataFrame] = None) -> Dict:
+    """
+    Calculate technical score from price DataFrame - DUAL TIMEFRAME SUPPORT
+    
+    Args:
+        df: Intraday DataFrame (5m) for RSI, SMA20, current price
+        ticker_symbol: Ticker symbol
+        df_trend: Optional hourly DataFrame (1h) for SMA50, ADX (trend context)
+    """
     try:
+        # Use intraday df as primary
+        print(f"  📊 [INTRADAY] Calculating from {len(df)} candles (5m)...")
+        if df_trend is not None:
+            print(f"  📊 [TREND] Using {len(df_trend)} hourly candles for trend context...")
+        
         # Normalize column names to lowercase
         df = df.copy()
         df.columns = [str(col).lower().strip() for col in df.columns]
+        
+        if df_trend is not None:
+            df_trend = df_trend.copy()
+            df_trend.columns = [str(col).lower().strip() for col in df_trend.columns]
         
         print(f"  📋 DataFrame columns: {list(df.columns)[:5]}... ({len(df.columns)} total)")
         
@@ -509,39 +576,60 @@ def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str) -> Dict:
         
         print(f"  ✅ Using columns: close={close_col}, high={high_col}, low={low_col}")
         
-        # Calculate indicators
+        # Calculate indicators from INTRADAY data (5m)
         df['sma_20'] = df[close_col].rolling(20).mean()
-        df['sma_50'] = df[close_col].rolling(50).mean()
         
-        # RSI
+        # SMA 50 - use TREND data (1h) if available, otherwise intraday
+        if df_trend is not None and len(df_trend) >= 50:
+            # Find close column in trend df
+            trend_close_col = None
+            for col in df_trend.columns:
+                if 'close' in col:
+                    trend_close_col = col
+                    break
+            
+            if trend_close_col:
+                df_trend['sma_50'] = df_trend[trend_close_col].rolling(50).mean()
+                sma_50_value = df_trend['sma_50'].iloc[-1]
+                print(f"  ✅ SMA50 from TREND data (1h): {sma_50_value:.2f}")
+            else:
+                df['sma_50'] = df[close_col].rolling(50).mean()
+                sma_50_value = df['sma_50'].iloc[-1]
+        else:
+            df['sma_50'] = df[close_col].rolling(50).mean()
+            sma_50_value = df['sma_50'].iloc[-1] if 'sma_50' in df.columns else None
+        
+        # RSI from INTRADAY data
         delta = df[close_col].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
         
-        # Latest values
+        # Latest values from INTRADAY
         current = df.iloc[-1]
         
         # Technical score
         tech_score = 0
         key_signals = []
         
-        # SMA trend
-        if pd.notna(current['sma_20']) and pd.notna(current['sma_50']):
+        # SMA trend - use SMA50 from trend timeframe if available
+        sma_50_for_comparison = sma_50_value if pd.notna(sma_50_value) else current.get('sma_50')
+        
+        if pd.notna(current['sma_20']) and pd.notna(sma_50_for_comparison):
             if current[close_col] > current['sma_20']:
                 tech_score += 25
                 key_signals.append("Price > SMA20")
             else:
                 tech_score -= 15
             
-            if current[close_col] > current['sma_50']:
+            if current[close_col] > sma_50_for_comparison:
                 tech_score += 20
                 key_signals.append("Price > SMA50")
             else:
                 tech_score -= 10
             
-            if current['sma_20'] > current['sma_50']:
+            if current['sma_20'] > sma_50_for_comparison:
                 tech_score += 15
                 key_signals.append("Golden Cross")
             else:
@@ -566,9 +654,58 @@ def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str) -> Dict:
                 tech_score -= 20
                 key_signals.append(f"RSI oversold ({rsi:.1f})")
         
-        # ADX - Trend Strength Indicator
+        # ADX - Trend Strength Indicator from TREND timeframe (1h)
         adx = None
-        if high_col and low_col:
+        if df_trend is not None and len(df_trend) >= 28:
+            try:
+                # Find columns in trend df
+                trend_high = None
+                trend_low = None
+                trend_close = None
+                
+                for col in df_trend.columns:
+                    if 'high' in col:
+                        trend_high = col
+                    elif 'low' in col:
+                        trend_low = col
+                    elif 'close' in col:
+                        trend_close = col
+                
+                if trend_high and trend_low and trend_close:
+                    # Calculate True Range on TREND timeframe
+                    df_trend['tr1'] = df_trend[trend_high] - df_trend[trend_low]
+                    df_trend['tr2'] = abs(df_trend[trend_high] - df_trend[trend_close].shift())
+                    df_trend['tr3'] = abs(df_trend[trend_low] - df_trend[trend_close].shift())
+                    df_trend['tr'] = df_trend[['tr1', 'tr2', 'tr3']].max(axis=1)
+                    
+                    # Calculate Directional Movement
+                    df_trend['up_move'] = df_trend[trend_high] - df_trend[trend_high].shift()
+                    df_trend['down_move'] = df_trend[trend_low].shift() - df_trend[trend_low]
+                    
+                    df_trend['plus_dm'] = df_trend['up_move'].where((df_trend['up_move'] > df_trend['down_move']) & (df_trend['up_move'] > 0), 0)
+                    df_trend['minus_dm'] = df_trend['down_move'].where((df_trend['down_move'] > df_trend['up_move']) & (df_trend['down_move'] > 0), 0)
+                    
+                    # Smooth with 14-period
+                    atr_14 = df_trend['tr'].rolling(14).mean()
+                    plus_di = 100 * (df_trend['plus_dm'].rolling(14).mean() / atr_14)
+                    minus_di = 100 * (df_trend['minus_dm'].rolling(14).mean() / atr_14)
+                    
+                    # Calculate ADX
+                    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+                    df_trend['adx'] = dx.rolling(14).mean()
+                    
+                    trend_current = df_trend.iloc[-1]
+                    adx = trend_current['adx'] if pd.notna(trend_current.get('adx')) else None
+                    
+                    if adx is not None:
+                        key_signals.append(f"ADX: {adx:.1f} (1h trend)")
+                        print(f"  ✅ ADX calculated from TREND data: {adx:.1f}")
+                    
+            except Exception as e:
+                print(f"  ⚠️ Could not calculate ADX from trend data: {e}")
+                adx = None
+        elif high_col and low_col:
+            # Fallback: try from intraday if no trend data
             try:
                 # Calculate True Range
                 df['tr1'] = df[high_col] - df[low_col]
@@ -678,7 +815,7 @@ def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str) -> Dict:
             "nearest_resistance": nearest_resistance,
             "rsi": float(current['rsi']) if pd.notna(current['rsi']) else None,
             "sma_20": float(current['sma_20']) if pd.notna(current['sma_20']) else None,
-            "sma_50": float(current['sma_50']) if pd.notna(current['sma_50']) else None,
+            "sma_50": float(sma_50_for_comparison) if pd.notna(sma_50_for_comparison) else None,  # From trend df!
             "adx": float(adx) if adx is not None else None
         }
         

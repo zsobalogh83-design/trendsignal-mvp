@@ -8,12 +8,41 @@ Add to your FastAPI app (api.py):
 """
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/signals", tags=["Signals"])
+
+# ===== IN-MEMORY SIGNAL STORAGE (MVP) =====
+# Will be replaced with database in Phase 2
+_signals_storage: Dict[int, Any] = {}  # id -> TradingSignal
+_signal_id_counter = 0
+
+
+def store_signals(signals: List) -> None:
+    """Store signals in memory with auto-incrementing IDs"""
+    global _signal_id_counter, _signals_storage
+    
+    # Clear old signals (MVP: no persistence)
+    _signals_storage.clear()
+    
+    for signal in signals:
+        _signal_id_counter += 1
+        signal_dict = signal.to_dict() if hasattr(signal, 'to_dict') else signal.__dict__
+        signal_dict['id'] = _signal_id_counter
+        _signals_storage[_signal_id_counter] = signal_dict
+
+
+def get_all_signals() -> List[Dict]:
+    """Get all stored signals"""
+    return list(_signals_storage.values())
+
+
+def get_signal_by_id(signal_id: int) -> Optional[Dict]:
+    """Get single signal by ID"""
+    return _signals_storage.get(signal_id)
 
 
 # ===== REQUEST/RESPONSE MODELS =====
@@ -64,8 +93,11 @@ async def generate_all_signals(request: GenerateSignalsRequest = None):
         # Run analysis with tickers parameter
         result = run_batch_analysis(tickers_to_process)
         
-        if result and 'signals' in result:
-            signals = result['signals']
+        if result:
+            signals = result if isinstance(result, list) else result.get('signals', [])
+            
+            # Store signals in memory
+            store_signals(signals)
             
             return GenerateSignalsResponse(
                 message=f"Successfully generated {len(signals)} signals",
@@ -150,6 +182,76 @@ async def refresh_signals(background_tasks: BackgroundTasks):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to refresh signals: {str(e)}"
+        )
+
+
+# ===== GET ENDPOINTS =====
+
+@router.get("")
+async def get_signals(
+    status: str = "active",
+    limit: int = 50,
+    ticker_symbol: Optional[str] = None
+):
+    """
+    Get all stored signals
+    
+    Query params:
+    - status: active/expired/archived (default: active)
+    - limit: max results (default: 50)
+    - ticker_symbol: filter by ticker (optional)
+    """
+    try:
+        signals = get_all_signals()
+        
+        # Filter by ticker if provided
+        if ticker_symbol:
+            signals = [s for s in signals if s.get('ticker_symbol') == ticker_symbol]
+        
+        # Limit results
+        signals = signals[:limit]
+        
+        return {
+            "signals": signals,
+            "total": len(signals)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting signals: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get signals: {str(e)}"
+        )
+
+
+@router.get("/{signal_id}")
+async def get_signal_by_id_endpoint(signal_id: int):
+    """
+    Get single signal by ID
+    
+    Path param:
+    - signal_id: Signal ID (auto-generated)
+    
+    Returns full signal object with components breakdown
+    """
+    try:
+        signal = get_signal_by_id(signal_id)
+        
+        if not signal:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Signal with ID {signal_id} not found"
+            )
+        
+        return signal
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting signal {signal_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get signal: {str(e)}"
         )
 
 
