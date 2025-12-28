@@ -1,4 +1,4 @@
-"""
+﻿"""
 TrendSignal MVP - Sentiment Analysis Module
 FinBERT-based sentiment analysis with corrected formula
 
@@ -8,7 +8,7 @@ Date: 2024-12-27
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
@@ -207,7 +207,7 @@ class NewsItem:
     
     def get_age_hours(self, reference_time: Optional[datetime] = None) -> float:
         """Calculate news age in hours"""
-        ref = reference_time or datetime.utcnow()
+        ref = reference_time or datetime.now(timezone.utc)
         age = ref - self.published_at
         return age.total_seconds() / 3600
 
@@ -261,7 +261,7 @@ class SentimentAggregator:
                 news_items=[]
             )
         
-        ref_time = reference_time or datetime.utcnow()
+        ref_time = reference_time or datetime.now(timezone.utc)
         
         # Calculate weighted sentiment
         weighted_sum = 0.0
@@ -408,3 +408,4 @@ if __name__ == "__main__":
     print("🧠 FinBERT formula: (pos - neg) / (pos + neu + neg)")
     print("⏱️ Decay model: 0-2h (100%), 2-6h (85%), 6-12h (60%), 12-24h (35%)")
     print("📊 Confidence factors: Volume, Consistency, Credibility, Recency")
+

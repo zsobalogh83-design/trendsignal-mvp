@@ -1,4 +1,4 @@
-"""
+﻿"""
 TrendSignal MVP - Signal Generator Module
 Combines sentiment and technical analysis to generate trading signals
 
@@ -8,7 +8,7 @@ Date: 2024-12-27
 
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, asdict
 
@@ -190,7 +190,7 @@ class SignalGenerator:
         signal = TradingSignal(
             ticker_symbol=ticker_symbol,
             ticker_name=ticker_name,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             decision=decision,
             strength=strength,
             combined_score=combined_score,
@@ -508,3 +508,4 @@ if __name__ == "__main__":
     print("⚖️ Formula: (Sentiment × 70%) + (Technical × 20%) + (Risk × 10%)")
     print("🎯 Decisions: STRONG BUY/SELL, MODERATE BUY/SELL, HOLD")
     print("💰 Auto-calculates: Entry, Stop-Loss, Take-Profit")
+

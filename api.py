@@ -14,6 +14,19 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 from main import run_analysis, run_batch_analysis, get_config
 
+# Import NewsCollector with fixed datetime handling
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+    from src.news_collector import NewsCollector
+    HAS_NEWS_COLLECTOR = True
+    print("✅ NewsCollector imported")
+except Exception as e:
+    HAS_NEWS_COLLECTOR = False
+    print(f"⚠️ NewsCollector not available: {e}")
+
+# Global
+news_collector = None
+
 app = FastAPI(title="TrendSignal API", version="0.1.0")
 
 app.add_middleware(
@@ -41,8 +54,16 @@ def to_python(val):
 
 @app.on_event("startup")
 async def startup_event():
-    print("🚀 TrendSignal FastAPI started - All endpoints ready!")
-    get_config()
+    global news_collector
+    print("🚀 TrendSignal FastAPI started!")
+    config = get_config()
+    
+    if HAS_NEWS_COLLECTOR:
+        try:
+            news_collector = NewsCollector(config)
+            print("✅ NewsCollector initialized (English + Hungarian)")
+        except Exception as e:
+            print(f"⚠️ NewsCollector init failed: {e}")
 
 @app.get("/")
 async def root():
