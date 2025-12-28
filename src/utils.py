@@ -69,6 +69,36 @@ def fetch_multiple_intervals(
     }
 
 
+def fetch_dual_timeframe(ticker_symbol: str) -> Dict[str, Optional[pd.DataFrame]]:
+    """
+    Fetch dual timeframe data for multi-timeframe analysis
+    
+    Intraday (5m): For RSI, SMA20, current price
+    Hourly (1h): For SMA50, ADX, trend context
+    
+    Returns:
+        {
+            'intraday': 5m DataFrame (2 days, ~156 candles),
+            'trend': 1h DataFrame (30 days, ~468 candles)
+        }
+    """
+    print(f"   📊 Fetching dual timeframe data for {ticker_symbol}...")
+    
+    # Intraday data (5m interval, 2 days)
+    df_5m = fetch_price_data(ticker_symbol, interval='5m', period='2d')
+    
+    # Trend data (1h interval, 30 days)  
+    df_1h = fetch_price_data(ticker_symbol, interval='1h', period='30d')
+    
+    if df_5m is not None and df_1h is not None:
+        print(f"   ✅ Dual timeframe: {len(df_5m)} intraday + {len(df_1h)} hourly candles")
+    
+    return {
+        'intraday': df_5m,
+        'trend': df_1h
+    }
+
+
 # ==========================================
 # VALIDATION UTILITIES
 # ==========================================
