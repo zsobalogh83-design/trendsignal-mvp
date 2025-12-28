@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Dashboard } from './pages/Dashboard';
 import { SignalDetail } from './pages/SignalDetail';
 import { NewsFeed } from './pages/NewsFeed';
+import { Configuration } from './pages/Configuration';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -23,6 +24,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/signal/:tickerId" element={<SignalDetail />} />
           <Route path="/news" element={<NewsFeed />} />
+          <Route path="/settings" element={<Configuration />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

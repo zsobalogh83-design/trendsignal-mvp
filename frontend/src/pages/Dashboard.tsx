@@ -82,9 +82,9 @@ export function Dashboard() {
             <Link to="/news" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
               📰 News
             </Link>
-            <a href="#" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
+            <Link to="/settings" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
               ⚙️ Settings
-            </a>
+            </Link>
           </div>
         </div>
 

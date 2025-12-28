@@ -1,0 +1,521 @@
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { FiArrowLeft, FiSave, FiEdit2, FiTrash2, FiPlus } from 'react-icons/fi';
+
+export function Configuration() {
+  const [activeTab, setActiveTab] = useState(0);
+  const [showTickerModal, setShowTickerModal] = useState(false);
+  
+  // Mock data (later connect to API)
+  const [tickers] = useState([
+    { symbol: 'OTP.BD', name: 'OTP Bank Nyrt.', market: 'BÉT', priority: 'high', active: true },
+    { symbol: 'MOL.BD', name: 'MOL Magyar Olaj', market: 'BÉT', priority: 'medium', active: true },
+    { symbol: 'RICHTER', name: 'Richter Gedeon', market: 'BÉT', priority: 'low', active: true },
+  ]);
+
+  const [sentimentWeights, setSentimentWeights] = useState({
+    fresh_0_2h: 100,
+    strong_2_6h: 85,
+    intraday_6_12h: 60,
+    overnight_12_24h: 35,
+  });
+
+  const [componentWeights, setComponentWeights] = useState({
+    sentiment: 70,
+    technical: 20,
+    risk: 10,
+  });
+
+  const tabs = [
+    { id: 0, label: '📊 Tickers' },
+    { id: 1, label: '📰 News Sources' },
+    { id: 2, label: '💭 Sentiment' },
+    { id: 3, label: '📈 Technical' },
+    { id: 4, label: '🎯 Signals' },
+  ];
+
+  const getPriorityBadge = (priority: string) => {
+    const styles = {
+      high: { bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444', text: 'High' },
+      medium: { bg: 'rgba(251, 191, 36, 0.2)', color: '#fbbf24', text: 'Medium' },
+      low: { bg: 'rgba(100, 116, 139, 0.2)', color: '#94a3b8', text: 'Low' },
+    };
+    const style = styles[priority as keyof typeof styles] || styles.medium;
+    
+    return (
+      <span style={{
+        padding: '4px 10px',
+        borderRadius: '6px',
+        fontSize: '11px',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        background: style.bg,
+        color: style.color
+      }}>
+        {style.text}
+      </span>
+    );
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)',
+      color: '#e0e7ff',
+      padding: '20px'
+    }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '20px 0',
+          borderBottom: '1px solid rgba(99, 102, 241, 0.2)',
+          marginBottom: '30px',
+          flexWrap: 'wrap',
+          gap: '16px'
+        }}>
+          <Link to="/" style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            color: '#60a5fa',
+            textDecoration: 'none',
+            fontSize: '14px',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            background: 'rgba(59, 130, 246, 0.1)',
+            transition: 'all 0.3s'
+          }}>
+            <FiArrowLeft /> Dashboard
+          </Link>
+
+          <div style={{
+            fontSize: '28px',
+            fontWeight: '700',
+            background: 'linear-gradient(135deg, #3b82f6 0%, #10b981 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text'
+          }}>
+            ⚙️ Configuration
+          </div>
+
+          <button style={{
+            padding: '10px 24px',
+            borderRadius: '8px',
+            border: 'none',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            color: 'white',
+            transition: 'all 0.3s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+          onClick={() => alert('Settings saved! (Will connect to API)')}
+          >
+            <FiSave /> Save All Changes
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '30px',
+          borderBottom: '2px solid rgba(51, 65, 85, 0.5)',
+          overflowX: 'auto'
+        }}>
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '12px 24px',
+                background: 'transparent',
+                border: 'none',
+                color: activeTab === tab.id ? '#60a5fa' : '#94a3b8',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.3s',
+                borderBottom: activeTab === tab.id ? '3px solid #3b82f6' : '3px solid transparent',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 0 && <TickersTab tickers={tickers} onAddNew={() => setShowTickerModal(true)} getPriorityBadge={getPriorityBadge} />}
+        {activeTab === 1 && <NewsSourcesTab />}
+        {activeTab === 2 && <SentimentTab weights={sentimentWeights} setWeights={setSentimentWeights} />}
+        {activeTab === 3 && <TechnicalTab />}
+        {activeTab === 4 && <SignalsTab componentWeights={componentWeights} setComponentWeights={setComponentWeights} />}
+
+        {/* Add Ticker Modal */}
+        {showTickerModal && (
+          <div style={{
+            position: 'fixed',
+            zIndex: 1000,
+            left: 0,
+            top: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+          onClick={() => setShowTickerModal(false)}
+          >
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              borderRadius: '16px',
+              padding: '32px',
+              maxWidth: '500px',
+              width: '90%'
+            }}
+            onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <div style={{ fontSize: '20px', fontWeight: '700', color: '#f1f5f9' }}>+ Add New Ticker</div>
+                <button onClick={() => setShowTickerModal(false)} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '24px', cursor: 'pointer' }}>×</button>
+              </div>
+              {/* Form content - simplified for MVP */}
+              <div style={{ fontSize: '14px', color: '#cbd5e1', marginBottom: '20px' }}>
+                Ticker management will be implemented in Phase 2
+              </div>
+              <button onClick={() => setShowTickerModal(false)} style={{
+                width: '100%',
+                padding: '10px',
+                borderRadius: '8px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(51, 65, 85, 0.5)',
+                color: '#cbd5e1',
+                cursor: 'pointer'
+              }}>Close</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// Tickers Tab Component
+function TickersTab({ tickers, onAddNew, getPriorityBadge }: any) {
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+      border: '1px solid rgba(99, 102, 241, 0.3)',
+      borderRadius: '16px',
+      padding: '24px'
+    }}>
+      <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+        📊 Ticker Management
+      </div>
+      <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+        Manage the stocks you want to track for trading signals
+      </div>
+
+      <button onClick={onAddNew} style={{
+        padding: '10px 20px',
+        borderRadius: '8px',
+        border: 'none',
+        background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+        color: 'white',
+        fontSize: '14px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        marginBottom: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px'
+      }}>
+        <FiPlus /> Add New Ticker
+      </button>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
+          <thead style={{ background: 'rgba(51, 65, 85, 0.5)' }}>
+            <tr>
+              {['Ticker', 'Name', 'Market', 'Priority', 'Status', 'Actions'].map((header, idx) => (
+                <th key={idx} style={{
+                  textAlign: 'left',
+                  padding: '12px 16px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  color: '#94a3b8',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tickers.map((ticker: any, idx: number) => (
+              <tr key={idx} style={{ borderBottom: idx < tickers.length - 1 ? '1px solid rgba(51, 65, 85, 0.3)' : 'none' }}>
+                <td style={{ padding: '14px 16px' }}>
+                  <strong style={{ color: '#60a5fa' }}>{ticker.symbol}</strong>
+                </td>
+                <td style={{ padding: '14px 16px', fontSize: '14px' }}>{ticker.name}</td>
+                <td style={{ padding: '14px 16px', fontSize: '14px' }}>{ticker.market}</td>
+                <td style={{ padding: '14px 16px' }}>{getPriorityBadge(ticker.priority)}</td>
+                <td style={{ padding: '14px 16px', color: '#10b981' }}>● Active</td>
+                <td style={{ padding: '14px 16px' }}>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(99, 102, 241, 0.3)',
+                      background: 'rgba(51, 65, 85, 0.5)',
+                      color: '#cbd5e1',
+                      cursor: 'pointer',
+                      fontSize: '14px'
+                    }}>
+                      <FiEdit2 size={14} />
+                    </button>
+                    <button style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(99, 102, 241, 0.3)',
+                      background: 'rgba(51, 65, 85, 0.5)',
+                      color: '#cbd5e1',
+                      cursor: 'pointer',
+                      fontSize: '14px'
+                    }}>
+                      <FiTrash2 size={14} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// News Sources Tab
+function NewsSourcesTab() {
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+      border: '1px solid rgba(99, 102, 241, 0.3)',
+      borderRadius: '16px',
+      padding: '24px'
+    }}>
+      <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+        📰 News Source Configuration
+      </div>
+      <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+        Configure news sources, credibility weights, and update frequency
+      </div>
+      <div style={{ fontSize: '14px', color: '#cbd5e1', padding: '40px', textAlign: 'center' }}>
+        News source management coming in Phase 2
+      </div>
+    </div>
+  );
+}
+
+// Sentiment Tab
+function SentimentTab({ weights, setWeights }: any) {
+  return (
+    <div>
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          💭 Sentiment Decay Model
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Time-based decay weights for day trading optimization
+        </div>
+
+        <div style={{
+          background: 'rgba(59, 130, 246, 0.1)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+          borderRadius: '8px',
+          padding: '14px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          color: '#60a5fa'
+        }}>
+          <span>ℹ️</span>
+          <span>Decay weights determine how much recent news impacts the sentiment score</span>
+        </div>
+
+        {[
+          { key: 'fresh_0_2h', label: '0-2 hours (Fresh news)', min: 50, max: 100 },
+          { key: 'strong_2_6h', label: '2-6 hours (Strong momentum)', min: 20, max: 100 },
+          { key: 'intraday_6_12h', label: '6-12 hours (Intraday news)', min: 10, max: 80 },
+          { key: 'overnight_12_24h', label: '12-24 hours (Overnight news 🆕)', min: 0, max: 50 },
+        ].map(item => (
+          <div key={item.key} style={{ margin: '20px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>{item.label}</span>
+              <span style={{ fontSize: '16px', fontWeight: '700', color: '#60a5fa' }}>
+                {weights[item.key]}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={item.min}
+              max={item.max}
+              value={weights[item.key]}
+              onChange={(e) => setWeights({ ...weights, [item.key]: parseInt(e.target.value) })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Technical Tab
+function TechnicalTab() {
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+      border: '1px solid rgba(99, 102, 241, 0.3)',
+      borderRadius: '16px',
+      padding: '24px'
+    }}>
+      <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+        📈 Technical Indicator Weights
+      </div>
+      <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+        Customize the importance of different technical indicators
+      </div>
+      <div style={{ fontSize: '14px', color: '#cbd5e1', padding: '40px', textAlign: 'center' }}>
+        Technical parameter configuration coming in Phase 2
+      </div>
+    </div>
+  );
+}
+
+// Signals Tab
+function SignalsTab({ componentWeights, setComponentWeights }: any) {
+  return (
+    <div>
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          ⚖️ Combined Score Formula
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Customize how sentiment, technical, and risk are combined
+        </div>
+
+        <div style={{
+          background: 'rgba(59, 130, 246, 0.1)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+          borderRadius: '8px',
+          padding: '14px',
+          marginBottom: '20px',
+          color: '#60a5fa'
+        }}>
+          ℹ️ Total weight must equal 100%
+        </div>
+
+        {[
+          { key: 'sentiment', label: 'Sentiment Weight', color: '#10b981' },
+          { key: 'technical', label: 'Technical Weight', color: '#3b82f6' },
+          { key: 'risk', label: 'Risk Weight', color: '#f59e0b' },
+        ].map(item => (
+          <div key={item.key} style={{ margin: '20px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>{item.label}</span>
+              <span style={{ fontSize: '16px', fontWeight: '700', color: item.color }}>
+                {componentWeights[item.key]}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={componentWeights[item.key]}
+              onChange={(e) => {
+                const newValue = parseInt(e.target.value);
+                setComponentWeights({ ...componentWeights, [item.key]: newValue });
+              }}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+          </div>
+        ))}
+
+        <div style={{ 
+          textAlign: 'right', 
+          marginTop: '20px', 
+          fontSize: '14px',
+          color: componentWeights.sentiment + componentWeights.technical + componentWeights.risk === 100 ? '#10b981' : '#ef4444',
+          fontWeight: '600'
+        }}>
+          Total: {componentWeights.sentiment + componentWeights.technical + componentWeights.risk}%
+          {componentWeights.sentiment + componentWeights.technical + componentWeights.risk !== 100 && ' ⚠️ Must equal 100%'}
+        </div>
+      </div>
+
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '20px' }}>
+          🎯 Signal Decision Thresholds
+        </div>
+        <div style={{ fontSize: '14px', color: '#cbd5e1', padding: '20px', textAlign: 'center' }}>
+          Threshold configuration coming in Phase 2
+        </div>
+      </div>
+    </div>
+  );
+}

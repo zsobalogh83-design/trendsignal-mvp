@@ -28,7 +28,7 @@ export function useSignal(tickerId: number): UseQueryResult<Signal> {
 
 export function useNews(params: NewsParams): UseQueryResult<NewsResponse> {
   return useQuery({
-    queryKey: ['news', params],
+    queryKey: ['news', params.ticker_symbol, params.sentiment, params.limit],
     queryFn: () => apiClient.getNews(params),
     staleTime: 0,      // Always consider data stale
     gcTime: 0,         // Don't cache (React Query v5)
