@@ -58,17 +58,17 @@ async def get_signal_config():
         config = get_config()
         
         return SignalConfigResponse(
-            sentiment_weight=config.get("SENTIMENT_WEIGHT", 0.7),
-            technical_weight=config.get("TECHNICAL_WEIGHT", 0.2),
-            risk_weight=config.get("RISK_WEIGHT", 0.1),
-            strong_buy_score=config.get("STRONG_BUY_SCORE", 65),
-            strong_buy_confidence=config.get("STRONG_BUY_CONFIDENCE", 0.75),
-            moderate_buy_score=config.get("MODERATE_BUY_SCORE", 50),
-            moderate_buy_confidence=config.get("MODERATE_BUY_CONFIDENCE", 0.65),
-            strong_sell_score=config.get("STRONG_SELL_SCORE", -65),
-            strong_sell_confidence=config.get("STRONG_SELL_CONFIDENCE", 0.75),
-            moderate_sell_score=config.get("MODERATE_SELL_SCORE", -50),
-            moderate_sell_confidence=config.get("MODERATE_SELL_CONFIDENCE", 0.65)
+            sentiment_weight=config.SENTIMENT_WEIGHT,
+            technical_weight=config.TECHNICAL_WEIGHT,
+            risk_weight=config.RISK_WEIGHT,
+            strong_buy_score=config.STRONG_BUY_SCORE,
+            strong_buy_confidence=config.STRONG_BUY_CONFIDENCE,
+            moderate_buy_score=config.MODERATE_BUY_SCORE,
+            moderate_buy_confidence=config.MODERATE_BUY_CONFIDENCE,
+            strong_sell_score=config.STRONG_SELL_SCORE,
+            strong_sell_confidence=config.STRONG_SELL_CONFIDENCE,
+            moderate_sell_score=config.MODERATE_SELL_SCORE,
+            moderate_sell_confidence=config.MODERATE_SELL_CONFIDENCE
         )
     except Exception as e:
         logger.error(f"Error getting signal config: {e}")
@@ -81,8 +81,9 @@ async def get_signal_config():
 async def update_signal_config(config_update: SignalConfigUpdate):
     """Update signal configuration"""
     try:
-        from src.config import update_config
+        from src.config import get_config, update_config_values
         
+        config = get_config()
         updates = {}
         
         # Check if all weights are provided
@@ -130,7 +131,7 @@ async def update_signal_config(config_update: SignalConfigUpdate):
             )
         
         # Update config
-        update_config(updates)
+        update_config_values(config, updates)
         
         logger.info(f"Config updated: {updates}")
         
@@ -150,23 +151,26 @@ async def update_signal_config(config_update: SignalConfigUpdate):
 async def reset_signal_config():
     """Reset configuration to defaults"""
     try:
-        from src.config import DEFAULT_CONFIG, update_config
+        from src.config import get_config, update_config_values
         
+        config = get_config()
+        
+        # Default values
         updates = {
-            "SENTIMENT_WEIGHT": DEFAULT_CONFIG["SENTIMENT_WEIGHT"],
-            "TECHNICAL_WEIGHT": DEFAULT_CONFIG["TECHNICAL_WEIGHT"],
-            "RISK_WEIGHT": DEFAULT_CONFIG["RISK_WEIGHT"],
-            "STRONG_BUY_SCORE": DEFAULT_CONFIG["STRONG_BUY_SCORE"],
-            "STRONG_BUY_CONFIDENCE": DEFAULT_CONFIG["STRONG_BUY_CONFIDENCE"],
-            "MODERATE_BUY_SCORE": DEFAULT_CONFIG["MODERATE_BUY_SCORE"],
-            "MODERATE_BUY_CONFIDENCE": DEFAULT_CONFIG["MODERATE_BUY_CONFIDENCE"],
-            "STRONG_SELL_SCORE": DEFAULT_CONFIG["STRONG_SELL_SCORE"],
-            "STRONG_SELL_CONFIDENCE": DEFAULT_CONFIG["STRONG_SELL_CONFIDENCE"],
-            "MODERATE_SELL_SCORE": DEFAULT_CONFIG["MODERATE_SELL_SCORE"],
-            "MODERATE_SELL_CONFIDENCE": DEFAULT_CONFIG["MODERATE_SELL_CONFIDENCE"],
+            "SENTIMENT_WEIGHT": 0.7,
+            "TECHNICAL_WEIGHT": 0.2,
+            "RISK_WEIGHT": 0.1,
+            "STRONG_BUY_SCORE": 65,
+            "STRONG_BUY_CONFIDENCE": 0.75,
+            "MODERATE_BUY_SCORE": 50,
+            "MODERATE_BUY_CONFIDENCE": 0.65,
+            "STRONG_SELL_SCORE": -65,
+            "STRONG_SELL_CONFIDENCE": 0.75,
+            "MODERATE_SELL_SCORE": -50,
+            "MODERATE_SELL_CONFIDENCE": 0.65,
         }
         
-        update_config(updates)
+        update_config_values(config, updates)
         
         logger.info("Config reset to defaults")
         
