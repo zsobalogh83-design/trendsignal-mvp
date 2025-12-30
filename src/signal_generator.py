@@ -381,15 +381,29 @@ def generate_signals_for_tickers(
             # ===== TECHNICAL CALCULATION =====
             technical_data_raw = technical_data_dict.get(ticker_symbol, {})
             
-            # Handle dual timeframe data (dict with 'intraday' and 'trend' keys)
+            # Handle multi-timeframe data (dict with 'intraday', 'trend', 'volatility', 'support_resistance')
             if isinstance(technical_data_raw, dict) and 'intraday' in technical_data_raw:
                 df_5m = technical_data_raw['intraday']
                 df_1h = technical_data_raw.get('trend')
+                df_vol = technical_data_raw.get('volatility')
+                df_sr = technical_data_raw.get('support_resistance')
                 
                 if df_5m is not None and len(df_5m) >= 50:
-                    print(f"📊 [{ticker_symbol}] Calculating technical (dual timeframe)...")
-                    print(f"     Intraday: {len(df_5m)} candles (5m) | Trend: {len(df_1h) if df_1h else 0} candles (1h)")
-                    technical_data = calculate_technical_score(df_5m, ticker_symbol, df_trend=df_1h)
+                    print(f"📊 [{ticker_symbol}] Calculating technical (multi-timeframe)...")
+                    timeframe_info = []
+                    if df_5m is not None: timeframe_info.append(f"5m: {len(df_5m)}")
+                    if df_1h is not None: timeframe_info.append(f"1h: {len(df_1h)}")
+                    if df_vol is not None: timeframe_info.append(f"Vol: {len(df_vol)}")
+                    if df_sr is not None: timeframe_info.append(f"15m: {len(df_sr)}")
+                    print(f"     {' | '.join(timeframe_info)}")
+                    
+                    technical_data = calculate_technical_score(
+                        df=df_5m, 
+                        ticker_symbol=ticker_symbol, 
+                        df_trend=df_1h,
+                        df_volatility=df_vol,
+                        df_sr=df_sr
+                    )
                 else:
                     technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
                     print(f"  ⚠️ Insufficient intraday data")
@@ -532,14 +546,22 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
     }
 
 
-def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str, df_trend: Optional[pd.DataFrame] = None) -> Dict:
+def calculate_technical_score(
+    df: pd.DataFrame, 
+    ticker_symbol: str, 
+    df_trend: Optional[pd.DataFrame] = None,
+    df_volatility: Optional[pd.DataFrame] = None,
+    df_sr: Optional[pd.DataFrame] = None
+) -> Dict:
     """
-    Calculate technical score from price DataFrame - DUAL TIMEFRAME SUPPORT
+    Calculate technical score from MULTI-TIMEFRAME data
     
     Args:
         df: Intraday DataFrame (5m) for RSI, SMA20, current price
         ticker_symbol: Ticker symbol
-        df_trend: Optional hourly DataFrame (1h) for SMA50, ADX (trend context)
+        df_trend: Hourly DataFrame (1h, 30d) for SMA50, ADX
+        df_volatility: Hourly DataFrame (1h, 3d) for ATR
+        df_sr: 15-min DataFrame (15m, 3d) for Support/Resistance
     """
     try:
         # Use intraday df as primary
@@ -738,20 +760,89 @@ def calculate_technical_score(df: pd.DataFrame, ticker_symbol: str, df_trend: Op
                 print(f"  ⚠️ Could not calculate ADX: {e}")
                 adx = None
         
-        # ATR
-        if high_col and low_col:
+        # ATR - from VOLATILITY timeframe (1h, 3d)
+        if df_volatility is not None and len(df_volatility) >= 14:
+            try:
+                # Find columns in volatility df
+                vol_high = None
+                vol_low = None
+                vol_close = None
+                
+                for col in df_volatility.columns:
+                    if 'high' in col:
+                        vol_high = col
+                    elif 'low' in col:
+                        vol_low = col
+                    elif 'close' in col:
+                        vol_close = col
+                
+                if vol_high and vol_low and vol_close:
+                    high_low = df_volatility[vol_high] - df_volatility[vol_low]
+                    atr = high_low.rolling(14).mean().iloc[-1]
+                    atr_pct = (atr / df_volatility[vol_close].iloc[-1]) * 100
+                    print(f"  ✅ ATR from VOLATILITY data (1h, 3d): {atr_pct:.2f}%")
+                else:
+                    # Fallback to intraday
+                    if high_col and low_col:
+                        high_low = df[high_col] - df[low_col]
+                        atr = high_low.rolling(14).mean().iloc[-1]
+                        atr_pct = (atr / current[close_col]) * 100
+                    else:
+                        atr = current[close_col] * 0.02
+                        atr_pct = 2.0
+            except Exception as e:
+                print(f"  ⚠️ Could not calculate ATR from volatility data: {e}")
+                atr = current[close_col] * 0.02
+                atr_pct = 2.0
+        elif high_col and low_col:
+            # Fallback: use intraday
             high_low = df[high_col] - df[low_col]
             atr = high_low.rolling(14).mean().iloc[-1]
             atr_pct = (atr / current[close_col]) * 100
-            
-            # Support/Resistance
+        else:
+            atr = current[close_col] * 0.02
+            atr_pct = 2.0
+        
+        # Support/Resistance - from S/R timeframe (15m, 3d)
+        if df_sr is not None and len(df_sr) >= 50:
+            try:
+                # Find columns in S/R df
+                sr_high = None
+                sr_low = None
+                
+                for col in df_sr.columns:
+                    if 'high' in col:
+                        sr_high = col
+                    elif 'low' in col:
+                        sr_low = col
+                
+                if sr_high and sr_low:
+                    recent_lows = df_sr[sr_low].tail(100)  # Last 100 candles = 25 hours
+                    recent_highs = df_sr[sr_high].tail(100)
+                    nearest_support = float(recent_lows.min())
+                    nearest_resistance = float(recent_highs.max())
+                    print(f"  ✅ S/R from 15m data: Support ${nearest_support:.2f}, Resistance ${nearest_resistance:.2f}")
+                else:
+                    # Fallback to intraday
+                    if high_col and low_col:
+                        recent_lows = df[low_col].tail(20)
+                        recent_highs = df[high_col].tail(20)
+                        nearest_support = float(recent_lows.min())
+                        nearest_resistance = float(recent_highs.max())
+                    else:
+                        nearest_support = current[close_col] * 0.97
+                        nearest_resistance = current[close_col] * 1.03
+            except Exception as e:
+                print(f"  ⚠️ Could not calculate S/R from 15m data: {e}")
+                nearest_support = current[close_col] * 0.97
+                nearest_resistance = current[close_col] * 1.03
+        elif high_col and low_col:
+            # Fallback: use intraday
             recent_lows = df[low_col].tail(20)
             recent_highs = df[high_col].tail(20)
             nearest_support = float(recent_lows.min())
             nearest_resistance = float(recent_highs.max())
         else:
-            atr = current[close_col] * 0.02
-            atr_pct = 2.0
             nearest_support = current[close_col] * 0.97
             nearest_resistance = current[close_col] * 1.03
         

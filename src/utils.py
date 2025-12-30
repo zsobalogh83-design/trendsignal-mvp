@@ -71,31 +71,49 @@ def fetch_multiple_intervals(
 
 def fetch_dual_timeframe(ticker_symbol: str) -> Dict[str, Optional[pd.DataFrame]]:
     """
-    Fetch dual timeframe data for multi-timeframe analysis
+    Fetch MULTI-timeframe data for comprehensive analysis
     
-    Intraday (5m): For RSI, SMA20, current price
-    Hourly (1h): For SMA50, ADX, trend context
+    Timeframe strategy:
+    - Intraday (5m, 2d): RSI, SMA20, current price
+    - Trend (1h, 30d): SMA50, ADX
+    - Volatility (1h, 3d): ATR
+    - S/R Levels (15m, 3d): Support/Resistance
     
     Returns:
         {
-            'intraday': 5m DataFrame (2 days, ~156 candles),
-            'trend': 1h DataFrame (30 days, ~468 candles)
+            'intraday': 5m DataFrame (~156 candles),
+            'trend': 1h DataFrame (~468 candles),
+            'volatility': 1h DataFrame (~45 candles),
+            'support_resistance': 15m DataFrame (~180 candles)
         }
     """
-    print(f"   📊 Fetching dual timeframe data for {ticker_symbol}...")
+    print(f"   📊 Fetching multi-timeframe data for {ticker_symbol}...")
     
-    # Intraday data (5m interval, 2 days)
+    # Intraday momentum (5m, 2 days)
     df_5m = fetch_price_data(ticker_symbol, interval='5m', period='2d')
     
-    # Trend data (1h interval, 30 days)  
-    df_1h = fetch_price_data(ticker_symbol, interval='1h', period='30d')
+    # Trend context (1h, 30 days)  
+    df_1h_trend = fetch_price_data(ticker_symbol, interval='1h', period='30d')
     
-    if df_5m is not None and df_1h is not None:
-        print(f"   ✅ Dual timeframe: {len(df_5m)} intraday + {len(df_1h)} hourly candles")
+    # Volatility context (1h, 3 days) - focused on recent volatility
+    df_1h_vol = fetch_price_data(ticker_symbol, interval='1h', period='3d')
+    
+    # S/R levels (15m, 3 days) - fine-grained S/R detection
+    df_15m = fetch_price_data(ticker_symbol, interval='15m', period='3d')
+    
+    candle_summary = []
+    if df_5m is not None: candle_summary.append(f"5m: {len(df_5m)}")
+    if df_1h_trend is not None: candle_summary.append(f"1h: {len(df_1h_trend)}")
+    if df_1h_vol is not None: candle_summary.append(f"1h-vol: {len(df_1h_vol)}")
+    if df_15m is not None: candle_summary.append(f"15m: {len(df_15m)}")
+    
+    print(f"   ✅ Multi-timeframe: {' | '.join(candle_summary)}")
     
     return {
         'intraday': df_5m,
-        'trend': df_1h
+        'trend': df_1h_trend,
+        'volatility': df_1h_vol,
+        'support_resistance': df_15m
     }
 
 
