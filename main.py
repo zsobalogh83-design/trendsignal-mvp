@@ -51,18 +51,19 @@ def run_analysis(
     print(f"   Collected {len(news_items)} news items")
     print()
     
-    # 2. Fetch price data (DUAL TIMEFRAME)
-    print("📊 Step 2: Fetching price data (dual timeframe)...")
-    price_data_dual = fetch_dual_timeframe(ticker_symbol)
+    # 2. Fetch price data (MULTI-TIMEFRAME)
+    print("📊 Step 2: Fetching price data (multi-timeframe)...")
+    price_data_multi = fetch_dual_timeframe(ticker_symbol)
     
-    price_df_5m = price_data_dual['intraday']
-    price_df_1h = price_data_dual['trend']
+    price_df_5m = price_data_multi['intraday']
+    price_df_1h = price_data_multi['trend']
+    price_df_vol = price_data_multi['volatility']
+    price_df_sr = price_data_multi['support_resistance']
     
     if price_df_5m is None or len(price_df_5m) < 50:
         print("❌ Insufficient intraday price data, cannot generate signal")
         return None
     
-    print(f"   ✅ 5m: {len(price_df_5m)} candles | 1h: {len(price_df_1h) if price_df_1h else 0} candles")
     print()
     
     # 3. Generate signal
@@ -78,8 +79,14 @@ def run_analysis(
     # Aggregate sentiment from news
     sentiment_data = aggregate_sentiment_from_news(news_items)
     
-    # Calculate technical score from DUAL timeframe
-    technical_data = calculate_technical_score(price_df_5m, ticker_symbol, df_trend=price_df_1h)
+    # Calculate technical score from MULTI timeframe
+    technical_data = calculate_technical_score(
+        df=price_df_5m, 
+        ticker_symbol=ticker_symbol, 
+        df_trend=price_df_1h,
+        df_volatility=price_df_vol,
+        df_sr=price_df_sr
+    )
     
     # Calculate risk score
     if technical_data.get("current_price") and technical_data.get("atr_pct"):
