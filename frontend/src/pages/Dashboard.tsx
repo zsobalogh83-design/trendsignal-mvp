@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSignals } from '../hooks/useApi';
 import { FiRefreshCw, FiStar } from 'react-icons/fi';
+import { useQueryClient } from '@tanstack/react-query';
 
 export function Dashboard() {
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<'active' | 'expired' | 'archived'>('active');
   const [activeFilter, setActiveFilter] = useState('all');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -21,7 +23,7 @@ export function Dashboard() {
     return true;
   });
 
-  // ===== REFRESH SIGNALS - Generate + Fetch =====
+  // ===== REFRESH SIGNALS - Generate + Invalidate Cache =====
   const handleRefreshSignals = async () => {
     setIsGenerating(true);
     
@@ -40,10 +42,13 @@ export function Dashboard() {
       const result = await generateResponse.json();
       console.log('✅ Signals generated:', result);
       
-      // Step 2: Refetch the updated signals list
+      // Step 2: INVALIDATE cache to force fresh fetch
+      await queryClient.invalidateQueries({ queryKey: ['signals'] });
+      
+      // Step 3: Refetch the updated signals list
       await refetch();
       
-      console.log('✅ Dashboard refreshed');
+      console.log('✅ Dashboard refreshed with fresh data');
       
     } catch (error) {
       console.error('❌ Error refreshing signals:', error);
@@ -200,9 +205,8 @@ export function Dashboard() {
         {!isLoading && filteredSignals.length > 0 && (
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
-            gap: '25px',
-            marginTop: '30px'
+            gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
+            gap: '20px'
           }}>
             {filteredSignals.map((signal: any) => (
               <div
@@ -212,94 +216,86 @@ export function Dashboard() {
                   border: '1px solid rgba(99, 102, 241, 0.3)',
                   borderRadius: '16px',
                   padding: '24px',
-                  position: 'relative',
-                  overflow: 'hidden',
                   transition: 'all 0.3s',
                   cursor: 'pointer'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#3b82f6';
-                  e.currentTarget.style.transform = 'translateY(-5px)';
-                  e.currentTarget.style.boxShadow = '0 10px 40px rgba(59, 130, 246, 0.3)';
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = '0 8px 24px rgba(59, 130, 246, 0.3)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.3)';
                   e.currentTarget.style.transform = 'translateY(0)';
                   e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                {/* Card Header */}
+                {/* Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
                   <div>
-                    <div style={{ fontSize: '24px', fontWeight: '700', color: '#f1f5f9', marginBottom: '4px' }}>
+                    <div style={{ fontSize: '20px', fontWeight: '700', color: '#f1f5f9', marginBottom: '6px' }}>
                       {signal.ticker_symbol}
                     </div>
-                    <div style={{ fontSize: '13px', color: '#64748b' }}>
-                      {signal.ticker_symbol === 'AAPL' && 'Apple Inc.'}
-                      {signal.ticker_symbol === 'MSFT' && 'Microsoft Corp.'}
-                      {signal.ticker_symbol === 'GOOGL' && 'Alphabet Inc.'}
-                    </div>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '4px 12px',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      background: signal.decision === 'BUY' ? 'rgba(16, 185, 129, 0.2)' : signal.decision === 'SELL' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(148, 163, 184, 0.2)',
+                      color: signal.decision === 'BUY' ? '#10b981' : signal.decision === 'SELL' ? '#ef4444' : '#94a3b8',
+                      border: `1px solid ${signal.decision === 'BUY' ? 'rgba(16, 185, 129, 0.3)' : signal.decision === 'SELL' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(148, 163, 184, 0.3)'}`
+                    }}>
+                      {getDecisionIcon(signal.decision)} {signal.strength} {signal.decision}
+                    </span>
                   </div>
-                  <button style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', opacity: 0.5 }}>
+                  <button style={{
+                    background: 'rgba(251, 191, 36, 0.1)',
+                    border: '1px solid rgba(251, 191, 36, 0.3)',
+                    borderRadius: '6px',
+                    padding: '6px',
+                    cursor: 'pointer',
+                    color: '#fbbf24'
+                  }}>
                     <FiStar />
                   </button>
-                </div>
-
-                {/* Decision Badge */}
-                <div style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  marginBottom: '20px',
-                  border: '1px solid'
-                }}
-                className={getDecisionBadgeClass(signal.decision, signal.strength)}
-                >
-                  <span>{getDecisionIcon(signal.decision)}</span>
-                  <span>{signal.strength} {signal.decision}</span>
                 </div>
 
                 {/* Score Section */}
                 <div style={{ marginBottom: '25px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <div style={{
-                      fontSize: '32px',
+                    <span style={{ fontSize: '13px', color: '#64748b' }}>Combined Score</span>
+                    <span style={{
+                      fontSize: '24px',
                       fontWeight: '700',
-                      background: 'linear-gradient(135deg, #10b981 0%, #3b82f6 100%)',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      backgroundClip: 'text'
+                      color: signal.combined_score > 0 ? '#10b981' : signal.combined_score < 0 ? '#ef4444' : '#94a3b8'
                     }}>
                       {signal.combined_score > 0 ? '+' : ''}{signal.combined_score.toFixed(1)}
-                    </div>
-                    <div style={{
-                      background: 'rgba(59, 130, 246, 0.2)',
-                      color: '#60a5fa',
-                      padding: '6px 12px',
-                      borderRadius: '6px',
-                      fontSize: '13px',
-                      fontWeight: '600'
-                    }}>
-                      {(signal.overall_confidence * 100).toFixed(0)}% confidence
-                    </div>
+                    </span>
                   </div>
-                  <div style={{
-                    height: '8px',
-                    background: 'rgba(51, 65, 85, 0.5)',
+                  
+                  <div style={{ 
+                    width: '100%', 
+                    height: '8px', 
+                    background: 'rgba(51, 65, 85, 0.5)', 
                     borderRadius: '4px',
-                    overflow: 'hidden'
+                    overflow: 'hidden',
+                    marginBottom: '8px'
                   }}>
                     <div style={{
                       height: '100%',
                       width: `${scoreToPercentage(signal.combined_score)}%`,
-                      background: 'linear-gradient(90deg, #10b981 0%, #3b82f6 100%)',
-                      borderRadius: '4px',
-                      transition: 'width 1s ease-out'
+                      background: signal.combined_score > 0 
+                        ? 'linear-gradient(90deg, #10b981 0%, #059669 100%)'
+                        : signal.combined_score < 0
+                        ? 'linear-gradient(90deg, #ef4444 0%, #dc2626 100%)'
+                        : '#94a3b8',
+                      transition: 'width 0.5s ease'
                     }}></div>
+                  </div>
+
+                  <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'right' }}>
+                    Confidence: {(signal.overall_confidence * 100).toFixed(0)}%
                   </div>
                 </div>
 

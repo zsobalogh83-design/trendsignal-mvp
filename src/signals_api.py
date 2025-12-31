@@ -75,7 +75,7 @@ def save_signal_to_db(signal, db: Session):
             # Use the complete reasoning from SignalGenerator (includes key_news, key_signals, etc.)
             reasoning = signal.reasoning
             
-            # CRITICAL: Also include components for indicator values (RSI, MACD, SMA, etc.)
+            # Also include components if available (for indicator values like RSI, MACD, etc.)
             if signal.components:
                 reasoning["components"] = signal.components
         else:

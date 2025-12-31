@@ -135,49 +135,129 @@ def calculate_stochastic(
 
 def detect_support_resistance(
     df: pd.DataFrame,
-    lookback_days: int = 90,
-    proximity_pct: float = 0.02
+    lookback_days: int = 180,  # 6 months for swing trading
+    proximity_pct: float = 0.04  # 4% clustering tolerance
 ) -> Dict[str, list]:
     """
-    Detect support and resistance levels using local extrema
+    Detect support and resistance levels using blue chip swing trading best practices.
+    
+    Strategy:
+    - Stricter pivot detection (order=7, requires 7 bars on each side)
+    - 6-month lookback for swing trading
+    - DBSCAN-style clustering with 4% tolerance
+    - Returns ALL detected S/R levels with distance information
+    - User/system decides which levels are significant enough to use
     
     Args:
         df: DataFrame with OHLC data
-        lookback_days: Days to look back
-        proximity_pct: Cluster proximity threshold (2%)
+        lookback_days: Days to look back (default 180 = 6 months)
+        proximity_pct: Cluster proximity threshold (default 4%)
     
     Returns:
-        {'support': [levels], 'resistance': [levels]}
+        {
+            'support': [{'price': X, 'distance_pct': Y}, ...],
+            'resistance': [{'price': X, 'distance_pct': Y}, ...]
+        }
+        Returns levels sorted by proximity to current price
     """
     # Get recent data
     recent_df = df.tail(lookback_days) if len(df) > lookback_days else df
     
+    if len(recent_df) < 30:
+        logger.warning(f"Insufficient data for S/R: {len(recent_df)} bars")
+        return {'support': [], 'resistance': []}
+    
+    # Extract current price as scalar (handle MultiIndex)
+    try:
+        current_price = float(recent_df['Close'].iloc[-1])
+    except (TypeError, ValueError):
+        # Handle MultiIndex case
+        if isinstance(recent_df['Close'].iloc[-1], pd.Series):
+            current_price = float(recent_df['Close'].iloc[-1].iloc[0])
+        else:
+            current_price = float(recent_df['Close'].iloc[-1])
+    
+    # STRICTER PIVOT DETECTION: order=7 (requires 7 bars on each side)
+    order = 7
     supports = []
     resistances = []
     
-    # Find local minima (support)
-    for i in range(2, len(recent_df) - 2):
-        if (recent_df['Low'].iloc[i] < recent_df['Low'].iloc[i-1] and
-            recent_df['Low'].iloc[i] < recent_df['Low'].iloc[i-2] and
-            recent_df['Low'].iloc[i] < recent_df['Low'].iloc[i+1] and
-            recent_df['Low'].iloc[i] < recent_df['Low'].iloc[i+2]):
-            supports.append(recent_df['Low'].iloc[i])
+    # Find local minima (support) with order=7
+    for i in range(order, len(recent_df) - order):
+        window_values = recent_df['Low'].iloc[i-order:i+order+1]
+        current_value = recent_df['Low'].iloc[i]
+        
+        # Extract scalar values (handle MultiIndex)
+        try:
+            min_value = float(window_values.min())
+            current_float = float(current_value)
+        except (TypeError, ValueError):
+            if isinstance(window_values.min(), pd.Series):
+                min_value = float(window_values.min().iloc[0])
+            else:
+                min_value = float(window_values.min())
+            
+            if isinstance(current_value, pd.Series):
+                current_float = float(current_value.iloc[0])
+            else:
+                current_float = float(current_value)
+        
+        if current_float == min_value:
+            supports.append(current_float)
     
-    # Find local maxima (resistance)
-    for i in range(2, len(recent_df) - 2):
-        if (recent_df['High'].iloc[i] > recent_df['High'].iloc[i-1] and
-            recent_df['High'].iloc[i] > recent_df['High'].iloc[i-2] and
-            recent_df['High'].iloc[i] > recent_df['High'].iloc[i+1] and
-            recent_df['High'].iloc[i] > recent_df['High'].iloc[i+2]):
-            resistances.append(recent_df['High'].iloc[i])
+    # Find local maxima (resistance) with order=7
+    for i in range(order, len(recent_df) - order):
+        window_values = recent_df['High'].iloc[i-order:i+order+1]
+        current_value = recent_df['High'].iloc[i]
+        
+        # Extract scalar values (handle MultiIndex)
+        try:
+            max_value = float(window_values.max())
+            current_float = float(current_value)
+        except (TypeError, ValueError):
+            if isinstance(window_values.max(), pd.Series):
+                max_value = float(window_values.max().iloc[0])
+            else:
+                max_value = float(window_values.max())
+            
+            if isinstance(current_value, pd.Series):
+                current_float = float(current_value.iloc[0])
+            else:
+                current_float = float(current_value)
+        
+        if current_float == max_value:
+            resistances.append(current_float)
     
-    # Cluster nearby levels
+    # CLUSTER nearby levels with 4% tolerance
     supports = cluster_levels(supports, proximity_pct)
     resistances = cluster_levels(resistances, proximity_pct)
     
+    # BUILD RESULTS with distance information
+    support_levels = []
+    for s in supports:
+        if s < current_price:
+            distance_pct = (current_price - s) / current_price * 100
+            support_levels.append({
+                'price': round(s, 2),
+                'distance_pct': round(distance_pct, 2)
+            })
+    
+    resistance_levels = []
+    for r in resistances:
+        if r > current_price:
+            distance_pct = (r - current_price) / current_price * 100
+            resistance_levels.append({
+                'price': round(r, 2),
+                'distance_pct': round(distance_pct, 2)
+            })
+    
+    # Sort by proximity (nearest first)
+    support_levels.sort(key=lambda x: x['distance_pct'])
+    resistance_levels.sort(key=lambda x: x['distance_pct'])
+    
     return {
-        'support': sorted(supports)[:5],  # Top 5
-        'resistance': sorted(resistances, reverse=True)[:5]
+        'support': support_levels[:5],  # Top 5 nearest
+        'resistance': resistance_levels[:5]
     }
 
 
@@ -250,8 +330,14 @@ class TechnicalAnalyzer:
         # Calculate all indicators
         indicators = self._calculate_all_indicators(df)
         
-        # Detect support/resistance
-        sr_levels = detect_support_resistance(df)
+        # Detect support/resistance with blue chip swing trading parameters
+        sr_config = self.config.support_resistance if hasattr(self.config, 'support_resistance') else {}
+        sr_levels = detect_support_resistance(
+            df,
+            lookback_days=sr_config.get('lookback_days', 180),  # 6 months default
+            proximity_pct=sr_config.get('proximity_pct', 0.04),  # 4% default
+            min_distance_pct=sr_config.get('min_distance_pct', 0.025)  # 2.5% default
+        )
         
         # Calculate component scores
         trend_score = self._calculate_trend_score(indicators, df)

@@ -1,12 +1,13 @@
 """
-TrendSignal MVP - Enhanced News Collector
-English + Hungarian news with timezone-aware datetime handling
+TrendSignal MVP - Enhanced News Collector with Database Integration
+English + Hungarian news with timezone-aware datetime handling and DB persistence
 """
 
 import requests
 import pandas as pd
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, TYPE_CHECKING
+from sqlalchemy.orm import Session
 
 import sys
 import os
@@ -28,10 +29,11 @@ if TYPE_CHECKING:
 
 
 class NewsCollector:
-    """Enhanced collector with Hungarian support and timezone-aware datetimes"""
+    """Enhanced collector with Hungarian support, timezone-aware datetimes, and DB persistence"""
     
-    def __init__(self, config: Optional[TrendSignalConfig] = None):
+    def __init__(self, config: Optional[TrendSignalConfig] = None, db: Optional[Session] = None):
         self.config = config or get_config()
+        self.db = db  # Optional database session
         
         # Initialize Hungarian collector
         if HAS_HUNGARIAN:
@@ -48,11 +50,22 @@ class NewsCollector:
         self,
         ticker_symbol: str,
         company_name: str,
-        lookback_hours: int = 24
+        lookback_hours: int = 24,
+        save_to_db: bool = True
     ) -> List[NewsItem]:
         """
         Collect news from all sources (English + Hungarian if applicable)
         All datetimes are timezone-aware (UTC)
+        Optionally saves to database
+        
+        Args:
+            ticker_symbol: Stock ticker
+            company_name: Company name
+            lookback_hours: Hours to look back
+            save_to_db: If True and db session available, save to database
+        
+        Returns:
+            List of NewsItem objects
         """
         from src.multilingual_sentiment import MultilingualSentimentAnalyzer
         
@@ -89,7 +102,27 @@ class NewsCollector:
         # Sort by date
         all_news.sort(key=lambda x: x.published_at, reverse=True)
         
+        # Save to database if enabled
+        if save_to_db and self.db and len(all_news) > 0:
+            self._save_news_to_db(all_news, ticker_symbol)
+        
         return all_news
+    
+    def _save_news_to_db(self, news_items: List[NewsItem], ticker_symbol: str):
+        """Save news items to database"""
+        try:
+            from src.db_helpers import save_news_item_to_db
+            
+            saved_count = 0
+            for item in news_items:
+                if save_news_item_to_db(item, ticker_symbol, self.db):
+                    saved_count += 1
+            
+            if saved_count > 0:
+                print(f"💾 Saved {saved_count} news items to database")
+                
+        except Exception as e:
+            print(f"⚠️ Could not save news to DB: {e}")
     
     def _collect_from_newsapi(
         self,
@@ -238,7 +271,8 @@ class NewsCollector:
 
 
 if __name__ == "__main__":
-    print("✅ Enhanced News Collector")
-    print("🌍 English: NewsAPI + Alpha Vantage")
+    print("✅ Enhanced News Collector with Database Integration")
+    print("🌐 English: NewsAPI + Alpha Vantage")
     print("🇭🇺 Hungarian: Portfolio.hu + RSS feeds")
     print("🕐 Timezone-aware datetime handling")
+    print("💾 Database persistence support")
