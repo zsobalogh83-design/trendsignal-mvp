@@ -17,6 +17,44 @@ logger = logging.getLogger(__name__)
 
 
 # ==========================================
+# HELPER: S/R FORMAT CONVERSION
+# ==========================================
+
+def parse_support_resistance(risk_data: Dict) -> Tuple[Optional[float], Optional[float]]:
+    """
+    Parse support/resistance from risk_data, handling both old and new formats.
+    
+    OLD FORMAT (from calculate_risk_score):
+        risk_data = {"nearest_support": 2935.0, "nearest_resistance": 2945.0}
+    
+    NEW FORMAT (from detect_support_resistance):
+        risk_data = {
+            "support": [{"price": 2935, "distance_pct": 0.03}],
+            "resistance": [{"price": 2945, "distance_pct": 0.31}]
+        }
+    
+    Returns:
+        (nearest_support, nearest_resistance) as floats or None
+    """
+    # Try NEW format first
+    if 'support' in risk_data and isinstance(risk_data['support'], list):
+        support_levels = risk_data.get('support', [])
+        resistance_levels = risk_data.get('resistance', [])
+        
+        nearest_support = support_levels[0]['price'] if support_levels else None
+        nearest_resistance = resistance_levels[0]['price'] if resistance_levels else None
+        
+        return nearest_support, nearest_resistance
+    
+    # Fall back to OLD format
+    else:
+        nearest_support = risk_data.get('nearest_support')
+        nearest_resistance = risk_data.get('nearest_resistance')
+        
+        return nearest_support, nearest_resistance
+
+
+# ==========================================
 # DATA CLASSES
 # ==========================================
 
@@ -185,16 +223,46 @@ class SignalGenerator:
         print(f"[{ticker_symbol}] Confidences: S={sentiment_confidence:.2f}, T={technical_confidence:.2f}, R={risk_confidence:.2f}")
         print(f"[{ticker_symbol}] OVERALL CONFIDENCE: {overall_confidence:.2%}")
         
-        # ===== DETERMINE DECISION =====
-        decision, strength = self._determine_decision(combined_score, overall_confidence)
+        # ===== PRELIMINARY DECISION (for entry/exit calculation) =====
+        # Need basic decision to know if BUY or SELL for stop-loss calculation
+        # HOLD zone: -15 to +15 (neutral/no clear trend)
+        # TODO: Make HOLD_ZONE_THRESHOLD configurable in Phase 2
+        HOLD_ZONE_THRESHOLD = 15
         
-        print(f"[{ticker_symbol}] DECISION: {strength} {decision} (Conf: {overall_confidence:.0%})")
+        if combined_score >= HOLD_ZONE_THRESHOLD:
+            preliminary_decision = "BUY"
+        elif combined_score <= -HOLD_ZONE_THRESHOLD:
+            preliminary_decision = "SELL"
+        else:  # -15 < score < 15
+            preliminary_decision = "HOLD"
+        
+        logger.info(f"Preliminary decision: {preliminary_decision} (Score: {combined_score:.1f}, Threshold: ±{HOLD_ZONE_THRESHOLD})")
         
         # ===== CALCULATE ENTRY/EXIT LEVELS =====
         current_price = technical_data.get("current_price")
         entry_price, stop_loss, take_profit, rr_ratio = self._calculate_levels(
-            decision, current_price, technical_data, risk_data
+            preliminary_decision, current_price, technical_data, risk_data
         )
+        
+        # DEBUG: Log calculated levels
+        print(f"[{ticker_symbol}] 📊 Entry/Exit Levels:")
+        print(f"   Entry: ${entry_price if entry_price else 'None'}")
+        print(f"   Stop-Loss: ${stop_loss if stop_loss else 'None'} ({((stop_loss/entry_price-1)*100) if (entry_price and stop_loss) else 0:+.2f}%)")
+        print(f"   Take-Profit: ${take_profit if take_profit else 'None'} ({((take_profit/entry_price-1)*100) if (entry_price and take_profit) else 0:+.2f}%)")
+        print(f"   R:R Ratio: {rr_ratio if rr_ratio else 'None'}")
+        
+        # ===== DETERMINE FINAL DECISION & STRENGTH =====
+        # Now we can use entry/exit levels to assess setup quality
+        decision, strength = self._determine_decision(
+            combined_score, 
+            overall_confidence,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            rr_ratio=rr_ratio
+        )
+        
+        print(f"[{ticker_symbol}] DECISION: {strength} {decision} (Conf: {overall_confidence:.0%})")
         
         # ===== BUILD REASONING =====
         reasoning = {
@@ -274,8 +342,30 @@ class SignalGenerator:
         
         return signal
     
-    def _determine_decision(self, combined_score: float, confidence: float) -> Tuple[str, str]:
-        """Determine BUY/SELL/HOLD decision using DYNAMIC thresholds"""
+    def _determine_decision(
+        self, 
+        combined_score: float, 
+        confidence: float,
+        entry_price: Optional[float] = None,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        rr_ratio: Optional[float] = None
+    ) -> Tuple[str, str]:
+        """
+        Determine BUY/SELL/HOLD decision using DYNAMIC thresholds
+        AND swing trading setup quality assessment
+        
+        Strength levels consider:
+        1. Combined score (sentiment + technical + risk)
+        2. Confidence level
+        3. Setup quality (S/R distances, R:R ratio) ← NEW!
+        
+        Args:
+            combined_score: -100 to +100
+            confidence: 0.0 to 1.0
+            entry_price, stop_loss, take_profit: Price levels (optional)
+            rr_ratio: Risk/Reward ratio (optional)
+        """
         strong_buy_score = self.config.STRONG_BUY_SCORE
         strong_buy_conf = self.config.STRONG_BUY_CONFIDENCE
         moderate_buy_score = self.config.MODERATE_BUY_SCORE
@@ -286,21 +376,92 @@ class SignalGenerator:
         moderate_sell_score = self.config.MODERATE_SELL_SCORE
         moderate_sell_conf = self.config.MODERATE_SELL_CONFIDENCE
         
-        if combined_score >= strong_buy_score and confidence >= strong_buy_conf:
-            return "BUY", "STRONG"
-        elif combined_score >= moderate_buy_score and confidence >= moderate_buy_conf:
-            return "BUY", "MODERATE"
-        elif combined_score <= strong_sell_score and confidence >= strong_sell_conf:
-            return "SELL", "STRONG"
-        elif combined_score <= moderate_sell_score and confidence >= moderate_sell_conf:
-            return "SELL", "MODERATE"
-        else:
-            if combined_score > 0 and combined_score < moderate_buy_score:
-                return "BUY", "WEAK"
-            elif combined_score < 0 and combined_score > moderate_sell_score:
-                return "SELL", "WEAK"
+        # ===== SETUP QUALITY ASSESSMENT =====
+        setup_quality = "unknown"
+        
+        if entry_price and stop_loss and take_profit and rr_ratio:
+            # Calculate S/R distances
+            stop_dist_pct = abs((entry_price - stop_loss) / entry_price * 100)
+            target_dist_pct = abs((take_profit - entry_price) / entry_price * 100)
+            
+            # DEBUG: Log setup quality calculation
+            logger.info(f"Setup Quality: Stop={stop_dist_pct:.2f}%, Target={target_dist_pct:.2f}%, R:R={rr_ratio:.2f}")
+            
+            # Assess setup quality for swing trading
+            good_setup = (
+                2.0 <= stop_dist_pct <= 6.0 and  # Stop in ideal swing range
+                target_dist_pct >= 3.0 and        # Target far enough
+                rr_ratio >= 1.5                   # Good risk/reward
+            )
+            
+            poor_setup = (
+                stop_dist_pct > 8.0 or            # Stop too far (support broken?)
+                target_dist_pct < 2.0 or          # Target too close
+                rr_ratio < 1.0                    # Bad risk/reward
+            )
+            
+            if good_setup:
+                setup_quality = "good"
+                logger.info(f"✅ GOOD swing setup")
+            elif poor_setup:
+                setup_quality = "poor"
+                logger.info(f"⚠️ POOR swing setup (Stop>8% OR Target<2% OR R:R<1.0)")
             else:
-                return "HOLD", "NEUTRAL"
+                setup_quality = "neutral"
+                logger.info(f"⚪ NEUTRAL swing setup")
+        else:
+            logger.warning(f"⚠️ Cannot assess setup quality - missing levels (entry={entry_price}, stop={stop_loss}, target={take_profit}, rr={rr_ratio})")
+        
+        # ===== BASE DECISION (Score + Confidence) =====
+        base_decision = None
+        base_strength = None
+        
+        if combined_score >= strong_buy_score and confidence >= strong_buy_conf:
+            base_decision, base_strength = "BUY", "STRONG"
+        elif combined_score >= moderate_buy_score and confidence >= moderate_buy_conf:
+            base_decision, base_strength = "BUY", "MODERATE"
+        elif combined_score <= strong_sell_score and confidence >= strong_sell_conf:
+            base_decision, base_strength = "SELL", "STRONG"
+        elif combined_score <= moderate_sell_score and confidence >= moderate_sell_conf:
+            base_decision, base_strength = "SELL", "MODERATE"
+        else:
+            # WEAK BUY/SELL or HOLD zone (-15 to +15)
+            HOLD_ZONE = 15  # Same as preliminary_decision threshold
+            
+            if combined_score >= HOLD_ZONE and combined_score < moderate_buy_score:
+                base_decision, base_strength = "BUY", "WEAK"
+            elif combined_score <= -HOLD_ZONE and combined_score > moderate_sell_score:
+                base_decision, base_strength = "SELL", "WEAK"
+            else:  # -15 < score < 15
+                base_decision, base_strength = "HOLD", "NEUTRAL"
+        
+        # ===== ADJUST STRENGTH BASED ON SETUP QUALITY =====
+        final_strength = base_strength
+        
+        logger.info(f"Base strength: {base_strength} (Score: {combined_score:.1f}, Conf: {confidence:.0%})")
+        
+        if setup_quality == "poor":
+            # Downgrade strength if setup is poor
+            if base_strength == "STRONG":
+                final_strength = "MODERATE"
+                logger.warning(f"⬇️ Downgraded STRONG → MODERATE (poor swing setup)")
+            elif base_strength == "MODERATE":
+                final_strength = "WEAK"
+                logger.warning(f"⬇️ Downgraded MODERATE → WEAK (poor swing setup)")
+            # WEAK stays WEAK
+        
+        elif setup_quality == "good" and base_strength == "MODERATE":
+            # Upgrade MODERATE → STRONG if setup is excellent AND score is strong enough
+            if combined_score >= strong_buy_score * 0.9:  # Within 10% of STRONG threshold
+                final_strength = "STRONG"
+                logger.info(f"⬆️ Upgraded MODERATE → STRONG (excellent swing setup)")
+        
+        if final_strength != base_strength:
+            logger.info(f"Final strength: {final_strength} (adjusted from {base_strength})")
+        else:
+            logger.info(f"Final strength: {final_strength} (no adjustment)")
+        
+        return base_decision, final_strength
     
     def _calculate_levels(
         self,
@@ -309,26 +470,64 @@ class SignalGenerator:
         technical_data: Dict,
         risk_data: Dict
     ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
-        """Calculate entry, stop-loss, take-profit levels"""
+        """
+        Calculate entry, stop-loss, take-profit levels.
+        
+        S/R levels now include distance information:
+        - Uses nearest S/R regardless of distance
+        - Stop-loss: 0.5× ATR buffer below support (not 1.5×)
+        - User can see if S/R is too close and decide not to trade
+        
+        Stop-loss buffer logic:
+        - Support = psychological level where buyers step in
+        - Stop BELOW support = only triggers if support truly breaks
+        - Small buffer (0.5× ATR) prevents spike-outs while confirming breaks
+        """
         if decision == "HOLD" or current_price is None:
             return None, None, None, None
         
         # Get data
         atr = technical_data.get("atr", current_price * 0.02)
-        nearest_support = risk_data.get("nearest_support", current_price * 0.97)
-        nearest_resistance = risk_data.get("nearest_resistance", current_price * 1.03)
+        
+        # Parse S/R (handles both old and new formats)
+        nearest_support, nearest_resistance = parse_support_resistance(risk_data)
         
         entry_price = current_price
         
         if "BUY" in decision:
-            stop_loss = nearest_support - (atr * 1.5)
-            stop_loss = max(stop_loss, current_price * 0.974)
-            take_profit = nearest_resistance
-        else:  # SELL
-            stop_loss = nearest_resistance + (atr * 1.5)
-            stop_loss = min(stop_loss, current_price * 1.026)
-            take_profit = nearest_support
+            # Stop-loss: Use support if available with small buffer
+            if nearest_support:
+                # 0.5× ATR buffer below support (reduced from 1.5×)
+                # Ensures stop only triggers on confirmed support break
+                stop_loss = nearest_support - (atr * 0.5)
+            else:
+                # Fallback: 2.5× ATR or 2.6% minimum
+                stop_loss = current_price - max(atr * 2.5, current_price * 0.026)
+            
+            # Take-profit: Use resistance if available
+            if nearest_resistance:
+                take_profit = nearest_resistance
+            else:
+                # Fallback: 3× ATR or 3.5% minimum
+                take_profit = current_price + max(atr * 3, current_price * 0.035)
         
+        else:  # SELL
+            # Stop-loss: Use resistance if available with small buffer
+            if nearest_resistance:
+                # 0.5× ATR buffer above resistance
+                stop_loss = nearest_resistance + (atr * 0.5)
+            else:
+                # Fallback: 2.5× ATR or 2.6% minimum
+                stop_loss = current_price + max(atr * 2.5, current_price * 0.026)
+            
+            # Take-profit: Use support if available
+            if nearest_support:
+                take_profit = nearest_support
+            else:
+                # Fallback: 3× ATR or 3.5% minimum
+                take_profit = current_price - max(atr * 3, current_price * 0.035)
+        
+        # Calculate Risk/Reward ratio
         risk = abs(entry_price - stop_loss)
         reward = abs(take_profit - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
@@ -381,12 +580,13 @@ def generate_signals_for_tickers(
             # ===== TECHNICAL CALCULATION =====
             technical_data_raw = technical_data_dict.get(ticker_symbol, {})
             
-            # Handle multi-timeframe data (dict with 'intraday', 'trend', 'volatility', 'support_resistance')
+            # Handle multi-timeframe data (dict with 'intraday', 'trend', 'volatility', 'support_resistance', 'swing_sr')
             if isinstance(technical_data_raw, dict) and 'intraday' in technical_data_raw:
                 df_5m = technical_data_raw['intraday']
                 df_1h = technical_data_raw.get('trend')
                 df_vol = technical_data_raw.get('volatility')
                 df_sr = technical_data_raw.get('support_resistance')
+                swing_sr = technical_data_raw.get('swing_sr')  # NEW: Extract swing S/R
                 
                 if df_5m is not None and len(df_5m) >= 50:
                     print(f"📊 [{ticker_symbol}] Calculating technical (multi-timeframe)...")
@@ -395,6 +595,7 @@ def generate_signals_for_tickers(
                     if df_1h is not None: timeframe_info.append(f"1h: {len(df_1h)}")
                     if df_vol is not None: timeframe_info.append(f"Vol: {len(df_vol)}")
                     if df_sr is not None: timeframe_info.append(f"15m: {len(df_sr)}")
+                    if swing_sr is not None: timeframe_info.append(f"Swing S/R: ✅")
                     print(f"     {' | '.join(timeframe_info)}")
                     
                     technical_data = calculate_technical_score(
@@ -406,23 +607,28 @@ def generate_signals_for_tickers(
                     )
                 else:
                     technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
+                    swing_sr = None
                     print(f"  ⚠️ Insufficient intraday data")
                     
             # Handle single DataFrame (backward compatibility)
             elif isinstance(technical_data_raw, pd.DataFrame) and len(technical_data_raw) > 50:
                 print(f"📊 [{ticker_symbol}] Calculating technical from {len(technical_data_raw)} candles...")
                 technical_data = calculate_technical_score(technical_data_raw, ticker_symbol)
+                swing_sr = None
             elif isinstance(technical_data_raw, dict) and 'score' in technical_data_raw:
                 technical_data = technical_data_raw
+                swing_sr = None
             else:
                 technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
+                swing_sr = None
                 print(f"  ⚠️ No technical data")
             
             # ===== RISK CALCULATION =====
             if technical_data.get("current_price") and technical_data.get("atr_pct"):
-                risk_data = calculate_risk_score(technical_data, ticker_symbol)
+                # NEW: Pass swing_sr to calculate_risk_score
+                risk_data = calculate_risk_score(technical_data, ticker_symbol, swing_sr=swing_sr)
             else:
-                risk_data = {"score": 0, "volatility": 2.0, "nearest_support": None, "nearest_resistance": None}
+                risk_data = {"score": 0, "volatility": 2.0, "support": [], "resistance": []}
                 print(f"  ⚠️ No risk data")
             
             # ===== GENERATE SIGNAL =====
@@ -804,6 +1010,9 @@ def calculate_technical_score(
             atr_pct = 2.0
         
         # Support/Resistance - from S/R timeframe (15m, 3d)
+        # NOTE: This is INTRADAY S/R (simple min/max from last 100 15m candles)
+        # Different from TechnicalAnalyzer.detect_support_resistance() which uses
+        # 180-day daily pivots with order=7 for swing trading S/R levels
         if df_sr is not None and len(df_sr) >= 50:
             try:
                 # Find columns in S/R df
@@ -922,7 +1131,11 @@ def calculate_technical_score(
         return {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
 
 
-def calculate_risk_score(technical_data: Dict, ticker_symbol: str) -> Dict:
+def calculate_risk_score(
+    technical_data: Dict, 
+    ticker_symbol: str,
+    swing_sr: Optional[Dict] = None
+) -> Dict:
     """
     Calculate multi-component risk score
     
@@ -931,14 +1144,52 @@ def calculate_risk_score(technical_data: Dict, ticker_symbol: str) -> Dict:
     2. S/R Proximity - 35% weight  
     3. Trend Strength (ADX) - 25% weight
     
+    Args:
+        technical_data: Technical indicators
+        ticker_symbol: Ticker symbol
+        swing_sr: Optional swing S/R from detect_support_resistance()
+                  Format: {'support': [{'price': X, 'distance_pct': Y}], 'resistance': [...]}
+                  If provided, prioritized over intraday S/R
+    
     Returns risk score in range -50 to +50 (not -100 to +100!)
     """
     try:
         atr_pct = technical_data.get("atr_pct", 2.0)
         current_price = technical_data["current_price"]
-        nearest_support = technical_data.get("nearest_support", current_price * 0.97)
-        nearest_resistance = technical_data.get("nearest_resistance", current_price * 1.03)
         adx = technical_data.get("adx", None)  # Trend strength
+        
+        # ===== SUPPORT/RESISTANCE SELECTION =====
+        # PRIORITY: swing_sr (daily 180d, order=7) > intraday S/R (15m min/max)
+        
+        if swing_sr and (swing_sr.get('support') or swing_sr.get('resistance')):
+            # Use swing S/R from detect_support_resistance()
+            support_levels = swing_sr.get('support', [])
+            resistance_levels = swing_sr.get('resistance', [])
+            
+            nearest_support = support_levels[0]['price'] if support_levels else None
+            nearest_resistance = resistance_levels[0]['price'] if resistance_levels else None
+            
+            sr_source = "Swing S/R (180d)"
+            
+            # Log the swing S/R usage
+            if nearest_support:
+                support_dist = support_levels[0]['distance_pct']
+                print(f"  📊 {sr_source}: Support ${nearest_support:.2f} ({support_dist:.2f}% below)")
+            if nearest_resistance:
+                resistance_dist = resistance_levels[0]['distance_pct']
+                print(f"  📊 {sr_source}: Resistance ${nearest_resistance:.2f} ({resistance_dist:.2f}% above)")
+        else:
+            # Fallback to intraday S/R from technical_data
+            nearest_support = technical_data.get("nearest_support", current_price * 0.97)
+            nearest_resistance = technical_data.get("nearest_resistance", current_price * 1.03)
+            sr_source = "Intraday S/R (15m)"
+            print(f"  ⚠️ Using {sr_source} (no swing S/R available)")
+        
+        # Handle None values (fallback to percentage-based)
+        if nearest_support is None:
+            nearest_support = current_price * 0.97
+        if nearest_resistance is None:
+            nearest_resistance = current_price * 1.03
         
         # ===== 1. VOLATILITY RISK (ATR-based) - 40% =====
         if atr_pct < 2.0:
@@ -1014,6 +1265,10 @@ def calculate_risk_score(technical_data: Dict, ticker_symbol: str) -> Dict:
             "score": max(-100, min(100, risk_score)),  # Clamp to -100...+100
             "confidence": risk_confidence,
             "volatility": atr_pct,
+            # NEW FORMAT: For parse_support_resistance() helper
+            "support": swing_sr.get('support', []) if swing_sr else [],
+            "resistance": swing_sr.get('resistance', []) if swing_sr else [],
+            # OLD FORMAT: Keep for backward compatibility
             "nearest_support": nearest_support,
             "nearest_resistance": nearest_resistance,
             "components": {

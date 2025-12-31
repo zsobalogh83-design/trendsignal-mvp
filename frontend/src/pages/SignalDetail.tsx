@@ -241,22 +241,22 @@ export function SignalDetail() {
               { 
                 label: 'Sentiment', 
                 score: signal.sentiment_score, 
-                weight: signal.components?.sentiment?.weight ? Math.round(signal.components.sentiment.weight * 100) : null,
-                contribution: signal.components?.sentiment?.contribution || (signal.sentiment_score * 0.7),
+                weight: signal.reasoning.components?.sentiment?.weight ? Math.round(signal.reasoning.components.sentiment.weight * 100) : null,
+                contribution: signal.reasoning.components?.sentiment?.contribution || (signal.sentiment_score * 0.7),
                 color: '#10b981' 
               },
               { 
                 label: 'Technical', 
                 score: signal.technical_score, 
-                weight: signal.components?.technical?.weight ? Math.round(signal.components.technical.weight * 100) : null,
-                contribution: signal.components?.technical?.contribution || (signal.technical_score * 0.2),
+                weight: signal.reasoning.components?.technical?.weight ? Math.round(signal.reasoning.components.technical.weight * 100) : null,
+                contribution: signal.reasoning.components?.technical?.contribution || (signal.technical_score * 0.2),
                 color: '#3b82f6' 
               },
               { 
                 label: 'Risk', 
                 score: signal.risk_score, 
-                weight: signal.components?.risk?.weight ? Math.round(signal.components.risk.weight * 100) : null,
-                contribution: signal.components?.risk?.contribution || (signal.risk_score * 0.1),
+                weight: signal.reasoning.components?.risk?.weight ? Math.round(signal.reasoning.components.risk.weight * 100) : null,
+                contribution: signal.reasoning.components?.risk?.contribution || (signal.risk_score * 0.1),
                 color: '#f59e0b' 
               }
             ].map((item, idx) => (
@@ -414,7 +414,7 @@ export function SignalDetail() {
             </ul>
             
             {/* Indicator Table */}
-            {(signal.components?.technical || signal.reasoning?.technical) && (
+            {(signal.reasoning.components?.technical || signal.reasoning?.technical) && (
               <div style={{ marginTop: '24px' }}>
                 <h4 style={{ fontSize: '14px', color: '#64748b', marginBottom: '12px', fontWeight: '600' }}>📊 Indicators</h4>
                 <div style={{ 
@@ -432,83 +432,83 @@ export function SignalDetail() {
                       </tr>
                     </thead>
                     <tbody>
-                      {signal.components?.technical?.sma_20 && (
+                      {signal.reasoning.components?.technical?.sma_20 && (
                         <tr style={{ borderTop: '1px solid rgba(51, 65, 85, 0.3)' }}>
                           <td style={{ padding: '12px', fontSize: '13px', color: '#cbd5e1' }}>SMA 20</td>
                           <td style={{ padding: '12px', textAlign: 'right', fontSize: '13px', color: '#f1f5f9', fontWeight: '600' }}>
-                            ${signal.components.technical.sma_20.toFixed(2)}
+                            ${signal.reasoning.components.technical.sma_20.toFixed(2)}
                           </td>
                           <td style={{ padding: '12px', textAlign: 'right', fontSize: '12px' }}>
                             <span style={{ 
                               padding: '4px 8px', 
                               borderRadius: '4px',
-                              background: signal.entry_price > signal.components.technical.sma_20 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                              color: signal.entry_price > signal.components.technical.sma_20 ? '#10b981' : '#ef4444'
+                              background: signal.entry_price > signal.reasoning.components.technical.sma_20 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                              color: signal.entry_price > signal.reasoning.components.technical.sma_20 ? '#10b981' : '#ef4444'
                             }}>
-                              {signal.entry_price > signal.components.technical.sma_20 ? 'Bullish' : 'Bearish'}
+                              {signal.entry_price > signal.reasoning.components.technical.sma_20 ? 'Bullish' : 'Bearish'}
                             </span>
                           </td>
                         </tr>
                       )}
-                      {signal.components?.technical?.sma_50 && (
+                      {signal.reasoning.components?.technical?.sma_50 && (
                         <tr style={{ borderTop: '1px solid rgba(51, 65, 85, 0.3)' }}>
                           <td style={{ padding: '12px', fontSize: '13px', color: '#cbd5e1' }}>SMA 50</td>
                           <td style={{ padding: '12px', textAlign: 'right', fontSize: '13px', color: '#f1f5f9', fontWeight: '600' }}>
-                            ${signal.components.technical.sma_50.toFixed(2)}
+                            ${signal.reasoning.components.technical.sma_50.toFixed(2)}
                           </td>
                           <td style={{ padding: '12px', textAlign: 'right', fontSize: '12px' }}>
                             <span style={{ 
                               padding: '4px 8px', 
                               borderRadius: '4px',
-                              background: signal.entry_price > signal.components.technical.sma_50 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                              color: signal.entry_price > signal.components.technical.sma_50 ? '#10b981' : '#ef4444'
+                              background: signal.entry_price > signal.reasoning.components.technical.sma_50 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                              color: signal.entry_price > signal.reasoning.components.technical.sma_50 ? '#10b981' : '#ef4444'
                             }}>
-                              {signal.entry_price > signal.components.technical.sma_50 ? 'Bullish' : 'Bearish'}
+                              {signal.entry_price > signal.reasoning.components.technical.sma_50 ? 'Bullish' : 'Bearish'}
                             </span>
                           </td>
                         </tr>
                       )}
-                      {signal.components?.technical?.rsi && (
+                      {signal.reasoning.components?.technical?.rsi && (
                         <tr style={{ borderTop: '1px solid rgba(51, 65, 85, 0.3)' }}>
                           <td style={{ padding: '12px', fontSize: '13px', color: '#cbd5e1' }}>RSI (14)</td>
                           <td style={{ padding: '12px', textAlign: 'right', fontSize: '13px', color: '#f1f5f9', fontWeight: '600' }}>
-                            {signal.components.technical.rsi.toFixed(1)}
+                            {signal.reasoning.components.technical.rsi.toFixed(1)}
                           </td>
                           <td style={{ padding: '12px', textAlign: 'right', fontSize: '12px' }}>
                             <span style={{ 
                               padding: '4px 8px', 
                               borderRadius: '4px',
-                              background: signal.components.technical.rsi > 70 ? 'rgba(239, 68, 68, 0.2)' : 
-                                         signal.components.technical.rsi > 55 ? 'rgba(16, 185, 129, 0.2)' :
-                                         signal.components.technical.rsi < 30 ? 'rgba(239, 68, 68, 0.2)' :
-                                         signal.components.technical.rsi < 45 ? 'rgba(251, 191, 36, 0.2)' : 'rgba(100, 116, 139, 0.2)',
-                              color: signal.components.technical.rsi > 70 ? '#ef4444' : 
-                                    signal.components.technical.rsi > 55 ? '#10b981' :
-                                    signal.components.technical.rsi < 30 ? '#ef4444' :
-                                    signal.components.technical.rsi < 45 ? '#fbbf24' : '#94a3b8'
+                              background: signal.reasoning.components.technical.rsi > 70 ? 'rgba(239, 68, 68, 0.2)' : 
+                                         signal.reasoning.components.technical.rsi > 55 ? 'rgba(16, 185, 129, 0.2)' :
+                                         signal.reasoning.components.technical.rsi < 30 ? 'rgba(239, 68, 68, 0.2)' :
+                                         signal.reasoning.components.technical.rsi < 45 ? 'rgba(251, 191, 36, 0.2)' : 'rgba(100, 116, 139, 0.2)',
+                              color: signal.reasoning.components.technical.rsi > 70 ? '#ef4444' : 
+                                    signal.reasoning.components.technical.rsi > 55 ? '#10b981' :
+                                    signal.reasoning.components.technical.rsi < 30 ? '#ef4444' :
+                                    signal.reasoning.components.technical.rsi < 45 ? '#fbbf24' : '#94a3b8'
                             }}>
-                              {signal.components.technical.rsi > 70 ? 'Overbought' : 
-                               signal.components.technical.rsi > 55 ? 'Bullish' :
-                               signal.components.technical.rsi < 30 ? 'Oversold' :
-                               signal.components.technical.rsi < 45 ? 'Moderate' : 'Neutral'}
+                              {signal.reasoning.components.technical.rsi > 70 ? 'Overbought' : 
+                               signal.reasoning.components.technical.rsi > 55 ? 'Bullish' :
+                               signal.reasoning.components.technical.rsi < 30 ? 'Oversold' :
+                               signal.reasoning.components.technical.rsi < 45 ? 'Moderate' : 'Neutral'}
                             </span>
                           </td>
                         </tr>
                       )}
-                      {signal.components?.technical?.adx && (
+                      {signal.reasoning.components?.technical?.adx && (
                         <tr style={{ borderTop: '1px solid rgba(51, 65, 85, 0.3)' }}>
                           <td style={{ padding: '12px', fontSize: '13px', color: '#cbd5e1' }}>ADX (Trend)</td>
                           <td style={{ padding: '12px', textAlign: 'right', fontSize: '13px', color: '#f1f5f9', fontWeight: '600' }}>
-                            {signal.components.technical.adx.toFixed(1)}
+                            {signal.reasoning.components.technical.adx.toFixed(1)}
                           </td>
                           <td style={{ padding: '12px', textAlign: 'right', fontSize: '12px' }}>
                             <span style={{ 
                               padding: '4px 8px', 
                               borderRadius: '4px',
-                              background: signal.components.technical.adx > 25 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(100, 116, 139, 0.2)',
-                              color: signal.components.technical.adx > 25 ? '#10b981' : '#94a3b8'
+                              background: signal.reasoning.components.technical.adx > 25 ? 'rgba(16, 185, 129, 0.2)' : 'rgba(100, 116, 139, 0.2)',
+                              color: signal.reasoning.components.technical.adx > 25 ? '#10b981' : '#94a3b8'
                             }}>
-                              {signal.components.technical.adx > 25 ? 'Strong' : 'Weak'}
+                              {signal.reasoning.components.technical.adx > 25 ? 'Strong' : 'Weak'}
                             </span>
                           </td>
                         </tr>
@@ -520,7 +520,7 @@ export function SignalDetail() {
             )}
             
             {/* Price vs SMA Chart */}
-            {(signal.components?.technical?.sma_20 || signal.components?.technical?.sma_50) && (
+            {(signal.reasoning.components?.technical?.sma_20 || signal.reasoning.components?.technical?.sma_50) && (
               <div style={{ marginTop: '24px' }}>
                 <h4 style={{ fontSize: '14px', color: '#64748b', marginBottom: '12px', fontWeight: '600' }}>📍 Price vs Moving Averages</h4>
                 <div style={{ 
@@ -529,17 +529,17 @@ export function SignalDetail() {
                   padding: '20px',
                   border: '1px solid rgba(51, 65, 85, 0.5)'
                 }}>
-                  {signal.components?.technical?.sma_50 && (
+                  {signal.reasoning.components?.technical?.sma_50 && (
                     <div style={{ marginBottom: '16px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '13px', color: '#94a3b8' }}>SMA 50</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontSize: '14px', fontWeight: '600', color: '#f1f5f9' }}>
-                            ${signal.components.technical.sma_50.toFixed(2)}
+                            ${signal.reasoning.components.technical.sma_50.toFixed(2)}
                           </span>
-                          <span style={{ fontSize: '12px', color: signal.entry_price > signal.components.technical.sma_50 ? '#10b981' : '#ef4444' }}>
-                            {signal.entry_price > signal.components.technical.sma_50 ? '↑' : '↓'} 
-                            {Math.abs(((signal.entry_price - signal.components.technical.sma_50) / signal.components.technical.sma_50) * 100).toFixed(1)}%
+                          <span style={{ fontSize: '12px', color: signal.entry_price > signal.reasoning.components.technical.sma_50 ? '#10b981' : '#ef4444' }}>
+                            {signal.entry_price > signal.reasoning.components.technical.sma_50 ? '↑' : '↓'} 
+                            {Math.abs(((signal.entry_price - signal.reasoning.components.technical.sma_50) / signal.reasoning.components.technical.sma_50) * 100).toFixed(1)}%
                           </span>
                         </div>
                       </div>
@@ -570,24 +570,24 @@ export function SignalDetail() {
                     padding: '12px',
                     background: 'rgba(59, 130, 246, 0.1)',
                     borderRadius: '6px',
-                    marginBottom: signal.components?.technical?.sma_20 ? '16px' : '0'
+                    marginBottom: signal.reasoning.components?.technical?.sma_20 ? '16px' : '0'
                   }}>
                     <span style={{ fontSize: '16px', fontWeight: '700', color: '#60a5fa' }}>
                       Current: ${signal.entry_price?.toFixed(2) || 'N/A'}
                     </span>
                   </div>
                   
-                  {signal.components?.technical?.sma_20 && (
+                  {signal.reasoning.components?.technical?.sma_20 && (
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '13px', color: '#94a3b8' }}>SMA 20</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{ fontSize: '14px', fontWeight: '600', color: '#f1f5f9' }}>
-                            ${signal.components.technical.sma_20.toFixed(2)}
+                            ${signal.reasoning.components.technical.sma_20.toFixed(2)}
                           </span>
-                          <span style={{ fontSize: '12px', color: signal.entry_price > signal.components.technical.sma_20 ? '#10b981' : '#ef4444' }}>
-                            {signal.entry_price > signal.components.technical.sma_20 ? '↑' : '↓'} 
-                            {Math.abs(((signal.entry_price - signal.components.technical.sma_20) / signal.components.technical.sma_20) * 100).toFixed(1)}%
+                          <span style={{ fontSize: '12px', color: signal.entry_price > signal.reasoning.components.technical.sma_20 ? '#10b981' : '#ef4444' }}>
+                            {signal.entry_price > signal.reasoning.components.technical.sma_20 ? '↑' : '↓'} 
+                            {Math.abs(((signal.entry_price - signal.reasoning.components.technical.sma_20) / signal.reasoning.components.technical.sma_20) * 100).toFixed(1)}%
                           </span>
                         </div>
                       </div>
@@ -611,7 +611,7 @@ export function SignalDetail() {
                     </div>
                   )}
                   
-                  {(signal.components?.technical?.sma_20 && signal.components?.technical?.sma_50) && (
+                  {(signal.reasoning.components?.technical?.sma_20 && signal.reasoning.components?.technical?.sma_50) && (
                     <div style={{ 
                       marginTop: '12px', 
                       padding: '10px', 
@@ -621,7 +621,7 @@ export function SignalDetail() {
                       color: '#60a5fa',
                       textAlign: 'center'
                     }}>
-                      {signal.components.technical.sma_20 > signal.components.technical.sma_50 
+                      {signal.reasoning.components.technical.sma_20 > signal.reasoning.components.technical.sma_50 
                         ? '✨ Golden Cross (SMA20 > SMA50)' 
                         : '⚠️ Death Cross (SMA20 < SMA50)'}
                     </div>
@@ -631,7 +631,7 @@ export function SignalDetail() {
             )}
             
             {/* Volatility Gauge */}
-            {signal.components?.technical?.atr_pct && (
+            {signal.reasoning.components?.technical?.atr_pct && (
               <div style={{ marginTop: '24px' }}>
                 <h4 style={{ fontSize: '14px', color: '#64748b', marginBottom: '12px', fontWeight: '600' }}>📉 Volatility</h4>
                 <div style={{ 
@@ -643,7 +643,7 @@ export function SignalDetail() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <span style={{ fontSize: '13px', color: '#94a3b8' }}>ATR (14-period)</span>
                     <span style={{ fontSize: '16px', fontWeight: '700', color: '#f1f5f9' }}>
-                      {signal.components.technical.atr_pct.toFixed(2)}%
+                      {signal.reasoning.components.technical.atr_pct.toFixed(2)}%
                     </span>
                   </div>
                   <div style={{ 
@@ -655,9 +655,9 @@ export function SignalDetail() {
                   }}>
                     <div style={{
                       height: '100%',
-                      width: `${Math.min((signal.components.technical.atr_pct / 5) * 100, 100)}%`,
-                      background: signal.components.technical.atr_pct < 2.0 ? 'linear-gradient(90deg, #10b981 0%, #059669 100%)' :
-                                 signal.components.technical.atr_pct < 4.0 ? 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)' :
+                      width: `${Math.min((signal.reasoning.components.technical.atr_pct / 5) * 100, 100)}%`,
+                      background: signal.reasoning.components.technical.atr_pct < 2.0 ? 'linear-gradient(90deg, #10b981 0%, #059669 100%)' :
+                                 signal.reasoning.components.technical.atr_pct < 4.0 ? 'linear-gradient(90deg, #fbbf24 0%, #f59e0b 100%)' :
                                  'linear-gradient(90deg, #ef4444 0%, #dc2626 100%)',
                       borderRadius: '4px',
                       transition: 'width 0.5s ease-out'
@@ -666,12 +666,12 @@ export function SignalDetail() {
                   <div style={{ 
                     marginTop: '8px', 
                     fontSize: '12px',
-                    color: signal.components.technical.atr_pct < 2.0 ? '#10b981' :
-                           signal.components.technical.atr_pct < 4.0 ? '#fbbf24' : '#ef4444',
+                    color: signal.reasoning.components.technical.atr_pct < 2.0 ? '#10b981' :
+                           signal.reasoning.components.technical.atr_pct < 4.0 ? '#fbbf24' : '#ef4444',
                     fontWeight: '600'
                   }}>
-                    {signal.components.technical.atr_pct < 2.0 ? '🟢 Low Volatility' :
-                     signal.components.technical.atr_pct < 4.0 ? '🟡 Moderate Volatility' :
+                    {signal.reasoning.components.technical.atr_pct < 2.0 ? '🟢 Low Volatility' :
+                     signal.reasoning.components.technical.atr_pct < 4.0 ? '🟡 Moderate Volatility' :
                      '🔴 High Volatility'}
                   </div>
                 </div>
@@ -686,7 +686,7 @@ export function SignalDetail() {
             id="risk"
             icon="🛡️"
             title="Risk Assessment"
-            badge={`${signal.risk_score.toFixed(1)} · ${(signal.components?.risk?.confidence ? signal.components.risk.confidence * 100 : 50).toFixed(0)}% conf`}
+            badge={`${signal.risk_score.toFixed(1)} · ${(signal.reasoning.components?.risk?.confidence ? signal.reasoning.components.risk.confidence * 100 : 50).toFixed(0)}% conf`}
             summary={signal.reasoning.risk.summary}
             isOpen={openSections.includes('risk')}
             onToggle={() => toggleSection('risk')}
@@ -714,18 +714,18 @@ export function SignalDetail() {
               )}
               
               {/* Multi-Component Risk Breakdown */}
-              {signal.components?.risk?.components && (
+              {signal.reasoning.components?.risk?.components && (
                 <div>
                   <h4 style={{ fontSize: '14px', color: '#64748b', marginBottom: '12px', fontWeight: '600' }}>🛡️ Risk Components</h4>
                   
                   {/* Volatility Component */}
-                  {signal.components.risk.components.volatility && (
+                  {signal.reasoning.components.risk.components.volatility && (
                     <div style={{ 
                       background: 'rgba(15, 23, 42, 0.5)', 
                       borderRadius: '8px',
                       padding: '16px',
                       marginBottom: '12px',
-                      borderLeft: `4px solid ${signal.components.risk.components.volatility.risk > 0 ? '#10b981' : signal.components.risk.components.volatility.risk < 0 ? '#ef4444' : '#94a3b8'}`
+                      borderLeft: `4px solid ${signal.reasoning.components.risk.components.volatility.risk > 0 ? '#10b981' : signal.reasoning.components.risk.components.volatility.risk < 0 ? '#ef4444' : '#94a3b8'}`
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: '600' }}>
@@ -734,28 +734,28 @@ export function SignalDetail() {
                         <span style={{ 
                           fontSize: '14px', 
                           fontWeight: '700',
-                          color: signal.components.risk.components.volatility.risk > 0 ? '#10b981' : signal.components.risk.components.volatility.risk < 0 ? '#ef4444' : '#94a3b8'
+                          color: signal.reasoning.components.risk.components.volatility.risk > 0 ? '#10b981' : signal.reasoning.components.risk.components.volatility.risk < 0 ? '#ef4444' : '#94a3b8'
                         }}>
-                          {signal.components.risk.components.volatility.risk > 0 ? '+' : ''}{signal.components.risk.components.volatility.risk.toFixed(1)}
+                          {signal.reasoning.components.risk.components.volatility.risk > 0 ? '+' : ''}{signal.reasoning.components.risk.components.volatility.risk.toFixed(1)}
                         </span>
                       </div>
                       <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>
-                        {signal.components.risk.components.volatility.status}
+                        {signal.reasoning.components.risk.components.volatility.status}
                       </div>
                       <div style={{ fontSize: '11px', color: '#64748b' }}>
-                        Confidence: {(signal.components.risk.components.volatility.confidence * 100).toFixed(0)}%
+                        Confidence: {(signal.reasoning.components.risk.components.volatility.confidence * 100).toFixed(0)}%
                       </div>
                     </div>
                   )}
                   
                   {/* Proximity Component */}
-                  {signal.components.risk.components.proximity && (
+                  {signal.reasoning.components.risk.components.proximity && (
                     <div style={{ 
                       background: 'rgba(15, 23, 42, 0.5)', 
                       borderRadius: '8px',
                       padding: '16px',
                       marginBottom: '12px',
-                      borderLeft: `4px solid ${signal.components.risk.components.proximity.risk > 0 ? '#10b981' : signal.components.risk.components.proximity.risk < 0 ? '#ef4444' : '#94a3b8'}`
+                      borderLeft: `4px solid ${signal.reasoning.components.risk.components.proximity.risk > 0 ? '#10b981' : signal.reasoning.components.risk.components.proximity.risk < 0 ? '#ef4444' : '#94a3b8'}`
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: '600' }}>
@@ -764,28 +764,28 @@ export function SignalDetail() {
                         <span style={{ 
                           fontSize: '14px', 
                           fontWeight: '700',
-                          color: signal.components.risk.components.proximity.risk > 0 ? '#10b981' : signal.components.risk.components.proximity.risk < 0 ? '#ef4444' : '#94a3b8'
+                          color: signal.reasoning.components.risk.components.proximity.risk > 0 ? '#10b981' : signal.reasoning.components.risk.components.proximity.risk < 0 ? '#ef4444' : '#94a3b8'
                         }}>
-                          {signal.components.risk.components.proximity.risk > 0 ? '+' : ''}{signal.components.risk.components.proximity.risk.toFixed(1)}
+                          {signal.reasoning.components.risk.components.proximity.risk > 0 ? '+' : ''}{signal.reasoning.components.risk.components.proximity.risk.toFixed(1)}
                         </span>
                       </div>
                       <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>
-                        {signal.components.risk.components.proximity.status}
+                        {signal.reasoning.components.risk.components.proximity.status}
                       </div>
                       <div style={{ fontSize: '11px', color: '#64748b' }}>
-                        Confidence: {(signal.components.risk.components.proximity.confidence * 100).toFixed(0)}%
+                        Confidence: {(signal.reasoning.components.risk.components.proximity.confidence * 100).toFixed(0)}%
                       </div>
                     </div>
                   )}
                   
                   {/* Trend Strength Component */}
-                  {signal.components.risk.components.trend_strength && (
+                  {signal.reasoning.components.risk.components.trend_strength && (
                     <div style={{ 
                       background: 'rgba(15, 23, 42, 0.5)', 
                       borderRadius: '8px',
                       padding: '16px',
                       marginBottom: '12px',
-                      borderLeft: `4px solid ${signal.components.risk.components.trend_strength.risk > 0 ? '#10b981' : signal.components.risk.components.trend_strength.risk < 0 ? '#ef4444' : '#94a3b8'}`
+                      borderLeft: `4px solid ${signal.reasoning.components.risk.components.trend_strength.risk > 0 ? '#10b981' : signal.reasoning.components.risk.components.trend_strength.risk < 0 ? '#ef4444' : '#94a3b8'}`
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                         <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: '600' }}>
@@ -794,16 +794,16 @@ export function SignalDetail() {
                         <span style={{ 
                           fontSize: '14px', 
                           fontWeight: '700',
-                          color: signal.components.risk.components.trend_strength.risk > 0 ? '#10b981' : signal.components.risk.components.trend_strength.risk < 0 ? '#ef4444' : '#94a3b8'
+                          color: signal.reasoning.components.risk.components.trend_strength.risk > 0 ? '#10b981' : signal.reasoning.components.risk.components.trend_strength.risk < 0 ? '#ef4444' : '#94a3b8'
                         }}>
-                          {signal.components.risk.components.trend_strength.risk > 0 ? '+' : ''}{signal.components.risk.components.trend_strength.risk.toFixed(1)}
+                          {signal.reasoning.components.risk.components.trend_strength.risk > 0 ? '+' : ''}{signal.reasoning.components.risk.components.trend_strength.risk.toFixed(1)}
                         </span>
                       </div>
                       <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>
-                        {signal.components.risk.components.trend_strength.status}
+                        {signal.reasoning.components.risk.components.trend_strength.status}
                       </div>
                       <div style={{ fontSize: '11px', color: '#64748b' }}>
-                        Confidence: {(signal.components.risk.components.trend_strength.confidence * 100).toFixed(0)}%
+                        Confidence: {(signal.reasoning.components.risk.components.trend_strength.confidence * 100).toFixed(0)}%
                       </div>
                     </div>
                   )}
@@ -818,7 +818,7 @@ export function SignalDetail() {
                   }}>
                     <div style={{ fontSize: '12px', color: '#60a5fa' }}>
                       💡 Overall Risk Score: <strong>{signal.risk_score > 0 ? '+' : ''}{signal.risk_score.toFixed(1)}</strong> 
-                      {' '}(Confidence: {(signal.components.risk.confidence * 100).toFixed(0)}%)
+                      {' '}(Confidence: {(signal.reasoning.components.risk.confidence * 100).toFixed(0)}%)
                     </div>
                     <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px' }}>
                       Calculated from: Volatility (40%) + S/R Proximity (35%) + Trend Strength (25%)
