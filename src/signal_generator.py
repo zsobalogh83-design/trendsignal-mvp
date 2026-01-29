@@ -586,6 +586,7 @@ def generate_signals_for_tickers(
                 df_1h = technical_data_raw.get('trend')
                 df_vol = technical_data_raw.get('volatility')
                 df_sr = technical_data_raw.get('support_resistance')
+                df_daily = technical_data_raw.get('daily')  # NEW: For ATR calculation
                 swing_sr = technical_data_raw.get('swing_sr')  # NEW: Extract swing S/R
                 
                 if df_5m is not None and len(df_5m) >= 50:
@@ -603,7 +604,8 @@ def generate_signals_for_tickers(
                         ticker_symbol=ticker_symbol, 
                         df_trend=df_1h,
                         df_volatility=df_vol,
-                        df_sr=df_sr
+                        df_sr=df_sr,
+                        df_daily=df_daily  # NEW: For ATR from daily data
                     )
                 else:
                     technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
@@ -625,6 +627,9 @@ def generate_signals_for_tickers(
             
             # ===== RISK CALCULATION =====
             if technical_data.get("current_price") and technical_data.get("atr_pct"):
+                # DEBUG: Show what ATR is being passed to risk calculation
+                print(f"  🔍 DEBUG: ATR passed to risk calc: {technical_data.get('atr_pct'):.2f}%")
+                
                 # NEW: Pass swing_sr to calculate_risk_score
                 risk_data = calculate_risk_score(technical_data, ticker_symbol, swing_sr=swing_sr)
             else:
@@ -757,7 +762,8 @@ def calculate_technical_score(
     ticker_symbol: str, 
     df_trend: Optional[pd.DataFrame] = None,
     df_volatility: Optional[pd.DataFrame] = None,
-    df_sr: Optional[pd.DataFrame] = None
+    df_sr: Optional[pd.DataFrame] = None,
+    df_daily: Optional[pd.DataFrame] = None  # NEW: For ATR from daily data
 ) -> Dict:
     """
     Calculate technical score from MULTI-TIMEFRAME data
@@ -766,8 +772,9 @@ def calculate_technical_score(
         df: Intraday DataFrame (5m) for RSI, SMA20, current price
         ticker_symbol: Ticker symbol
         df_trend: Hourly DataFrame (1h, 30d) for SMA50, ADX
-        df_volatility: Hourly DataFrame (1h, 3d) for ATR
+        df_volatility: Hourly DataFrame (1h, 3d) for ATR (DEPRECATED - use df_daily)
         df_sr: 15-min DataFrame (15m, 3d) for Support/Resistance
+        df_daily: Daily DataFrame (1d, 6mo) for ATR calculation (PREFERRED)
     """
     try:
         # Use intraday df as primary
@@ -966,8 +973,43 @@ def calculate_technical_score(
                 print(f"  ⚠️ Could not calculate ADX: {e}")
                 adx = None
         
-        # ATR - from VOLATILITY timeframe (1h, 3d)
-        if df_volatility is not None and len(df_volatility) >= 14:
+        # ATR - CRITICAL: Use DAILY data for accurate daily volatility measurement
+        # Daily ATR = average daily price range over last 14 days
+        atr = None
+        atr_pct = None
+        
+        if df_daily is not None and len(df_daily) >= 14:
+            try:
+                # Normalize daily df columns
+                df_daily_copy = df_daily.copy()
+                df_daily_copy.columns = [str(col).lower().strip() for col in df_daily_copy.columns]
+                
+                # Find columns
+                daily_high = None
+                daily_low = None
+                daily_close = None
+                
+                for col in df_daily_copy.columns:
+                    if 'high' in col:
+                        daily_high = col
+                    elif 'low' in col:
+                        daily_low = col
+                    elif 'close' in col:
+                        daily_close = col
+                
+                if daily_high and daily_low and daily_close:
+                    # Calculate True Range (daily)
+                    high_low = df_daily_copy[daily_high] - df_daily_copy[daily_low]
+                    atr = high_low.rolling(14).mean().iloc[-1]
+                    atr_pct = (atr / df_daily_copy[daily_close].iloc[-1]) * 100
+                    print(f"  ✅ ATR from DAILY data (1d, 14-period): {atr_pct:.2f}%")
+                else:
+                    print(f"  ⚠️ Could not find High/Low/Close in daily data")
+            except Exception as e:
+                print(f"  ⚠️ Could not calculate ATR from daily data: {e}")
+        
+        # Fallback if no daily data or calculation failed: use hourly (DEPRECATED)
+        if atr is None and df_volatility is not None and len(df_volatility) >= 14:
             try:
                 # Find columns in volatility df
                 vol_high = None
