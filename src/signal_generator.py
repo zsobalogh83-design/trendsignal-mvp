@@ -495,37 +495,76 @@ class SignalGenerator:
         entry_price = current_price
         
         if "BUY" in decision:
-            # Stop-loss: Use support if available with small buffer
+            # Stop-loss: Use support if available AND within reasonable distance
             if nearest_support:
-                # 0.5× ATR buffer below support (reduced from 1.5×)
-                # Ensures stop only triggers on confirmed support break
-                stop_loss = nearest_support - (atr * 0.5)
+                support_distance_pct = ((current_price - nearest_support) / current_price) * 100
+                
+                # Only use support if it's within 5% distance (day trading best practice)
+                if support_distance_pct <= 5.0:
+                    # 0.5× ATR buffer below support
+                    stop_loss = nearest_support - (atr * 0.5)
+                    print(f"  ✅ Support-based stop: {nearest_support:.2f} (-{support_distance_pct:.1f}%)")
+                else:
+                    # Support too far, use ATR fallback (day trading: 2× ATR)
+                    stop_loss = current_price - (atr * 2.0)
+                    print(f"  ⚠️ Support too far ({support_distance_pct:.1f}%), ATR stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
             else:
-                # Fallback: 2.5× ATR or 2.6% minimum
-                stop_loss = current_price - max(atr * 2.5, current_price * 0.026)
+                # Fallback: 2× ATR (day trading standard, volatility-adaptive)
+                stop_loss = current_price - (atr * 2.0)
+                print(f"  ℹ️ No support found, ATR-based stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
             
-            # Take-profit: Use resistance if available
+            # Take-profit: Use resistance if available AND within reasonable distance
             if nearest_resistance:
-                take_profit = nearest_resistance
+                resistance_distance_pct = ((nearest_resistance - current_price) / current_price) * 100
+                
+                # Only use resistance if it's within 8% distance
+                if resistance_distance_pct <= 8.0:
+                    take_profit = nearest_resistance
+                    print(f"  ✅ Resistance-based target: {nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%)")
+                else:
+                    # Resistance too far, use ATR fallback (day trading: 3× ATR for 1:1.5 R:R)
+                    take_profit = current_price + (atr * 3.0)
+                    print(f"  ⚠️ Resistance too far ({resistance_distance_pct:.1f}%), ATR target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
             else:
-                # Fallback: 3× ATR or 3.5% minimum
-                take_profit = current_price + max(atr * 3, current_price * 0.035)
+                # Fallback: 3× ATR (1:1.5 R:R ratio, day trading standard)
+                take_profit = current_price + (atr * 3.0)
+                print(f"  ℹ️ No resistance found, ATR-based target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
         
         else:  # SELL
-            # Stop-loss: Use resistance if available with small buffer
+            # Stop-loss: Use resistance if available AND within reasonable distance
             if nearest_resistance:
-                # 0.5× ATR buffer above resistance
-                stop_loss = nearest_resistance + (atr * 0.5)
+                resistance_distance_pct = ((nearest_resistance - current_price) / current_price) * 100
+                
+                # Only use resistance if it's within 5% distance
+                if resistance_distance_pct <= 5.0:
+                    # 0.5× ATR buffer above resistance
+                    stop_loss = nearest_resistance + (atr * 0.5)
+                    print(f"  ✅ Resistance-based stop: {nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%)")
+                else:
+                    # Resistance too far, use ATR fallback (day trading: 2× ATR)
+                    stop_loss = current_price + (atr * 2.0)
+                    print(f"  ⚠️ Resistance too far ({resistance_distance_pct:.1f}%), ATR stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
             else:
-                # Fallback: 2.5× ATR or 2.6% minimum
-                stop_loss = current_price + max(atr * 2.5, current_price * 0.026)
+                # Fallback: 2× ATR (day trading standard, volatility-adaptive)
+                stop_loss = current_price + (atr * 2.0)
+                print(f"  ℹ️ No resistance found, ATR-based stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
             
-            # Take-profit: Use support if available
+            # Take-profit: Use support if available AND within reasonable distance
             if nearest_support:
-                take_profit = nearest_support
+                support_distance_pct = ((current_price - nearest_support) / current_price) * 100
+                
+                # Only use support if it's within 8% distance
+                if support_distance_pct <= 8.0:
+                    take_profit = nearest_support
+                    print(f"  ✅ Support-based target: {nearest_support:.2f} (-{support_distance_pct:.1f}%)")
+                else:
+                    # Support too far, use ATR fallback (day trading: 3× ATR for 1:1.5 R:R)
+                    take_profit = current_price - (atr * 3.0)
+                    print(f"  ⚠️ Support too far ({support_distance_pct:.1f}%), ATR target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
             else:
-                # Fallback: 3× ATR or 3.5% minimum
-                take_profit = current_price - max(atr * 3, current_price * 0.035)
+                # Fallback: 3× ATR (1:1.5 R:R ratio, day trading standard)
+                take_profit = current_price - (atr * 3.0)
+                print(f"  ℹ️ No support found, ATR-based target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
         
         # Calculate Risk/Reward ratio
         risk = abs(entry_price - stop_loss)
@@ -1042,14 +1081,18 @@ def calculate_technical_score(
                 print(f"  ⚠️ Could not calculate ATR from volatility data: {e}")
                 atr = current[close_col] * 0.02
                 atr_pct = 2.0
-        elif high_col and low_col:
-            # Fallback: use intraday
-            high_low = df[high_col] - df[low_col]
-            atr = high_low.rolling(14).mean().iloc[-1]
-            atr_pct = (atr / current[close_col]) * 100
-        else:
-            atr = current[close_col] * 0.02
-            atr_pct = 2.0
+        # Final fallback: use intraday ONLY if no ATR calculated yet
+        if atr is None:
+            if high_col and low_col:
+                # Fallback: use intraday (5m data)
+                high_low = df[high_col] - df[low_col]
+                atr = high_low.rolling(14).mean().iloc[-1]
+                atr_pct = (atr / current[close_col]) * 100
+                print(f"  ⚠️ Using INTRADAY ATR fallback (5m): {atr_pct:.2f}%")
+            else:
+                atr = current[close_col] * 0.02
+                atr_pct = 2.0
+                print(f"  ⚠️ Using DEFAULT ATR: 2.0%")
         
         # Support/Resistance - from S/R timeframe (15m, 3d)
         # NOTE: This is INTRADAY S/R (simple min/max from last 100 15m candles)

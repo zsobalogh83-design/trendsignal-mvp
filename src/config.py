@@ -19,12 +19,15 @@ from pathlib import Path
 
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")
+GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")  # GNews API (real-time, no delay)
 
 # For development/testing (replace with your keys)
 if not NEWSAPI_KEY:
     NEWSAPI_KEY = "c042824059404c8e9da37ef7cd4088b6"
 if not ALPHAVANTAGE_KEY:
     ALPHAVANTAGE_KEY = "Q3R3ZCIBFDJI8BU9"
+if not GNEWS_API_KEY:
+    GNEWS_API_KEY = "422e63bafec92ab1e705b47455a16ce5"
 
 
 # ==========================================
@@ -229,6 +232,7 @@ class TrendSignalConfig:
     # API Keys
     newsapi_key: str = NEWSAPI_KEY
     alphavantage_key: str = ALPHAVANTAGE_KEY
+    gnews_api_key: str = GNEWS_API_KEY  # GNews API (real-time news, no 24h delay)
     
     # Decay model
     decay_weights: Dict[str, float] = None
