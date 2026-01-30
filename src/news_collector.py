@@ -24,6 +24,14 @@ except ImportError:
     HAS_HUNGARIAN = False
     print("⚠️ Hungarian news module not available")
 
+# Import GNews collector
+try:
+    from src.gnews_collector import GNewsCollector
+    HAS_GNEWS = True
+except ImportError:
+    HAS_GNEWS = False
+    print("⚠️ GNews module not available")
+
 if TYPE_CHECKING:
     from src.multilingual_sentiment import MultilingualSentimentAnalyzer
 
@@ -34,6 +42,17 @@ class NewsCollector:
     def __init__(self, config: Optional[TrendSignalConfig] = None, db: Optional[Session] = None):
         self.config = config or get_config()
         self.db = db  # Optional database session
+        
+        # Initialize GNews collector
+        if HAS_GNEWS and self.config.gnews_api_key:
+            try:
+                self.gnews_collector = GNewsCollector(self.config.gnews_api_key)
+                print("✅ GNews collector ready (100 req/day, real-time)")
+            except Exception as e:
+                self.gnews_collector = None
+                print(f"⚠️ GNews collector init failed: {e}")
+        else:
+            self.gnews_collector = None
         
         # Initialize Hungarian collector
         if HAS_HUNGARIAN:
@@ -72,18 +91,35 @@ class NewsCollector:
         all_news = []
         sentiment_analyzer = MultilingualSentimentAnalyzer(self.config, ticker_symbol)
         
-        # Collect English news (NewsAPI + AlphaVantage)
-        if self.config.newsapi_key and self.config.newsapi_key != "YOUR_NEWSAPI_KEY_HERE":
-            newsapi_items = self._collect_from_newsapi(
+        # ===== MULTI-SOURCE STRATEGY =====
+        # Priority: GNews (real-time) > Alpha Vantage (financial focus) > NewsAPI (delayed)
+        
+        # US Blue Chips: Prioritize GNews + Alpha Vantage
+        is_us_ticker = not ticker_symbol.endswith('.BD')
+        
+        # 1. GNews (real-time, no delay) - PRIORITY for US tickers
+        if self.gnews_collector and is_us_ticker:
+            gnews_items = self._collect_from_gnews(
                 ticker_symbol, company_name, lookback_hours, sentiment_analyzer
             )
-            all_news.extend(newsapi_items)
+            all_news.extend(gnews_items)
+            print(f"  📰 GNews: {len(gnews_items)} articles")
         
-        if self.config.alphavantage_key and self.config.alphavantage_key != "YOUR_ALPHAVANTAGE_KEY_HERE":
+        # 2. Alpha Vantage (financial focus) - ONLY for US tickers (conserve 25 req/day limit)
+        if is_us_ticker and self.config.alphavantage_key:
             alphavantage_items = self._collect_from_alphavantage(
                 ticker_symbol, lookback_hours, sentiment_analyzer
             )
             all_news.extend(alphavantage_items)
+            print(f"  📰 Alpha Vantage: {len(alphavantage_items)} articles")
+        
+        # 3. NewsAPI (legacy, 24h delay) - Fallback if no GNews
+        if not self.gnews_collector and self.config.newsapi_key:
+            newsapi_items = self._collect_from_newsapi(
+                ticker_symbol, company_name, lookback_hours, sentiment_analyzer
+            )
+            all_news.extend(newsapi_items)
+            print(f"  📰 NewsAPI (delayed): {len(newsapi_items)} articles")
         
         # Collect Hungarian news for BÉT tickers
         if self.hungarian_collector and ticker_symbol.endswith('.BD'):
@@ -123,6 +159,56 @@ class NewsCollector:
                 
         except Exception as e:
             print(f"⚠️ Could not save news to DB: {e}")
+    
+    def _collect_from_gnews(
+        self,
+        ticker_symbol: str,
+        company_name: str,
+        lookback_hours: int,
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer'
+    ) -> List[NewsItem]:
+        """
+        Collect from GNews API (real-time, no 24h delay)
+        
+        Priority for US blue chip tickers
+        """
+        try:
+            news_items = self.gnews_collector.collect_news(
+                ticker_symbol=ticker_symbol,
+                max_articles=10
+            )
+            
+            # Convert to NewsItem format with sentiment analysis
+            analyzed_items = []
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+            
+            for item in news_items:
+                # Filter by time
+                if item['published_at'] < cutoff_time:
+                    continue
+                
+                # Analyze sentiment
+                text = f"{item['title']}. {item.get('description', '')}"
+                sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
+                
+                news_item = NewsItem(
+                    title=item['title'],
+                    description=item.get('description', ''),
+                    url=item['url'],
+                    published_at=item['published_at'],
+                    source=f"GNews-{item['source']}",
+                    sentiment_score=sentiment['score'],
+                    sentiment_confidence=sentiment['confidence'],
+                    sentiment_label=sentiment['label'],
+                    credibility=0.85  # GNews high credibility
+                )
+                analyzed_items.append(news_item)
+            
+            return analyzed_items
+            
+        except Exception as e:
+            print(f"  ❌ GNews collection error: {e}")
+            return []
     
     def _collect_from_newsapi(
         self,

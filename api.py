@@ -2,6 +2,8 @@
 TrendSignal MVP - Complete Working API with Database Integration
 All endpoints functional with SQLite persistence
 No duplicate endpoints - signals handled by signals_api router
+
+FIXED: CORS + Host settings for proper frontend connection
 """
 
 from fastapi import FastAPI, HTTPException, Depends
@@ -40,12 +42,21 @@ app = FastAPI(title="TrendSignal API", version="0.1.0")
 app.include_router(config_router)
 app.include_router(signals_router)
 
+# ==========================================
+# CORS CONFIGURATION - CRITICAL FOR FRONTEND
+# ==========================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",      # Vite dev server
+        "http://127.0.0.1:5173",      # Alternative localhost
+        "http://localhost:3000",      # Alternative port
+        "http://127.0.0.1:3000",      # Alternative port
+        "*"                            # Fallback (development only)
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],              # Allow GET, POST, PUT, DELETE, etc.
+    allow_headers=["*"],              # Allow all headers
 )
 
 @app.on_event("startup")
@@ -163,9 +174,18 @@ async def database_status(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ==========================================
+# MAIN ENTRY POINT - FIXED HOST SETTING
+# ==========================================
 if __name__ == "__main__":
     import uvicorn
     print("🚀 Starting TrendSignal API server...")
     print("📊 Database: SQLite")
     print("🔗 Signals API: Integrated via signals_api router")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("=" * 60)
+    print("🌐 Server starting on: http://127.0.0.1:8000")
+    print("📖 API Documentation: http://127.0.0.1:8000/docs")
+    print("✅ Frontend should connect to: http://localhost:8000")
+    print("=" * 60)
+    
+    uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
