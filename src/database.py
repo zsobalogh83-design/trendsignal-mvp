@@ -33,6 +33,7 @@ def get_db():
 # Initialize database (create all tables)
 def init_db():
     """Create all tables in the database"""
-    from models import Base
+    # Import models to register them with Base
+    import models  # This registers all models
     Base.metadata.create_all(bind=engine)
     print("✅ Database tables created successfully!")

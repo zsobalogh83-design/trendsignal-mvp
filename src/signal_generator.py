@@ -587,7 +587,8 @@ def generate_signals_for_tickers(
     tickers: List[Dict],
     sentiment_data_dict: Dict,
     technical_data_dict: Dict,
-    config=None
+    config=None,
+    db=None  # Database session for saving indicators
 ) -> List[TradingSignal]:
     """
     Generate signals for multiple tickers with ROBUST error handling
@@ -644,7 +645,8 @@ def generate_signals_for_tickers(
                         df_trend=df_1h,
                         df_volatility=df_vol,
                         df_sr=df_sr,
-                        df_daily=df_daily  # NEW: For ATR from daily data
+                        df_daily=df_daily,  # NEW: For ATR from daily data
+                        db=db  # Pass database session for saving indicators
                     )
                 else:
                     technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
@@ -654,7 +656,7 @@ def generate_signals_for_tickers(
             # Handle single DataFrame (backward compatibility)
             elif isinstance(technical_data_raw, pd.DataFrame) and len(technical_data_raw) > 50:
                 print(f"📊 [{ticker_symbol}] Calculating technical from {len(technical_data_raw)} candles...")
-                technical_data = calculate_technical_score(technical_data_raw, ticker_symbol)
+                technical_data = calculate_technical_score(technical_data_raw, ticker_symbol, db=db)
                 swing_sr = None
             elif isinstance(technical_data_raw, dict) and 'score' in technical_data_raw:
                 technical_data = technical_data_raw
@@ -802,7 +804,8 @@ def calculate_technical_score(
     df_trend: Optional[pd.DataFrame] = None,
     df_volatility: Optional[pd.DataFrame] = None,
     df_sr: Optional[pd.DataFrame] = None,
-    df_daily: Optional[pd.DataFrame] = None  # NEW: For ATR from daily data
+    df_daily: Optional[pd.DataFrame] = None,  # NEW: For ATR from daily data
+    db: Optional = None  # NEW: Database session for saving indicators
 ) -> Dict:
     """
     Calculate technical score from MULTI-TIMEFRAME data
@@ -879,6 +882,47 @@ def calculate_technical_score(
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
+        
+        # EMA 12 and 26 for MACD
+        df['ema_12'] = df[close_col].ewm(span=12, adjust=False).mean()
+        df['ema_26'] = df[close_col].ewm(span=26, adjust=False).mean()
+        
+        # MACD
+        df['macd'] = df['ema_12'] - df['ema_26']
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_histogram'] = df['macd'] - df['macd_signal']
+        
+        # Stochastic Oscillator
+        if high_col and low_col:
+            low_14 = df[low_col].rolling(window=14).min()
+            high_14 = df[high_col].rolling(window=14).max()
+            df['stoch_k'] = 100 * ((df[close_col] - low_14) / (high_14 - low_14))
+            df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()
+        
+        # Bollinger Bands
+        df['bb_middle'] = df[close_col].rolling(window=20).mean()
+        bb_std = df[close_col].rolling(window=20).std()
+        df['bb_upper'] = df['bb_middle'] + (bb_std * 2)
+        df['bb_lower'] = df['bb_middle'] - (bb_std * 2)
+        
+        # CCI (Commodity Channel Index)
+        if high_col and low_col:
+            tp = (df[high_col] + df[low_col] + df[close_col]) / 3  # Typical Price
+            sma_tp = tp.rolling(window=20).mean()
+            mad = tp.rolling(window=20).apply(lambda x: abs(x - x.mean()).mean())
+            df['cci'] = (tp - sma_tp) / (0.015 * mad)
+        
+        # OBV (On-Balance Volume)
+        if 'volume' in df.columns:
+            obv = [0]
+            for i in range(1, len(df)):
+                if df[close_col].iloc[i] > df[close_col].iloc[i-1]:
+                    obv.append(obv[-1] + df['volume'].iloc[i])
+                elif df[close_col].iloc[i] < df[close_col].iloc[i-1]:
+                    obv.append(obv[-1] - df['volume'].iloc[i])
+                else:
+                    obv.append(obv[-1])
+            df['obv'] = obv
         
         # Latest values from INTRADAY
         current = df.iloc[-1]
@@ -1203,6 +1247,46 @@ def calculate_technical_score(
             "sma_50": float(sma_50_for_comparison) if pd.notna(sma_50_for_comparison) else None,  # From trend df!
             "adx": float(adx) if adx is not None else None
         }
+        
+        # Save technical indicators to database
+        if db is not None:
+            try:
+                from db_helpers import save_technical_indicators_to_db
+                
+                indicators_to_save = {
+                    'sma_20': float(current['sma_20']) if pd.notna(current.get('sma_20')) else None,
+                    'sma_50': float(sma_50_for_comparison) if pd.notna(sma_50_for_comparison) else None,
+                    'rsi': float(current['rsi']) if pd.notna(current.get('rsi')) else None,
+                    'adx': float(adx) if adx is not None else None,
+                    'atr': float(atr) if atr is not None else None,
+                    'stoch_k': float(current['stoch_k']) if 'stoch_k' in current and pd.notna(current['stoch_k']) else None,
+                    'stoch_d': float(current['stoch_d']) if 'stoch_d' in current and pd.notna(current['stoch_d']) else None,
+                    'macd': float(current['macd']) if 'macd' in current and pd.notna(current['macd']) else None,
+                    'macd_signal': float(current['macd_signal']) if 'macd_signal' in current and pd.notna(current['macd_signal']) else None,
+                    'macd_histogram': float(current['macd_histogram']) if 'macd_histogram' in current and pd.notna(current['macd_histogram']) else None,
+                    'bb_upper': float(current['bb_upper']) if 'bb_upper' in current and pd.notna(current['bb_upper']) else None,
+                    'bb_middle': float(current['bb_middle']) if 'bb_middle' in current and pd.notna(current['bb_middle']) else None,
+                    'bb_lower': float(current['bb_lower']) if 'bb_lower' in current and pd.notna(current['bb_lower']) else None,
+                    'close_price': float(current[close_col])
+                }
+                
+                # Use the last timestamp from the dataframe
+                timestamp = df.index[-1]
+                if not hasattr(timestamp, 'tzinfo') or timestamp.tzinfo is None:
+                    from datetime import timezone as tz
+                    timestamp = timestamp.replace(tzinfo=tz.utc)
+                
+                save_technical_indicators_to_db(
+                    ticker_symbol=ticker_symbol,
+                    interval='5m',  # Primary timeframe
+                    timestamp=timestamp,
+                    indicators=indicators_to_save,
+                    db=db
+                )
+                print(f"  💾 Technical indicators saved to DB")
+                
+            except Exception as e:
+                print(f"  ⚠️ Could not save technical indicators to DB: {e}")
         
         adx_str = f" | ADX: {adx:.1f}" if adx is not None else ""
         print(f"  ✅ Technical: {tech_score:.1f} (Conf: {technical_confidence:.0%}) | RSI: {current['rsi']:.1f}{adx_str} | Price: ${current[close_col]:.2f}")
