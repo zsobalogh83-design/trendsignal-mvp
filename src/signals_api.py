@@ -19,7 +19,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.database import get_db
-from src.models import Ticker, Signal
+from models import Ticker, Signal
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +180,11 @@ async def generate_all_signals(
         else:
             # All active tickers
             tickers = db.query(Ticker).filter(Ticker.is_active == True).all()
+            print(f"🔍 DEBUG: Query returned {len(tickers)} tickers from database")
+            for t in tickers:
+                print(f"   - {t.symbol}: {t.name} (active={t.is_active})")
             tickers_to_process = [{'symbol': t.symbol, 'name': t.name} for t in tickers]
+            print(f"🔍 DEBUG: tickers_to_process has {len(tickers_to_process)} items")
         
         if not tickers_to_process:
             logger.warning("No tickers to process")

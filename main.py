@@ -21,7 +21,7 @@ from utils import fetch_price_data, fetch_dual_timeframe, display_dataframe_summ
 
 # Database imports (optional)
 try:
-    from src.database import SessionLocal
+    from database import SessionLocal
     HAS_DATABASE = True
 except ImportError:
     HAS_DATABASE = False
@@ -106,7 +106,8 @@ def run_analysis(
             ticker_symbol=ticker_symbol, 
             df_trend=price_df_1h,
             df_volatility=price_df_vol,
-            df_sr=price_df_sr
+            df_sr=price_df_sr,
+            db=db  # Pass database session for saving indicators
         )
         
         # Calculate risk score
@@ -209,7 +210,7 @@ def run_batch_analysis(
         print("=" * 70)
         
         # Generate signals
-        signals = generate_signals_for_tickers(tickers, news_data, price_data, config)
+        signals = generate_signals_for_tickers(tickers, news_data, price_data, config, db=db)
         
         print("\n" + "=" * 70)
         print(f"✅ Generated {len(signals)} signals")

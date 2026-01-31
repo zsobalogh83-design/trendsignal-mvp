@@ -340,23 +340,32 @@ export function Dashboard() {
                     💰 Entry & Exit Levels
                   </div>
                   
-                  {[
-                    { label: 'Entry Price', value: signal.entry_price },
-                    { label: 'Take-Profit', value: signal.take_profit, change: ((signal.take_profit - signal.entry_price) / signal.entry_price * 100), positive: true },
-                    { label: 'Stop-Loss', value: signal.stop_loss, change: ((signal.stop_loss - signal.entry_price) / signal.entry_price * 100), positive: false },
-                    { label: 'Risk/Reward', value: `1:${signal.risk_reward_ratio.toFixed(1)}`, isRatio: true }
-                  ].map((level, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '13px', color: '#94a3b8' }}>{level.label}</span>
-                      <span style={{ 
-                        fontWeight: '600', 
-                        color: level.positive === true ? '#10b981' : level.positive === false ? '#ef4444' : '#e0e7ff' 
-                      }}>
-                        {level.isRatio ? level.value : `${level.value.toFixed(2)} ${signal.ticker_symbol.includes('.') ? 'HUF' : 'USD'}`}
-                        {level.change && ` (${level.change > 0 ? '+' : ''}${level.change.toFixed(1)}%)`}
-                      </span>
+                  {signal.decision !== 'HOLD' && signal.entry_price > 0 ? (
+                    [
+                      { label: 'Entry Price', value: signal.entry_price },
+                      { label: 'Take-Profit', value: signal.take_profit, change: signal.take_profit && signal.entry_price ? ((signal.take_profit - signal.entry_price) / signal.entry_price * 100) : null, positive: true },
+                      { label: 'Stop-Loss', value: signal.stop_loss, change: signal.stop_loss && signal.entry_price ? ((signal.stop_loss - signal.entry_price) / signal.entry_price * 100) : null, positive: false },
+                      { label: 'Risk/Reward', value: signal.risk_reward_ratio, isRatio: true }
+                    ].map((level, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '13px', color: '#94a3b8' }}>{level.label}</span>
+                        <span style={{ 
+                          fontWeight: '600', 
+                          color: level.positive === true ? '#10b981' : level.positive === false ? '#ef4444' : '#e0e7ff' 
+                        }}>
+                          {level.isRatio 
+                            ? (level.value ? `1:${level.value.toFixed(1)}` : '-')
+                            : (level.value && !isNaN(level.value) ? `${level.value.toFixed(2)} ${signal.ticker_symbol.includes('.') ? 'HUF' : 'USD'}` : '-')
+                          }
+                          {level.change && !isNaN(level.change) && ` (${level.change > 0 ? '+' : ''}${level.change.toFixed(1)}%)`}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
+                      No active trading position
                     </div>
-                  ))}
+                  )}
                 </div>
 
                 {/* Quick Info */}

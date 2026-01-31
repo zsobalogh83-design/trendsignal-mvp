@@ -21,8 +21,8 @@ from main import get_config
 
 # Database imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-from src.database import get_db
-from src.models import Ticker, Signal, NewsItem, NewsSource, NewsTicker
+from database import get_db
+from models import Ticker, Signal, NewsItem, NewsSource, NewsTicker
 
 # Import NewsCollector with fixed datetime handling
 try:

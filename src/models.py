@@ -12,6 +12,7 @@ from database import Base
 class Ticker(Base):
     """Stock ticker/company information"""
     __tablename__ = "tickers"
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String(10), unique=True, nullable=False, index=True)
@@ -25,13 +26,14 @@ class Ticker(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
     # Relationships
-    signals = relationship("Signal", back_populates="ticker")
-    price_data = relationship("PriceData", back_populates="ticker")
+    signals = relationship("Signal", back_populates="ticker", lazy="dynamic")
+    price_data = relationship("PriceData", back_populates="ticker", lazy="dynamic")
 
 
 class NewsSource(Base):
     """News data sources (APIs, RSS feeds)"""
     __tablename__ = "news_sources"
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
@@ -43,12 +45,13 @@ class NewsSource(Base):
     created_at = Column(DateTime, server_default=func.now())
     
     # Relationships
-    news_items = relationship("NewsItem", back_populates="source")
+    news_items = relationship("NewsItem", back_populates="source", lazy="dynamic")
 
 
 class NewsItem(Base):
     """Individual news articles"""
     __tablename__ = "news_items"
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     url = Column(Text, nullable=False)
@@ -79,14 +82,15 @@ class NewsItem(Base):
     cluster_id = Column(String(50))
     
     # Relationships
-    source = relationship("NewsSource", back_populates="news_items")
-    categories = relationship("NewsCategory", back_populates="news_item", cascade="all, delete-orphan")
-    tickers = relationship("NewsTicker", back_populates="news_item", cascade="all, delete-orphan")
+    source = relationship("NewsSource", back_populates="news_items", lazy="select")
+    categories = relationship("NewsCategory", back_populates="news_item", cascade="all, delete-orphan", lazy="dynamic")
+    tickers = relationship("NewsTicker", back_populates="news_item", cascade="all, delete-orphan", lazy="dynamic")
 
 
 class NewsTicker(Base):
     """Many-to-many relationship between news and tickers"""
     __tablename__ = "news_tickers"
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     news_id = Column(Integer, ForeignKey("news_items.id", ondelete="CASCADE"), nullable=False)
@@ -94,13 +98,14 @@ class NewsTicker(Base):
     relevance_score = Column(Float)
     
     # Relationships
-    news_item = relationship("NewsItem", back_populates="tickers")
-    ticker = relationship("Ticker")
+    news_item = relationship("NewsItem", back_populates="tickers", lazy="select")
+    ticker = relationship("Ticker", lazy="select")
 
 
 class NewsCategory(Base):
     """Categories for news items (multi-label)"""
     __tablename__ = "news_categories"
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     news_id = Column(Integer, ForeignKey("news_items.id", ondelete="CASCADE"), nullable=False)
@@ -108,12 +113,13 @@ class NewsCategory(Base):
     confidence = Column(Float)
     
     # Relationships
-    news_item = relationship("NewsItem", back_populates="categories")
+    news_item = relationship("NewsItem", back_populates="categories", lazy="select")
 
 
 class PriceData(Base):
     """Historical price data (OHLCV)"""
     __tablename__ = "price_data"
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     ticker_id = Column(Integer, ForeignKey("tickers.id"))
@@ -133,12 +139,13 @@ class PriceData(Base):
     fetched_at = Column(DateTime, server_default=func.now())
     
     # Relationships
-    ticker = relationship("Ticker", back_populates="price_data")
+    ticker = relationship("Ticker", back_populates="price_data", lazy="select")
 
 
 class TechnicalIndicator(Base):
     """Calculated technical indicators"""
     __tablename__ = "technical_indicators"
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     ticker_symbol = Column(String(10), nullable=False, index=True)
@@ -179,6 +186,7 @@ class TechnicalIndicator(Base):
 class Signal(Base):
     """Generated trading signals"""
     __tablename__ = "signals"
+    __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     ticker_id = Column(Integer, ForeignKey("tickers.id"))
@@ -214,4 +222,4 @@ class Signal(Base):
     expires_at = Column(DateTime)
     
     # Relationships
-    ticker = relationship("Ticker", back_populates="signals")
+    ticker = relationship("Ticker", back_populates="signals", lazy="select")
