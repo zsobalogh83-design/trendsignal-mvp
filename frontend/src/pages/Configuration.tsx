@@ -27,6 +27,17 @@ export function Configuration() {
     risk: 10,
   });
 
+  const [thresholds, setThresholds] = useState({
+    strongBuyScore: 65,
+    strongBuyConfidence: 0.75,
+    moderateBuyScore: 50,
+    moderateBuyConfidence: 0.65,
+    strongSellScore: -65,
+    strongSellConfidence: 0.75,
+    moderateSellScore: -50,
+    moderateSellConfidence: 0.65,
+  });
+
   // ===== LOAD CONFIG FROM BACKEND ON MOUNT =====
   useEffect(() => {
     loadConfigFromBackend();
@@ -34,7 +45,7 @@ export function Configuration() {
 
   const loadConfigFromBackend = async () => {
     try {
-      // Load signal weights
+      // Load signal weights and thresholds
       const response = await fetch('http://localhost:8000/api/v1/config/signal');
       if (response.ok) {
         const config = await response.json();
@@ -42,6 +53,16 @@ export function Configuration() {
           sentiment: Math.round(config.sentiment_weight * 100),
           technical: Math.round(config.technical_weight * 100),
           risk: Math.round(config.risk_weight * 100),
+        });
+        setThresholds({
+          strongBuyScore: config.strong_buy_score,
+          strongBuyConfidence: config.strong_buy_confidence,
+          moderateBuyScore: config.moderate_buy_score,
+          moderateBuyConfidence: config.moderate_buy_confidence,
+          strongSellScore: config.strong_sell_score,
+          strongSellConfidence: config.strong_sell_confidence,
+          moderateSellScore: config.moderate_sell_score,
+          moderateSellConfidence: config.moderate_sell_confidence,
         });
         console.log('✅ Signal config loaded:', config);
       }
@@ -75,11 +96,19 @@ export function Configuration() {
         return;
       }
       
-      // Convert percentages to decimals (0.7, 0.2, 0.1)
+      // Convert percentages to decimals (0.7, 0.2, 0.1) and add thresholds
       const payload = {
         sentiment_weight: componentWeights.sentiment / 100,
         technical_weight: componentWeights.technical / 100,
         risk_weight: componentWeights.risk / 100,
+        strong_buy_score: thresholds.strongBuyScore,
+        strong_buy_confidence: thresholds.strongBuyConfidence,
+        moderate_buy_score: thresholds.moderateBuyScore,
+        moderate_buy_confidence: thresholds.moderateBuyConfidence,
+        strong_sell_score: thresholds.strongSellScore,
+        strong_sell_confidence: thresholds.strongSellConfidence,
+        moderate_sell_score: thresholds.moderateSellScore,
+        moderate_sell_confidence: thresholds.moderateSellConfidence,
       };
       
       console.log('📤 Saving config to backend:', payload);
@@ -120,6 +149,11 @@ export function Configuration() {
               `Sentiment: ${componentWeights.sentiment}%\n` +
               `Technical: ${componentWeights.technical}%\n` +
               `Risk: ${componentWeights.risk}%\n\n` +
+              'Thresholds:\n' +
+              `Strong BUY: Score ≥ ${thresholds.strongBuyScore}, Conf ≥ ${Math.round(thresholds.strongBuyConfidence * 100)}%\n` +
+              `Moderate BUY: Score ≥ ${thresholds.moderateBuyScore}, Conf ≥ ${Math.round(thresholds.moderateBuyConfidence * 100)}%\n` +
+              `Strong SELL: Score ≤ ${thresholds.strongSellScore}, Conf ≥ ${Math.round(thresholds.strongSellConfidence * 100)}%\n` +
+              `Moderate SELL: Score ≤ ${thresholds.moderateSellScore}, Conf ≥ ${Math.round(thresholds.moderateSellConfidence * 100)}%\n\n` +
               'Decay Weights:\n' +
               `0-2h: ${sentimentWeights.fresh_0_2h}%\n` +
               `2-6h: ${sentimentWeights.strong_2_6h}%\n` +
@@ -277,7 +311,7 @@ export function Configuration() {
         {activeTab === 1 && <NewsSourcesTab />}
         {activeTab === 2 && <SentimentTab weights={sentimentWeights} setWeights={setSentimentWeights} />}
         {activeTab === 3 && <TechnicalTab />}
-        {activeTab === 4 && <SignalsTab componentWeights={componentWeights} setComponentWeights={setComponentWeights} />}
+        {activeTab === 4 && <SignalsTab componentWeights={componentWeights} setComponentWeights={setComponentWeights} thresholds={thresholds} setThresholds={setThresholds} />}
 
         {/* Add Ticker Modal */}
         {showTickerModal && (
@@ -549,7 +583,7 @@ function TechnicalTab() {
 }
 
 // Signals Tab
-function SignalsTab({ componentWeights, setComponentWeights }: any) {
+function SignalsTab({ componentWeights, setComponentWeights, thresholds, setThresholds }: any) {
   return (
     <div>
       <div style={{
@@ -629,11 +663,270 @@ function SignalsTab({ componentWeights, setComponentWeights }: any) {
         borderRadius: '16px',
         padding: '24px'
       }}>
-        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '20px' }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
           🎯 Signal Decision Thresholds
         </div>
-        <div style={{ fontSize: '14px', color: '#cbd5e1', padding: '20px', textAlign: 'center' }}>
-          Threshold configuration coming in Phase 2
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Define score and confidence thresholds for signal strength classification
+        </div>
+
+        <div style={{
+          background: 'rgba(59, 130, 246, 0.1)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+          borderRadius: '8px',
+          padding: '14px',
+          marginBottom: '20px',
+          color: '#60a5fa'
+        }}>
+          ℹ️ Higher thresholds = Fewer but higher quality signals
+        </div>
+
+        {/* BUY Thresholds */}
+        <div style={{ marginBottom: '32px' }}>
+          <div style={{ fontSize: '16px', fontWeight: '600', color: '#10b981', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🟢</span>
+            <span>BUY Signal Thresholds</span>
+          </div>
+
+          {/* Strong Buy Score */}
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Strong Buy Score</span>
+              <span style={{ fontSize: '15px', fontWeight: '700', color: '#10b981' }}>
+                {thresholds.strongBuyScore}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={50}
+              max={80}
+              value={thresholds.strongBuyScore}
+              onChange={(e) => setThresholds({ ...thresholds, strongBuyScore: parseInt(e.target.value) })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Combined score must be ≥ this value
+            </div>
+          </div>
+
+          {/* Strong Buy Confidence */}
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Strong Buy Confidence</span>
+              <span style={{ fontSize: '15px', fontWeight: '700', color: '#10b981' }}>
+                {Math.round(thresholds.strongBuyConfidence * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={60}
+              max={90}
+              value={thresholds.strongBuyConfidence * 100}
+              onChange={(e) => setThresholds({ ...thresholds, strongBuyConfidence: parseInt(e.target.value) / 100 })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Overall confidence must be ≥ this value
+            </div>
+          </div>
+
+          {/* Moderate Buy Score */}
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Moderate Buy Score</span>
+              <span style={{ fontSize: '15px', fontWeight: '700', color: '#10b981' }}>
+                {thresholds.moderateBuyScore}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={30}
+              max={65}
+              value={thresholds.moderateBuyScore}
+              onChange={(e) => setThresholds({ ...thresholds, moderateBuyScore: parseInt(e.target.value) })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Combined score must be ≥ this value
+            </div>
+          </div>
+
+          {/* Moderate Buy Confidence */}
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Moderate Buy Confidence</span>
+              <span style={{ fontSize: '15px', fontWeight: '700', color: '#10b981' }}>
+                {Math.round(thresholds.moderateBuyConfidence * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={50}
+              max={75}
+              value={thresholds.moderateBuyConfidence * 100}
+              onChange={(e) => setThresholds({ ...thresholds, moderateBuyConfidence: parseInt(e.target.value) / 100 })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Overall confidence must be ≥ this value
+            </div>
+          </div>
+        </div>
+
+        {/* SELL Thresholds */}
+        <div>
+          <div style={{ fontSize: '16px', fontWeight: '600', color: '#ef4444', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🔴</span>
+            <span>SELL Signal Thresholds</span>
+          </div>
+
+          {/* Strong Sell Score */}
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Strong Sell Score</span>
+              <span style={{ fontSize: '15px', fontWeight: '700', color: '#ef4444' }}>
+                {thresholds.strongSellScore}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={-80}
+              max={-50}
+              value={thresholds.strongSellScore}
+              onChange={(e) => setThresholds({ ...thresholds, strongSellScore: parseInt(e.target.value) })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Combined score must be ≤ this value
+            </div>
+          </div>
+
+          {/* Strong Sell Confidence */}
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Strong Sell Confidence</span>
+              <span style={{ fontSize: '15px', fontWeight: '700', color: '#ef4444' }}>
+                {Math.round(thresholds.strongSellConfidence * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={60}
+              max={90}
+              value={thresholds.strongSellConfidence * 100}
+              onChange={(e) => setThresholds({ ...thresholds, strongSellConfidence: parseInt(e.target.value) / 100 })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Overall confidence must be ≥ this value
+            </div>
+          </div>
+
+          {/* Moderate Sell Score */}
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Moderate Sell Score</span>
+              <span style={{ fontSize: '15px', fontWeight: '700', color: '#ef4444' }}>
+                {thresholds.moderateSellScore}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={-65}
+              max={-30}
+              value={thresholds.moderateSellScore}
+              onChange={(e) => setThresholds({ ...thresholds, moderateSellScore: parseInt(e.target.value) })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Combined score must be ≤ this value
+            </div>
+          </div>
+
+          {/* Moderate Sell Confidence */}
+          <div style={{ margin: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Moderate Sell Confidence</span>
+              <span style={{ fontSize: '15px', fontWeight: '700', color: '#ef4444' }}>
+                {Math.round(thresholds.moderateSellConfidence * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={50}
+              max={75}
+              value={thresholds.moderateSellConfidence * 100}
+              onChange={(e) => setThresholds({ ...thresholds, moderateSellConfidence: parseInt(e.target.value) / 100 })}
+              style={{
+                width: '100%',
+                height: '6px',
+                borderRadius: '3px',
+                background: 'rgba(51, 65, 85, 0.5)',
+                outline: 'none',
+                WebkitAppearance: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Overall confidence must be ≥ this value
+            </div>
+          </div>
         </div>
       </div>
     </div>
