@@ -62,6 +62,34 @@ class DecayWeightsResponse(BaseModel):
     intraday_6_12h: int
     overnight_12_24h: int
 
+class TechnicalWeightsUpdate(BaseModel):
+    """Model for updating technical component weights"""
+    tech_sma20_bullish: Optional[int] = Field(None, ge=0, le=100)
+    tech_sma20_bearish: Optional[int] = Field(None, ge=0, le=100)
+    tech_sma50_bullish: Optional[int] = Field(None, ge=0, le=100)
+    tech_sma50_bearish: Optional[int] = Field(None, ge=0, le=100)
+    tech_golden_cross: Optional[int] = Field(None, ge=0, le=100)
+    tech_death_cross: Optional[int] = Field(None, ge=0, le=100)
+    tech_rsi_neutral: Optional[int] = Field(None, ge=0, le=100)
+    tech_rsi_bullish: Optional[int] = Field(None, ge=0, le=100)
+    tech_rsi_weak_bullish: Optional[int] = Field(None, ge=0, le=100)
+    tech_rsi_overbought: Optional[int] = Field(None, ge=0, le=100)
+    tech_rsi_oversold: Optional[int] = Field(None, ge=0, le=100)
+
+class TechnicalWeightsResponse(BaseModel):
+    """Response model for technical component weights"""
+    tech_sma20_bullish: int
+    tech_sma20_bearish: int
+    tech_sma50_bullish: int
+    tech_sma50_bearish: int
+    tech_golden_cross: int
+    tech_death_cross: int
+    tech_rsi_neutral: int
+    tech_rsi_bullish: int
+    tech_rsi_weak_bullish: int
+    tech_rsi_overbought: int
+    tech_rsi_oversold: int
+
 # ===== ENDPOINTS =====
 
 @router.get("/signal", response_model=SignalConfigResponse)
@@ -273,6 +301,89 @@ async def update_decay_weights(updates: DecayWeightsUpdate):
         
     except Exception as e:
         logger.error(f"Error updating decay weights: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+# ===== TECHNICAL COMPONENT WEIGHTS ENDPOINTS =====
+
+@router.get("/technical-weights", response_model=TechnicalWeightsResponse)
+async def get_technical_weights():
+    """Get current technical component weights"""
+    try:
+        from src.config import get_config
+        config = get_config()
+        
+        return TechnicalWeightsResponse(
+            tech_sma20_bullish=config.tech_sma20_bullish,
+            tech_sma20_bearish=config.tech_sma20_bearish,
+            tech_sma50_bullish=config.tech_sma50_bullish,
+            tech_sma50_bearish=config.tech_sma50_bearish,
+            tech_golden_cross=config.tech_golden_cross,
+            tech_death_cross=config.tech_death_cross,
+            tech_rsi_neutral=config.tech_rsi_neutral,
+            tech_rsi_bullish=config.tech_rsi_bullish,
+            tech_rsi_weak_bullish=config.tech_rsi_weak_bullish,
+            tech_rsi_overbought=config.tech_rsi_overbought,
+            tech_rsi_oversold=config.tech_rsi_oversold
+        )
+    except Exception as e:
+        logger.error(f"Error getting technical weights: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.put("/technical-weights", response_model=TechnicalWeightsResponse)
+async def update_technical_weights(updates: TechnicalWeightsUpdate):
+    """Update technical component weights"""
+    try:
+        from src.config import get_config, update_config_values
+        
+        config = get_config()
+        config_updates = {}
+        
+        if updates.tech_sma20_bullish is not None:
+            config_updates["TECH_SMA20_BULLISH"] = updates.tech_sma20_bullish
+        if updates.tech_sma20_bearish is not None:
+            config_updates["TECH_SMA20_BEARISH"] = updates.tech_sma20_bearish
+        if updates.tech_sma50_bullish is not None:
+            config_updates["TECH_SMA50_BULLISH"] = updates.tech_sma50_bullish
+        if updates.tech_sma50_bearish is not None:
+            config_updates["TECH_SMA50_BEARISH"] = updates.tech_sma50_bearish
+        if updates.tech_golden_cross is not None:
+            config_updates["TECH_GOLDEN_CROSS"] = updates.tech_golden_cross
+        if updates.tech_death_cross is not None:
+            config_updates["TECH_DEATH_CROSS"] = updates.tech_death_cross
+        if updates.tech_rsi_neutral is not None:
+            config_updates["TECH_RSI_NEUTRAL"] = updates.tech_rsi_neutral
+        if updates.tech_rsi_bullish is not None:
+            config_updates["TECH_RSI_BULLISH"] = updates.tech_rsi_bullish
+        if updates.tech_rsi_weak_bullish is not None:
+            config_updates["TECH_RSI_WEAK_BULLISH"] = updates.tech_rsi_weak_bullish
+        if updates.tech_rsi_overbought is not None:
+            config_updates["TECH_RSI_OVERBOUGHT"] = updates.tech_rsi_overbought
+        if updates.tech_rsi_oversold is not None:
+            config_updates["TECH_RSI_OVERSOLD"] = updates.tech_rsi_oversold
+        
+        if not config_updates:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No updates provided"
+            )
+        
+        update_config_values(config, config_updates)
+        
+        logger.info(f"Technical weights updated: {config_updates}")
+        
+        return await get_technical_weights()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating technical weights: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

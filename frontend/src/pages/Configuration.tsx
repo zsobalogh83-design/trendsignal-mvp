@@ -38,6 +38,20 @@ export function Configuration() {
     moderateSellConfidence: 0.65,
   });
 
+  const [technicalWeights, setTechnicalWeights] = useState({
+    sma20Bullish: 25,
+    sma20Bearish: 15,
+    sma50Bullish: 20,
+    sma50Bearish: 10,
+    goldenCross: 15,
+    deathCross: 15,
+    rsiNeutral: 20,
+    rsiBullish: 30,
+    rsiWeakBullish: 10,
+    rsiOverbought: 20,
+    rsiOversold: 15,  // Bullish reversal (not 20)
+  });
+
   // ===== LOAD CONFIG FROM BACKEND ON MOUNT =====
   useEffect(() => {
     loadConfigFromBackend();
@@ -78,6 +92,26 @@ export function Configuration() {
           overnight_12_24h: decayConfig.overnight_12_24h,
         });
         console.log('✅ Decay weights loaded:', decayConfig);
+      }
+
+      // Load technical weights
+      const techResponse = await fetch('http://localhost:8000/api/v1/config/technical-weights');
+      if (techResponse.ok) {
+        const techConfig = await techResponse.json();
+        setTechnicalWeights({
+          sma20Bullish: techConfig.tech_sma20_bullish,
+          sma20Bearish: techConfig.tech_sma20_bearish,
+          sma50Bullish: techConfig.tech_sma50_bullish,
+          sma50Bearish: techConfig.tech_sma50_bearish,
+          goldenCross: techConfig.tech_golden_cross,
+          deathCross: techConfig.tech_death_cross,
+          rsiNeutral: techConfig.tech_rsi_neutral,
+          rsiBullish: techConfig.tech_rsi_bullish,
+          rsiWeakBullish: techConfig.tech_rsi_weak_bullish,
+          rsiOverbought: techConfig.tech_rsi_overbought,
+          rsiOversold: techConfig.tech_rsi_oversold,
+        });
+        console.log('✅ Technical weights loaded:', techConfig);
       }
     } catch (error) {
       console.error('⚠️ Error loading config:', error);
@@ -141,6 +175,31 @@ export function Configuration() {
         
         if (decayResponse.ok) {
           console.log('✅ Decay weights saved');
+        }
+
+        // Save technical weights too
+        const techPayload = {
+          tech_sma20_bullish: technicalWeights.sma20Bullish,
+          tech_sma20_bearish: technicalWeights.sma20Bearish,
+          tech_sma50_bullish: technicalWeights.sma50Bullish,
+          tech_sma50_bearish: technicalWeights.sma50Bearish,
+          tech_golden_cross: technicalWeights.goldenCross,
+          tech_death_cross: technicalWeights.deathCross,
+          tech_rsi_neutral: technicalWeights.rsiNeutral,
+          tech_rsi_bullish: technicalWeights.rsiBullish,
+          tech_rsi_weak_bullish: technicalWeights.rsiWeakBullish,
+          tech_rsi_overbought: technicalWeights.rsiOverbought,
+          tech_rsi_oversold: technicalWeights.rsiOversold,
+        };
+
+        const techResponse = await fetch('http://localhost:8000/api/v1/config/technical-weights', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(techPayload)
+        });
+
+        if (techResponse.ok) {
+          console.log('✅ Technical weights saved');
         }
         
         // Success notification
@@ -310,7 +369,7 @@ export function Configuration() {
         {activeTab === 0 && <TickersTab tickers={tickers} onAddNew={() => setShowTickerModal(true)} getPriorityBadge={getPriorityBadge} />}
         {activeTab === 1 && <NewsSourcesTab />}
         {activeTab === 2 && <SentimentTab weights={sentimentWeights} setWeights={setSentimentWeights} />}
-        {activeTab === 3 && <TechnicalTab />}
+        {activeTab === 3 && <TechnicalTab weights={technicalWeights} setWeights={setTechnicalWeights} />}
         {activeTab === 4 && <SignalsTab componentWeights={componentWeights} setComponentWeights={setComponentWeights} thresholds={thresholds} setThresholds={setThresholds} />}
 
         {/* Add Ticker Modal */}
@@ -561,22 +620,284 @@ function SentimentTab({ weights, setWeights }: any) {
 }
 
 // Technical Tab
-function TechnicalTab() {
+function TechnicalTab({ weights, setWeights }: any) {
   return (
-    <div style={{
-      background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
-      border: '1px solid rgba(99, 102, 241, 0.3)',
-      borderRadius: '16px',
-      padding: '24px'
-    }}>
-      <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
-        📈 Technical Indicator Weights
-      </div>
-      <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
-        Customize the importance of different technical indicators
-      </div>
-      <div style={{ fontSize: '14px', color: '#cbd5e1', padding: '40px', textAlign: 'center' }}>
-        Technical parameter configuration coming in Phase 2
+    <div>
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          📈 Technical Component Weights
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Configure score impact of technical indicators
+        </div>
+
+        {/* SMA Trend Weights */}
+        <div style={{ marginBottom: '32px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '16px' }}>
+            📊 SMA Trend Indicators
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                Price &gt; SMA20 (Bullish)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.sma20Bullish}
+                onChange={(e) => setWeights({ ...weights, sma20Bullish: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                Price &lt; SMA20 (Bearish)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.sma20Bearish}
+                onChange={(e) => setWeights({ ...weights, sma20Bearish: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                Price &gt; SMA50 (Bullish)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.sma50Bullish}
+                onChange={(e) => setWeights({ ...weights, sma50Bullish: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                Price &lt; SMA50 (Bearish)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.sma50Bearish}
+                onChange={(e) => setWeights({ ...weights, sma50Bearish: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                Golden Cross (SMA20 &gt; SMA50)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.goldenCross}
+                onChange={(e) => setWeights({ ...weights, goldenCross: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                Death Cross (SMA20 &lt; SMA50)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.deathCross}
+                onChange={(e) => setWeights({ ...weights, deathCross: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* RSI Weights */}
+        <div>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '16px' }}>
+            ⚡ RSI (Relative Strength Index)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                RSI Neutral (45-55)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.rsiNeutral}
+                onChange={(e) => setWeights({ ...weights, rsiNeutral: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                RSI Bullish (55-70)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.rsiBullish}
+                onChange={(e) => setWeights({ ...weights, rsiBullish: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                RSI Weak Bullish (30-45)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.rsiWeakBullish}
+                onChange={(e) => setWeights({ ...weights, rsiWeakBullish: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                RSI Overbought (≥70, bearish correction)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.rsiOverbought}
+                onChange={(e) => setWeights({ ...weights, rsiOverbought: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+                RSI Oversold (≤30, bullish reversal)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={weights.rsiOversold}
+                onChange={(e) => setWeights({ ...weights, rsiOversold: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '20px',
+          padding: '12px',
+          background: 'rgba(59, 130, 246, 0.1)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#94a3b8'
+        }}>
+          ℹ️ These values determine how much each indicator affects the technical score. Higher values = stronger influence.<br/>
+          <strong>Note:</strong> RSI Overbought subtracts from score (bearish), RSI Oversold adds to score (bullish reversal).
+        </div>
       </div>
     </div>
   );
