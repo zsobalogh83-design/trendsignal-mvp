@@ -927,6 +927,14 @@ def calculate_technical_score(
         # Latest values from INTRADAY
         current = df.iloc[-1]
         
+        # DEBUG: Check what's actually in current
+        print(f"  🔍 DEBUG: current.index = {list(current.index)}")
+        print(f"  🔍 DEBUG: 'macd' in current: {'macd' in current.index}")
+        print(f"  🔍 DEBUG: 'stoch_k' in current: {'stoch_k' in current.index}")
+        print(f"  🔍 DEBUG: 'ema_12' in current: {'ema_12' in current.index}")
+        if 'macd' in current.index:
+            print(f"  🔍 DEBUG: MACD value: {current['macd']}")
+        
         # Technical score
         tech_score = 0
         key_signals = []
