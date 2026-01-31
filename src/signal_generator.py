@@ -939,45 +939,51 @@ def calculate_technical_score(
         tech_score = 0
         key_signals = []
         
+        # ===== LOAD CONFIG FOR TECHNICAL WEIGHTS =====
+        from src.config import get_config
+        config = get_config()
+        if hasattr(config, 'reload'):
+            config.reload()
+        
         # SMA trend - use SMA50 from trend timeframe if available
         sma_50_for_comparison = sma_50_value if pd.notna(sma_50_value) else current.get('sma_50')
         
         if pd.notna(current['sma_20']) and pd.notna(sma_50_for_comparison):
             if current[close_col] > current['sma_20']:
-                tech_score += 25
+                tech_score += config.tech_sma20_bullish
                 key_signals.append("Price > SMA20")
             else:
-                tech_score -= 15
+                tech_score -= config.tech_sma20_bearish
             
             if current[close_col] > sma_50_for_comparison:
-                tech_score += 20
+                tech_score += config.tech_sma50_bullish
                 key_signals.append("Price > SMA50")
             else:
-                tech_score -= 10
+                tech_score -= config.tech_sma50_bearish
             
             if current['sma_20'] > sma_50_for_comparison:
-                tech_score += 15
+                tech_score += config.tech_golden_cross
                 key_signals.append("Golden Cross")
             else:
-                tech_score -= 15
+                tech_score -= config.tech_death_cross
                 key_signals.append("Death Cross")
         
         # RSI
         if pd.notna(current['rsi']):
             rsi = current['rsi']
             if 45 < rsi < 55:
-                tech_score += 20
+                tech_score += config.tech_rsi_neutral
                 key_signals.append(f"RSI neutral ({rsi:.1f})")
             elif 55 <= rsi < 70:
-                tech_score += 30
+                tech_score += config.tech_rsi_bullish
                 key_signals.append(f"RSI bullish ({rsi:.1f})")
             elif 30 < rsi <= 45:
-                tech_score += 10
+                tech_score += config.tech_rsi_weak_bullish
             elif rsi >= 70:
-                tech_score -= 20
+                tech_score -= config.tech_rsi_overbought
                 key_signals.append(f"RSI overbought ({rsi:.1f})")
             elif rsi <= 30:
-                tech_score -= 20
+                tech_score += config.tech_rsi_oversold  # ✅ BULLISH reversal signal
                 key_signals.append(f"RSI oversold ({rsi:.1f})")
         
         # ADX - Trend Strength Indicator from TREND timeframe (1h)

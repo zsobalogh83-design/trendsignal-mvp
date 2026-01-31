@@ -112,6 +112,26 @@ ATR_PERIOD = 14
 
 
 # ==========================================
+# TECHNICAL COMPONENT WEIGHTS
+# ==========================================
+
+# SMA Trend Weights
+TECH_SMA20_BULLISH = 25   # Price > SMA20
+TECH_SMA20_BEARISH = 15   # Price < SMA20
+TECH_SMA50_BULLISH = 20   # Price > SMA50
+TECH_SMA50_BEARISH = 10   # Price < SMA50
+TECH_GOLDEN_CROSS = 15    # SMA20 > SMA50
+TECH_DEATH_CROSS = 15     # SMA20 < SMA50
+
+# RSI Weights
+TECH_RSI_NEUTRAL = 20     # 45 < RSI < 55
+TECH_RSI_BULLISH = 30     # 55 <= RSI < 70
+TECH_RSI_WEAK_BULLISH = 10  # 30 < RSI <= 45
+TECH_RSI_OVERBOUGHT = 20  # RSI >= 70 (bearish, negative impact)
+TECH_RSI_OVERSOLD = 15    # RSI <= 30 (bullish reversal, positive impact)
+
+
+# ==========================================
 # RISK MANAGEMENT
 # ==========================================
 
@@ -179,6 +199,18 @@ def save_config_to_file(config_instance):
             "STRONG_SELL_CONFIDENCE": config_instance.strong_sell_confidence,
             "MODERATE_SELL_SCORE": config_instance.moderate_sell_score,
             "MODERATE_SELL_CONFIDENCE": config_instance.moderate_sell_confidence,
+            # Technical component weights
+            "TECH_SMA20_BULLISH": config_instance.tech_sma20_bullish,
+            "TECH_SMA20_BEARISH": config_instance.tech_sma20_bearish,
+            "TECH_SMA50_BULLISH": config_instance.tech_sma50_bullish,
+            "TECH_SMA50_BEARISH": config_instance.tech_sma50_bearish,
+            "TECH_GOLDEN_CROSS": config_instance.tech_golden_cross,
+            "TECH_DEATH_CROSS": config_instance.tech_death_cross,
+            "TECH_RSI_NEUTRAL": config_instance.tech_rsi_neutral,
+            "TECH_RSI_BULLISH": config_instance.tech_rsi_bullish,
+            "TECH_RSI_WEAK_BULLISH": config_instance.tech_rsi_weak_bullish,
+            "TECH_RSI_OVERBOUGHT": config_instance.tech_rsi_overbought,
+            "TECH_RSI_OVERSOLD": config_instance.tech_rsi_oversold,
             # Decay weights - CRITICAL FIX!
             "DECAY_WEIGHTS": config_instance.decay_weights,
         }
@@ -259,6 +291,19 @@ class TrendSignalConfig:
     atr_period: int = ATR_PERIOD
     macd_params: Dict[str, int] = None
     
+    # Technical component weights
+    tech_sma20_bullish: int = TECH_SMA20_BULLISH
+    tech_sma20_bearish: int = TECH_SMA20_BEARISH
+    tech_sma50_bullish: int = TECH_SMA50_BULLISH
+    tech_sma50_bearish: int = TECH_SMA50_BEARISH
+    tech_golden_cross: int = TECH_GOLDEN_CROSS
+    tech_death_cross: int = TECH_DEATH_CROSS
+    tech_rsi_neutral: int = TECH_RSI_NEUTRAL
+    tech_rsi_bullish: int = TECH_RSI_BULLISH
+    tech_rsi_weak_bullish: int = TECH_RSI_WEAK_BULLISH
+    tech_rsi_overbought: int = TECH_RSI_OVERBOUGHT
+    tech_rsi_oversold: int = TECH_RSI_OVERSOLD
+    
     # Risk management
     stop_loss_atr_mult: float = STOP_LOSS_ATR_MULTIPLIER
     risk_reward_ratio: float = RISK_REWARD_RATIO
@@ -279,6 +324,18 @@ class TrendSignalConfig:
             self.strong_sell_confidence = saved_config.get("STRONG_SELL_CONFIDENCE", STRONG_SELL_CONFIDENCE)
             self.moderate_sell_score = saved_config.get("MODERATE_SELL_SCORE", MODERATE_SELL_SCORE)
             self.moderate_sell_confidence = saved_config.get("MODERATE_SELL_CONFIDENCE", MODERATE_SELL_CONFIDENCE)
+            # Technical component weights
+            self.tech_sma20_bullish = saved_config.get("TECH_SMA20_BULLISH", TECH_SMA20_BULLISH)
+            self.tech_sma20_bearish = saved_config.get("TECH_SMA20_BEARISH", TECH_SMA20_BEARISH)
+            self.tech_sma50_bullish = saved_config.get("TECH_SMA50_BULLISH", TECH_SMA50_BULLISH)
+            self.tech_sma50_bearish = saved_config.get("TECH_SMA50_BEARISH", TECH_SMA50_BEARISH)
+            self.tech_golden_cross = saved_config.get("TECH_GOLDEN_CROSS", TECH_GOLDEN_CROSS)
+            self.tech_death_cross = saved_config.get("TECH_DEATH_CROSS", TECH_DEATH_CROSS)
+            self.tech_rsi_neutral = saved_config.get("TECH_RSI_NEUTRAL", TECH_RSI_NEUTRAL)
+            self.tech_rsi_bullish = saved_config.get("TECH_RSI_BULLISH", TECH_RSI_BULLISH)
+            self.tech_rsi_weak_bullish = saved_config.get("TECH_RSI_WEAK_BULLISH", TECH_RSI_WEAK_BULLISH)
+            self.tech_rsi_overbought = saved_config.get("TECH_RSI_OVERBOUGHT", TECH_RSI_OVERBOUGHT)
+            self.tech_rsi_oversold = saved_config.get("TECH_RSI_OVERSOLD", TECH_RSI_OVERSOLD)
             # Decay weights - CRITICAL FIX!
             if "DECAY_WEIGHTS" in saved_config:
                 self.decay_weights = saved_config["DECAY_WEIGHTS"]
@@ -374,6 +431,18 @@ class TrendSignalConfig:
             self.strong_sell_confidence = saved_config.get("STRONG_SELL_CONFIDENCE", STRONG_SELL_CONFIDENCE)
             self.moderate_sell_score = saved_config.get("MODERATE_SELL_SCORE", MODERATE_SELL_SCORE)
             self.moderate_sell_confidence = saved_config.get("MODERATE_SELL_CONFIDENCE", MODERATE_SELL_CONFIDENCE)
+            # Technical component weights
+            self.tech_sma20_bullish = saved_config.get("TECH_SMA20_BULLISH", TECH_SMA20_BULLISH)
+            self.tech_sma20_bearish = saved_config.get("TECH_SMA20_BEARISH", TECH_SMA20_BEARISH)
+            self.tech_sma50_bullish = saved_config.get("TECH_SMA50_BULLISH", TECH_SMA50_BULLISH)
+            self.tech_sma50_bearish = saved_config.get("TECH_SMA50_BEARISH", TECH_SMA50_BEARISH)
+            self.tech_golden_cross = saved_config.get("TECH_GOLDEN_CROSS", TECH_GOLDEN_CROSS)
+            self.tech_death_cross = saved_config.get("TECH_DEATH_CROSS", TECH_DEATH_CROSS)
+            self.tech_rsi_neutral = saved_config.get("TECH_RSI_NEUTRAL", TECH_RSI_NEUTRAL)
+            self.tech_rsi_bullish = saved_config.get("TECH_RSI_BULLISH", TECH_RSI_BULLISH)
+            self.tech_rsi_weak_bullish = saved_config.get("TECH_RSI_WEAK_BULLISH", TECH_RSI_WEAK_BULLISH)
+            self.tech_rsi_overbought = saved_config.get("TECH_RSI_OVERBOUGHT", TECH_RSI_OVERBOUGHT)
+            self.tech_rsi_oversold = saved_config.get("TECH_RSI_OVERSOLD", TECH_RSI_OVERSOLD)
             print("🔄 Config reloaded from file")
     
     def validate(self) -> bool:
