@@ -2,6 +2,25 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { FiArrowLeft, FiSave, FiEdit2, FiTrash2, FiPlus } from 'react-icons/fi';
 
+
+// Timeframe and Lookback options
+const TIMEFRAME_OPTIONS = [
+  { value: '1m', label: '1m' },
+  { value: '5m', label: '5m' },
+  { value: '15m', label: '15m' },
+  { value: '1h', label: '1h' },
+  { value: '1d', label: '1d' },
+];
+
+const LOOKBACK_OPTIONS = [
+  { value: '1d', label: '1d' },
+  { value: '2d', label: '2d' },
+  { value: '3d', label: '3d' },
+  { value: '7d', label: '7d' },
+  { value: '30d', label: '30d' },
+  { value: '180d', label: '180d' },
+];
+
 export function Configuration() {
   const [activeTab, setActiveTab] = useState(0);
   const [showTickerModal, setShowTickerModal] = useState(false);
@@ -50,7 +69,20 @@ export function Configuration() {
     rsiWeakBullish: 10,
     rsiOverbought: 20,
     rsiOversold: 15,  // Bullish reversal (not 20)
-  });
+  })
+
+  // ===== INDICATOR PARAMETERS STATE =====
+  const [indicatorParams, setIndicatorParams] = useState({
+    rsiPeriod: 14, rsiTimeframe: '5m', rsiLookback: '2d',
+    smaShortPeriod: 20, smaShortTimeframe: '5m', smaShortLookback: '2d',
+    smaMediumPeriod: 50, smaMediumTimeframe: '1h', smaMediumLookback: '30d',
+    smaLongPeriod: 200, smaLongTimeframe: '1d', smaLongLookback: '180d',
+    macdFast: 12, macdSlow: 26, macdSignal: 9, macdTimeframe: '15m', macdLookback: '3d',
+    bbPeriod: 20, bbStdDev: 2.0, bbTimeframe: '1h', bbLookback: '7d',
+    atrPeriod: 14, atrTimeframe: '1d', atrLookback: '180d',
+    stochPeriod: 14, stochTimeframe: '15m', stochLookback: '3d',
+    adxPeriod: 14, adxTimeframe: '1h', adxLookback: '30d',
+  });;
 
   // ===== LOAD CONFIG FROM BACKEND ON MOUNT =====
   useEffect(() => {
@@ -112,6 +144,24 @@ export function Configuration() {
           rsiOversold: techConfig.tech_rsi_oversold,
         });
         console.log('✅ Technical weights loaded:', techConfig);
+
+      // ===== NEW: Load indicator parameters =====
+      const indicatorResponse = await fetch('http://localhost:8000/api/v1/config/indicator-parameters');
+      if (indicatorResponse.ok) {
+        const ic = await indicatorResponse.json();
+        setIndicatorParams({
+          rsiPeriod: ic.rsi_period, rsiTimeframe: ic.rsi_timeframe, rsiLookback: ic.rsi_lookback,
+          smaShortPeriod: ic.sma_short_period, smaShortTimeframe: ic.sma_short_timeframe, smaShortLookback: ic.sma_short_lookback,
+          smaMediumPeriod: ic.sma_medium_period, smaMediumTimeframe: ic.sma_medium_timeframe, smaMediumLookback: ic.sma_medium_lookback,
+          smaLongPeriod: ic.sma_long_period, smaLongTimeframe: ic.sma_long_timeframe, smaLongLookback: ic.sma_long_lookback,
+          macdFast: ic.macd_fast, macdSlow: ic.macd_slow, macdSignal: ic.macd_signal, macdTimeframe: ic.macd_timeframe, macdLookback: ic.macd_lookback,
+          bbPeriod: ic.bb_period, bbStdDev: ic.bb_std_dev, bbTimeframe: ic.bb_timeframe, bbLookback: ic.bb_lookback,
+          atrPeriod: ic.atr_period, atrTimeframe: ic.atr_timeframe, atrLookback: ic.atr_lookback,
+          stochPeriod: ic.stoch_period, stochTimeframe: ic.stoch_timeframe, stochLookback: ic.stoch_lookback,
+          adxPeriod: ic.adx_period, adxTimeframe: ic.adx_timeframe, adxLookback: ic.adx_lookback,
+        });
+        console.log('✅ Indicator parameters loaded:', ic);
+      }
       }
     } catch (error) {
       console.error('⚠️ Error loading config:', error);
@@ -200,6 +250,30 @@ export function Configuration() {
 
         if (techResponse.ok) {
           console.log('✅ Technical weights saved');
+
+        // ===== NEW: Save indicator parameters =====
+        const ip = indicatorParams;
+        const indicatorPayload = {
+          rsi_period: ip.rsiPeriod, rsi_timeframe: ip.rsiTimeframe, rsi_lookback: ip.rsiLookback,
+          sma_short_period: ip.smaShortPeriod, sma_short_timeframe: ip.smaShortTimeframe, sma_short_lookback: ip.smaShortLookback,
+          sma_medium_period: ip.smaMediumPeriod, sma_medium_timeframe: ip.smaMediumTimeframe, sma_medium_lookback: ip.smaMediumLookback,
+          sma_long_period: ip.smaLongPeriod, sma_long_timeframe: ip.smaLongTimeframe, sma_long_lookback: ip.smaLongLookback,
+          macd_fast: ip.macdFast, macd_slow: ip.macdSlow, macd_signal: ip.macdSignal, macd_timeframe: ip.macdTimeframe, macd_lookback: ip.macdLookback,
+          bb_period: ip.bbPeriod, bb_std_dev: ip.bbStdDev, bb_timeframe: ip.bbTimeframe, bb_lookback: ip.bbLookback,
+          atr_period: ip.atrPeriod, atr_timeframe: ip.atrTimeframe, atr_lookback: ip.atrLookback,
+          stoch_period: ip.stochPeriod, stoch_timeframe: ip.stochTimeframe, stoch_lookback: ip.stochLookback,
+          adx_period: ip.adxPeriod, adx_timeframe: ip.adxTimeframe, adx_lookback: ip.adxLookback,
+        };
+
+        const indicatorResponse = await fetch('http://localhost:8000/api/v1/config/indicator-parameters', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(indicatorPayload)
+        });
+
+        if (indicatorResponse.ok) {
+          console.log('✅ Indicator parameters saved');
+        }
         }
         
         // Success notification
@@ -369,7 +443,7 @@ export function Configuration() {
         {activeTab === 0 && <TickersTab tickers={tickers} onAddNew={() => setShowTickerModal(true)} getPriorityBadge={getPriorityBadge} />}
         {activeTab === 1 && <NewsSourcesTab />}
         {activeTab === 2 && <SentimentTab weights={sentimentWeights} setWeights={setSentimentWeights} />}
-        {activeTab === 3 && <TechnicalTab weights={technicalWeights} setWeights={setTechnicalWeights} />}
+        {activeTab === 3 && <TechnicalTab weights={technicalWeights} setWeights={setTechnicalWeights} indicatorParams={indicatorParams} setIndicatorParams={setIndicatorParams} />}
         {activeTab === 4 && <SignalsTab componentWeights={componentWeights} setComponentWeights={setComponentWeights} thresholds={thresholds} setThresholds={setThresholds} />}
 
         {/* Add Ticker Modal */}
@@ -620,7 +694,7 @@ function SentimentTab({ weights, setWeights }: any) {
 }
 
 // Technical Tab
-function TechnicalTab({ weights, setWeights }: any) {
+function TechnicalTab({ weights, setWeights, indicatorParams, setIndicatorParams }: any) {
   return (
     <div>
       <div style={{
@@ -899,6 +973,351 @@ function TechnicalTab({ weights, setWeights }: any) {
           <strong>Note:</strong> RSI Overbought subtracts from score (bearish), RSI Oversold adds to score (bullish reversal).
         </div>
       </div>
+      {/* ===== INDICATOR PARAMETERS SECTION ===== */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        borderRadius: '12px',
+        border: '1px solid rgba(99, 102, 241, 0.2)',
+        padding: '24px',
+        marginBottom: '24px',
+        marginTop: '32px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          ⚙️ Indicator Periods & Timeframes
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Configure calculation parameters for technical indicators
+        </div>
+
+        {/* RSI */}
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            ⚡ RSI (Relative Strength Index)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Period</label>
+              <input type="number" min="5" max="50" value={indicatorParams.rsiPeriod}
+                onChange={(e) => setIndicatorParams({...indicatorParams, rsiPeriod: parseInt(e.target.value) || 14})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.rsiTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, rsiTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.rsiLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, rsiLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* SMA Short */}
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            📈 SMA Short
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Period</label>
+              <input type="number" min="5" max="100" value={indicatorParams.smaShortPeriod}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaShortPeriod: parseInt(e.target.value) || 20})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.smaShortTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaShortTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.smaShortLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaShortLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* SMA Medium */}
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            📈 SMA Medium
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Period</label>
+              <input type="number" min="20" max="200" value={indicatorParams.smaMediumPeriod}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaMediumPeriod: parseInt(e.target.value) || 50})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.smaMediumTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaMediumTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.smaMediumLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaMediumLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* SMA Long */}
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            📈 SMA Long
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Period</label>
+              <input type="number" min="100" max="300" value={indicatorParams.smaLongPeriod}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaLongPeriod: parseInt(e.target.value) || 200})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.smaLongTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaLongTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.smaLongLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, smaLongLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* MACD */}
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            📉 MACD
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Fast</label>
+              <input type="number" min="5" max="50" value={indicatorParams.macdFast}
+                onChange={(e) => setIndicatorParams({...indicatorParams, macdFast: parseInt(e.target.value) || 12})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Slow</label>
+              <input type="number" min="10" max="100" value={indicatorParams.macdSlow}
+                onChange={(e) => setIndicatorParams({...indicatorParams, macdSlow: parseInt(e.target.value) || 26})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Signal</label>
+              <input type="number" min="5" max="50" value={indicatorParams.macdSignal}
+                onChange={(e) => setIndicatorParams({...indicatorParams, macdSignal: parseInt(e.target.value) || 9})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.macdTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, macdTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.macdLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, macdLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Bollinger Bands */}
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            📊 Bollinger Bands
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Period</label>
+              <input type="number" min="10" max="50" value={indicatorParams.bbPeriod}
+                onChange={(e) => setIndicatorParams({...indicatorParams, bbPeriod: parseInt(e.target.value) || 20})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Std Dev</label>
+              <input type="number" min="1" max="3" step="0.1" value={indicatorParams.bbStdDev}
+                onChange={(e) => setIndicatorParams({...indicatorParams, bbStdDev: parseFloat(e.target.value) || 2.0})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.bbTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, bbTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.bbLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, bbLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* ATR */}
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            📏 ATR (Average True Range)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Period</label>
+              <input type="number" min="5" max="50" value={indicatorParams.atrPeriod}
+                onChange={(e) => setIndicatorParams({...indicatorParams, atrPeriod: parseInt(e.target.value) || 14})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.atrTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, atrTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.atrLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, atrLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Stochastic */}
+        <div style={{ marginBottom: '28px' }}>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            🎯 Stochastic Oscillator
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Period</label>
+              <input type="number" min="5" max="50" value={indicatorParams.stochPeriod}
+                onChange={(e) => setIndicatorParams({...indicatorParams, stochPeriod: parseInt(e.target.value) || 14})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.stochTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, stochTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.stochLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, stochLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* ADX */}
+        <div>
+          <div style={{ fontSize: '15px', fontWeight: '600', color: '#60a5fa', marginBottom: '12px' }}>
+            💪 ADX (Trend Strength)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Period</label>
+              <input type="number" min="5" max="50" value={indicatorParams.adxPeriod}
+                onChange={(e) => setIndicatorParams({...indicatorParams, adxPeriod: parseInt(e.target.value) || 14})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Timeframe</label>
+              <select value={indicatorParams.adxTimeframe}
+                onChange={(e) => setIndicatorParams({...indicatorParams, adxTimeframe: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {TIMEFRAME_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#94a3b8', marginBottom: '6px' }}>Lookback</label>
+              <select value={indicatorParams.adxLookback}
+                onChange={(e) => setIndicatorParams({...indicatorParams, adxLookback: e.target.value})}
+                style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }}>
+                {LOOKBACK_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* ===== END INDICATOR PARAMETERS SECTION ===== */}
+
     </div>
   );
 }

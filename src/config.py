@@ -86,29 +86,53 @@ MODERATE_SELL_CONFIDENCE = 0.65
 # TECHNICAL INDICATOR PARAMETERS
 # ==========================================
 
-# SMA periods
-SMA_SHORT = 20
-SMA_MEDIUM = 50
-SMA_LONG = 200
+# RSI (Relative Strength Index)
+RSI_PERIOD = 14
+RSI_TIMEFRAME = "5m"
+RSI_LOOKBACK = "2d"
 
-# EMA periods
-EMA_FAST = 12
-EMA_SLOW = 26
+# SMA Short
+SMA_SHORT_PERIOD = 20
+SMA_SHORT_TIMEFRAME = "5m"
+SMA_SHORT_LOOKBACK = "2d"
 
-# MACD parameters
+# SMA Medium
+SMA_MEDIUM_PERIOD = 50
+SMA_MEDIUM_TIMEFRAME = "1h"
+SMA_MEDIUM_LOOKBACK = "30d"
+
+# SMA Long
+SMA_LONG_PERIOD = 200
+SMA_LONG_TIMEFRAME = "1d"
+SMA_LONG_LOOKBACK = "180d"
+
+# MACD (Moving Average Convergence Divergence)
 MACD_FAST = 12
 MACD_SLOW = 26
 MACD_SIGNAL = 9
-
-# RSI period
-RSI_PERIOD = 14
+MACD_TIMEFRAME = "15m"
+MACD_LOOKBACK = "3d"
 
 # Bollinger Bands
 BB_PERIOD = 20
-BB_STD = 2
+BB_STD_DEV = 2.0
+BB_TIMEFRAME = "1h"
+BB_LOOKBACK = "7d"
 
-# ATR period
+# ATR (Average True Range)
 ATR_PERIOD = 14
+ATR_TIMEFRAME = "1d"
+ATR_LOOKBACK = "180d"
+
+# Stochastic Oscillator
+STOCH_PERIOD = 14
+STOCH_TIMEFRAME = "15m"
+STOCH_LOOKBACK = "3d"
+
+# ADX (Average Directional Index)
+ADX_PERIOD = 14
+ADX_TIMEFRAME = "1h"
+ADX_LOOKBACK = "30d"
 
 
 # ==========================================
@@ -211,8 +235,41 @@ def save_config_to_file(config_instance):
             "TECH_RSI_WEAK_BULLISH": config_instance.tech_rsi_weak_bullish,
             "TECH_RSI_OVERBOUGHT": config_instance.tech_rsi_overbought,
             "TECH_RSI_OVERSOLD": config_instance.tech_rsi_oversold,
-            # Decay weights - CRITICAL FIX!
+            # Decay weights
             "DECAY_WEIGHTS": config_instance.decay_weights,
+            # Technical indicator periods
+            "RSI_PERIOD": config_instance.rsi_period,
+            "SMA_SHORT_PERIOD": config_instance.sma_short_period,
+            "SMA_MEDIUM_PERIOD": config_instance.sma_medium_period,
+            "SMA_LONG_PERIOD": config_instance.sma_long_period,
+            "MACD_FAST": config_instance.macd_fast,
+            "MACD_SLOW": config_instance.macd_slow,
+            "MACD_SIGNAL": config_instance.macd_signal,
+            "BB_PERIOD": config_instance.bb_period,
+            "BB_STD_DEV": config_instance.bb_std_dev,
+            "ATR_PERIOD": config_instance.atr_period,
+            "STOCH_PERIOD": config_instance.stoch_period,
+            "ADX_PERIOD": config_instance.adx_period,
+            # Technical indicator timeframes
+            "RSI_TIMEFRAME": config_instance.rsi_timeframe,
+            "SMA_SHORT_TIMEFRAME": config_instance.sma_short_timeframe,
+            "SMA_MEDIUM_TIMEFRAME": config_instance.sma_medium_timeframe,
+            "SMA_LONG_TIMEFRAME": config_instance.sma_long_timeframe,
+            "MACD_TIMEFRAME": config_instance.macd_timeframe,
+            "BB_TIMEFRAME": config_instance.bb_timeframe,
+            "ATR_TIMEFRAME": config_instance.atr_timeframe,
+            "STOCH_TIMEFRAME": config_instance.stoch_timeframe,
+            "ADX_TIMEFRAME": config_instance.adx_timeframe,
+            # Technical indicator lookbacks
+            "RSI_LOOKBACK": config_instance.rsi_lookback,
+            "SMA_SHORT_LOOKBACK": config_instance.sma_short_lookback,
+            "SMA_MEDIUM_LOOKBACK": config_instance.sma_medium_lookback,
+            "SMA_LONG_LOOKBACK": config_instance.sma_long_lookback,
+            "MACD_LOOKBACK": config_instance.macd_lookback,
+            "BB_LOOKBACK": config_instance.bb_lookback,
+            "ATR_LOOKBACK": config_instance.atr_lookback,
+            "STOCH_LOOKBACK": config_instance.stoch_lookback,
+            "ADX_LOOKBACK": config_instance.adx_lookback,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -285,10 +342,44 @@ class TrendSignalConfig:
     moderate_sell_score: int = MODERATE_SELL_SCORE
     moderate_sell_confidence: float = MODERATE_SELL_CONFIDENCE
     
-    # Technical parameters
-    sma_periods: Dict[str, int] = None
+    # Technical parameters - Periods
     rsi_period: int = RSI_PERIOD
+    sma_short_period: int = SMA_SHORT_PERIOD
+    sma_medium_period: int = SMA_MEDIUM_PERIOD
+    sma_long_period: int = SMA_LONG_PERIOD
+    macd_fast: int = MACD_FAST
+    macd_slow: int = MACD_SLOW
+    macd_signal: int = MACD_SIGNAL
+    bb_period: int = BB_PERIOD
+    bb_std_dev: float = BB_STD_DEV
     atr_period: int = ATR_PERIOD
+    stoch_period: int = STOCH_PERIOD
+    adx_period: int = ADX_PERIOD
+    
+    # Technical parameters - Timeframes
+    rsi_timeframe: str = RSI_TIMEFRAME
+    sma_short_timeframe: str = SMA_SHORT_TIMEFRAME
+    sma_medium_timeframe: str = SMA_MEDIUM_TIMEFRAME
+    sma_long_timeframe: str = SMA_LONG_TIMEFRAME
+    macd_timeframe: str = MACD_TIMEFRAME
+    bb_timeframe: str = BB_TIMEFRAME
+    atr_timeframe: str = ATR_TIMEFRAME
+    stoch_timeframe: str = STOCH_TIMEFRAME
+    adx_timeframe: str = ADX_TIMEFRAME
+    
+    # Technical parameters - Lookbacks
+    rsi_lookback: str = RSI_LOOKBACK
+    sma_short_lookback: str = SMA_SHORT_LOOKBACK
+    sma_medium_lookback: str = SMA_MEDIUM_LOOKBACK
+    sma_long_lookback: str = SMA_LONG_LOOKBACK
+    macd_lookback: str = MACD_LOOKBACK
+    bb_lookback: str = BB_LOOKBACK
+    atr_lookback: str = ATR_LOOKBACK
+    stoch_lookback: str = STOCH_LOOKBACK
+    adx_lookback: str = ADX_LOOKBACK
+    
+    # Legacy compatibility
+    sma_periods: Dict[str, int] = None
     macd_params: Dict[str, int] = None
     
     # Technical component weights
@@ -336,27 +427,60 @@ class TrendSignalConfig:
             self.tech_rsi_weak_bullish = saved_config.get("TECH_RSI_WEAK_BULLISH", TECH_RSI_WEAK_BULLISH)
             self.tech_rsi_overbought = saved_config.get("TECH_RSI_OVERBOUGHT", TECH_RSI_OVERBOUGHT)
             self.tech_rsi_oversold = saved_config.get("TECH_RSI_OVERSOLD", TECH_RSI_OVERSOLD)
-            # Decay weights - CRITICAL FIX!
+            # Decay weights
             if "DECAY_WEIGHTS" in saved_config:
                 self.decay_weights = saved_config["DECAY_WEIGHTS"]
+            # Technical indicator periods
+            self.rsi_period = saved_config.get("RSI_PERIOD", RSI_PERIOD)
+            self.sma_short_period = saved_config.get("SMA_SHORT_PERIOD", SMA_SHORT_PERIOD)
+            self.sma_medium_period = saved_config.get("SMA_MEDIUM_PERIOD", SMA_MEDIUM_PERIOD)
+            self.sma_long_period = saved_config.get("SMA_LONG_PERIOD", SMA_LONG_PERIOD)
+            self.macd_fast = saved_config.get("MACD_FAST", MACD_FAST)
+            self.macd_slow = saved_config.get("MACD_SLOW", MACD_SLOW)
+            self.macd_signal = saved_config.get("MACD_SIGNAL", MACD_SIGNAL)
+            self.bb_period = saved_config.get("BB_PERIOD", BB_PERIOD)
+            self.bb_std_dev = saved_config.get("BB_STD_DEV", BB_STD_DEV)
+            self.atr_period = saved_config.get("ATR_PERIOD", ATR_PERIOD)
+            self.stoch_period = saved_config.get("STOCH_PERIOD", STOCH_PERIOD)
+            self.adx_period = saved_config.get("ADX_PERIOD", ADX_PERIOD)
+            # Technical indicator timeframes
+            self.rsi_timeframe = saved_config.get("RSI_TIMEFRAME", RSI_TIMEFRAME)
+            self.sma_short_timeframe = saved_config.get("SMA_SHORT_TIMEFRAME", SMA_SHORT_TIMEFRAME)
+            self.sma_medium_timeframe = saved_config.get("SMA_MEDIUM_TIMEFRAME", SMA_MEDIUM_TIMEFRAME)
+            self.sma_long_timeframe = saved_config.get("SMA_LONG_TIMEFRAME", SMA_LONG_TIMEFRAME)
+            self.macd_timeframe = saved_config.get("MACD_TIMEFRAME", MACD_TIMEFRAME)
+            self.bb_timeframe = saved_config.get("BB_TIMEFRAME", BB_TIMEFRAME)
+            self.atr_timeframe = saved_config.get("ATR_TIMEFRAME", ATR_TIMEFRAME)
+            self.stoch_timeframe = saved_config.get("STOCH_TIMEFRAME", STOCH_TIMEFRAME)
+            self.adx_timeframe = saved_config.get("ADX_TIMEFRAME", ADX_TIMEFRAME)
+            # Technical indicator lookbacks
+            self.rsi_lookback = saved_config.get("RSI_LOOKBACK", RSI_LOOKBACK)
+            self.sma_short_lookback = saved_config.get("SMA_SHORT_LOOKBACK", SMA_SHORT_LOOKBACK)
+            self.sma_medium_lookback = saved_config.get("SMA_MEDIUM_LOOKBACK", SMA_MEDIUM_LOOKBACK)
+            self.sma_long_lookback = saved_config.get("SMA_LONG_LOOKBACK", SMA_LONG_LOOKBACK)
+            self.macd_lookback = saved_config.get("MACD_LOOKBACK", MACD_LOOKBACK)
+            self.bb_lookback = saved_config.get("BB_LOOKBACK", BB_LOOKBACK)
+            self.atr_lookback = saved_config.get("ATR_LOOKBACK", ATR_LOOKBACK)
+            self.stoch_lookback = saved_config.get("STOCH_LOOKBACK", STOCH_LOOKBACK)
+            self.adx_lookback = saved_config.get("ADX_LOOKBACK", ADX_LOOKBACK)
             print("📝 Config loaded from file with custom weights")
         
-        # Initialize nested dicts if not loaded
+        # Initialize nested dicts if not loaded (legacy compatibility)
         if self.decay_weights is None:
             self.decay_weights = DECAY_WEIGHTS.copy()
         
         if self.sma_periods is None:
             self.sma_periods = {
-                'short': SMA_SHORT,
-                'medium': SMA_MEDIUM,
-                'long': SMA_LONG
+                'short': self.sma_short_period,
+                'medium': self.sma_medium_period,
+                'long': self.sma_long_period
             }
         
         if self.macd_params is None:
             self.macd_params = {
-                'fast': MACD_FAST,
-                'slow': MACD_SLOW,
-                'signal': MACD_SIGNAL
+                'fast': self.macd_fast,
+                'slow': self.macd_slow,
+                'signal': self.macd_signal
             }
     
     # Uppercase property aliases for backward compatibility
@@ -443,6 +567,39 @@ class TrendSignalConfig:
             self.tech_rsi_weak_bullish = saved_config.get("TECH_RSI_WEAK_BULLISH", TECH_RSI_WEAK_BULLISH)
             self.tech_rsi_overbought = saved_config.get("TECH_RSI_OVERBOUGHT", TECH_RSI_OVERBOUGHT)
             self.tech_rsi_oversold = saved_config.get("TECH_RSI_OVERSOLD", TECH_RSI_OVERSOLD)
+            # Technical indicator periods
+            self.rsi_period = saved_config.get("RSI_PERIOD", RSI_PERIOD)
+            self.sma_short_period = saved_config.get("SMA_SHORT_PERIOD", SMA_SHORT_PERIOD)
+            self.sma_medium_period = saved_config.get("SMA_MEDIUM_PERIOD", SMA_MEDIUM_PERIOD)
+            self.sma_long_period = saved_config.get("SMA_LONG_PERIOD", SMA_LONG_PERIOD)
+            self.macd_fast = saved_config.get("MACD_FAST", MACD_FAST)
+            self.macd_slow = saved_config.get("MACD_SLOW", MACD_SLOW)
+            self.macd_signal = saved_config.get("MACD_SIGNAL", MACD_SIGNAL)
+            self.bb_period = saved_config.get("BB_PERIOD", BB_PERIOD)
+            self.bb_std_dev = saved_config.get("BB_STD_DEV", BB_STD_DEV)
+            self.atr_period = saved_config.get("ATR_PERIOD", ATR_PERIOD)
+            self.stoch_period = saved_config.get("STOCH_PERIOD", STOCH_PERIOD)
+            self.adx_period = saved_config.get("ADX_PERIOD", ADX_PERIOD)
+            # Technical indicator timeframes
+            self.rsi_timeframe = saved_config.get("RSI_TIMEFRAME", RSI_TIMEFRAME)
+            self.sma_short_timeframe = saved_config.get("SMA_SHORT_TIMEFRAME", SMA_SHORT_TIMEFRAME)
+            self.sma_medium_timeframe = saved_config.get("SMA_MEDIUM_TIMEFRAME", SMA_MEDIUM_TIMEFRAME)
+            self.sma_long_timeframe = saved_config.get("SMA_LONG_TIMEFRAME", SMA_LONG_TIMEFRAME)
+            self.macd_timeframe = saved_config.get("MACD_TIMEFRAME", MACD_TIMEFRAME)
+            self.bb_timeframe = saved_config.get("BB_TIMEFRAME", BB_TIMEFRAME)
+            self.atr_timeframe = saved_config.get("ATR_TIMEFRAME", ATR_TIMEFRAME)
+            self.stoch_timeframe = saved_config.get("STOCH_TIMEFRAME", STOCH_TIMEFRAME)
+            self.adx_timeframe = saved_config.get("ADX_TIMEFRAME", ADX_TIMEFRAME)
+            # Technical indicator lookbacks
+            self.rsi_lookback = saved_config.get("RSI_LOOKBACK", RSI_LOOKBACK)
+            self.sma_short_lookback = saved_config.get("SMA_SHORT_LOOKBACK", SMA_SHORT_LOOKBACK)
+            self.sma_medium_lookback = saved_config.get("SMA_MEDIUM_LOOKBACK", SMA_MEDIUM_LOOKBACK)
+            self.sma_long_lookback = saved_config.get("SMA_LONG_LOOKBACK", SMA_LONG_LOOKBACK)
+            self.macd_lookback = saved_config.get("MACD_LOOKBACK", MACD_LOOKBACK)
+            self.bb_lookback = saved_config.get("BB_LOOKBACK", BB_LOOKBACK)
+            self.atr_lookback = saved_config.get("ATR_LOOKBACK", ATR_LOOKBACK)
+            self.stoch_lookback = saved_config.get("STOCH_LOOKBACK", STOCH_LOOKBACK)
+            self.adx_lookback = saved_config.get("ADX_LOOKBACK", ADX_LOOKBACK)
             print("🔄 Config reloaded from file")
     
     def validate(self) -> bool:
