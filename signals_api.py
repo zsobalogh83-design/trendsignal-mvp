@@ -99,6 +99,7 @@ def save_signal_to_db(signal, db: Session):
         db_signal = Signal(
             ticker_id=ticker.id,
             ticker_symbol=signal.ticker_symbol,
+            technical_indicator_id=getattr(signal, 'technical_indicator_id', None),  # ✅ Link to TechnicalIndicator
             decision=str(signal.decision),
             strength=str(signal.strength),
             combined_score=to_python(signal.combined_score),
@@ -122,7 +123,8 @@ def save_signal_to_db(signal, db: Session):
         db.commit()
         db.refresh(db_signal)
         
-        logger.info(f"✅ Saved signal for {signal.ticker_symbol} to database (ID: {db_signal.id})")
+        tech_id_info = f", Tech ID: {db_signal.technical_indicator_id}" if db_signal.technical_indicator_id else ""
+        logger.info(f"✅ Saved signal for {signal.ticker_symbol} to database (ID: {db_signal.id}{tech_id_info})")
         return db_signal
         
     except Exception as e:
@@ -360,6 +362,7 @@ async def get_signals(
             signals_list.append({
                 "id": signal.id,
                 "ticker_symbol": signal.ticker_symbol,
+                "technical_indicator_id": signal.technical_indicator_id,  # ✅ Link to technical snapshot
                 "decision": signal.decision,
                 "strength": signal.strength,
                 "combined_score": float(signal.combined_score),
@@ -417,6 +420,7 @@ async def get_signal_by_id_endpoint(
         return {
             "id": signal.id,
             "ticker_symbol": signal.ticker_symbol,
+            "technical_indicator_id": signal.technical_indicator_id,  # ✅ Link to technical snapshot
             "decision": signal.decision,
             "strength": signal.strength,
             "combined_score": float(signal.combined_score),

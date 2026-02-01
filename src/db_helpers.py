@@ -270,9 +270,30 @@ def save_technical_indicators_to_db(
     interval: str,
     timestamp: datetime,
     indicators: dict,
-    db: Session
+    technical_score: float = None,
+    technical_confidence: float = None,
+    score_components: dict = None,
+    db: Session = None
 ) -> Optional[TechnicalIndicator]:
-    """Save technical indicators to database"""
+    """
+    Save technical indicators to database with score breakdown
+    
+    Args:
+        ticker_symbol: Stock ticker
+        interval: Data interval
+        timestamp: Timestamp of the data
+        indicators: Dict with indicator values (RSI, SMA, etc.)
+        technical_score: Calculated technical score (-100 to +100)
+        technical_confidence: Technical confidence (0.0 to 1.0)
+        score_components: Dict with score breakdown (contributions)
+        db: Database session
+    
+    Returns:
+        TechnicalIndicator record with ID, or None if error
+    """
+    if db is None:
+        return None
+        
     try:
         # Check if record exists
         existing = db.query(TechnicalIndicator).filter(
@@ -282,7 +303,55 @@ def save_technical_indicators_to_db(
         ).first()
         
         if existing:
+            # UPDATE existing record with new score/components if provided
+            print(f"  🔍 DEBUG: Found existing tech indicator (ID: {existing.id})")
+            print(f"  🔍 DEBUG: existing.technical_score = {existing.technical_score}")
+            print(f"  🔍 DEBUG: new technical_score = {technical_score}")
+            print(f"  🔍 DEBUG: existing.score_components = {existing.score_components[:50] if existing.score_components else 'NULL'}...")
+            
+            updated = False
+            
+            # Update technical_score (NULL-safe)
+            if technical_score is not None:
+                if existing.technical_score is None:
+                    print(f"  🔍 DEBUG: Updating score from NULL to {technical_score}")
+                    existing.technical_score = technical_score
+                    updated = True
+                elif existing.technical_score != technical_score:
+                    print(f"  🔍 DEBUG: Updating score from {existing.technical_score} to {technical_score}")
+                    existing.technical_score = technical_score
+                    updated = True
+                else:
+                    print(f"  🔍 DEBUG: Score unchanged ({technical_score})")
+            
+            # Update technical_confidence (NULL-safe)
+            if technical_confidence is not None:
+                if existing.technical_confidence is None or existing.technical_confidence != technical_confidence:
+                    existing.technical_confidence = technical_confidence
+                    updated = True
+            
+            # Update score_components (NULL-safe)
+            if score_components is not None:
+                import json
+                score_components_json = json.dumps(score_components)
+                if existing.score_components is None or existing.score_components != score_components_json:
+                    existing.score_components = score_components_json
+                    updated = True
+            
+            print(f"  🔍 DEBUG: updated flag = {updated}")
+            
+            if updated:
+                db.commit()
+                db.refresh(existing)
+                print(f"  🔄 Technical indicators UPDATED (ID: {existing.id}, Score: {technical_score if technical_score else 'N/A'})")
+            else:
+                print(f"  ♻️ Technical indicators EXISTS (ID: {existing.id}, no changes)")
+            
             return existing
+        
+        # Convert score_components to JSON string
+        import json
+        score_components_json = json.dumps(score_components) if score_components else None
         
         # Create new record
         tech_record = TechnicalIndicator(
@@ -309,12 +378,17 @@ def save_technical_indicators_to_db(
             volume_sma=indicators.get('volume_sma'),
             obv=indicators.get('obv'),
             close_price=indicators.get('close_price'),
+            technical_score=technical_score,
+            technical_confidence=technical_confidence,
+            score_components=score_components_json,
             calculated_at=datetime.now(timezone.utc)
         )
         
         db.add(tech_record)
         db.commit()
         db.refresh(tech_record)
+        
+        print(f"  💾 Technical indicators saved to DB (ID: {tech_record.id}, Score: {technical_score if technical_score else 0})")
         
         return tech_record
         

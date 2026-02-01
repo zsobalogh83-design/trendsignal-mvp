@@ -90,6 +90,7 @@ class TradingSignal:
     news_count: int = 0
     reasoning: Optional[Dict] = None
     components: Optional[Dict] = None  # ✅ NEW: Weight and contribution breakdown
+    technical_indicator_id: Optional[int] = None  # ✅ Link to TechnicalIndicator table
     
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
@@ -309,6 +310,7 @@ class SignalGenerator:
             risk_reward_ratio=rr_ratio,
             news_count=news_count,
             reasoning=reasoning,
+            technical_indicator_id=technical_data.get("technical_indicator_id"),  # ✅ Link to DB record
             components={  # ✅ NEW: Include actual weights and contributions
                 "sentiment": {
                     "score": round(sentiment_score, 2),
@@ -939,6 +941,13 @@ def calculate_technical_score(
         tech_score = 0
         key_signals = []
         
+        # ===== SCORE COMPONENTS TRACKING =====
+        score_components = {
+            'sma_trend': {},
+            'rsi': {},
+            'total_score': 0
+        }
+        
         # ===== LOAD CONFIG FOR TECHNICAL WEIGHTS =====
         from src.config import get_config
         config = get_config()
@@ -950,41 +959,65 @@ def calculate_technical_score(
         
         if pd.notna(current['sma_20']) and pd.notna(sma_50_for_comparison):
             if current[close_col] > current['sma_20']:
-                tech_score += config.tech_sma20_bullish
+                contribution = config.tech_sma20_bullish
+                tech_score += contribution
                 key_signals.append("Price > SMA20")
+                score_components['sma_trend']['sma20'] = {'signal': 'bullish', 'contribution': contribution}
             else:
-                tech_score -= config.tech_sma20_bearish
+                contribution = -config.tech_sma20_bearish
+                tech_score += contribution
+                score_components['sma_trend']['sma20'] = {'signal': 'bearish', 'contribution': contribution}
             
             if current[close_col] > sma_50_for_comparison:
-                tech_score += config.tech_sma50_bullish
+                contribution = config.tech_sma50_bullish
+                tech_score += contribution
                 key_signals.append("Price > SMA50")
+                score_components['sma_trend']['sma50'] = {'signal': 'bullish', 'contribution': contribution}
             else:
-                tech_score -= config.tech_sma50_bearish
+                contribution = -config.tech_sma50_bearish
+                tech_score += contribution
+                score_components['sma_trend']['sma50'] = {'signal': 'bearish', 'contribution': contribution}
             
             if current['sma_20'] > sma_50_for_comparison:
-                tech_score += config.tech_golden_cross
+                contribution = config.tech_golden_cross
+                tech_score += contribution
                 key_signals.append("Golden Cross")
+                score_components['sma_trend']['cross'] = {'signal': 'golden', 'contribution': contribution}
             else:
-                tech_score -= config.tech_death_cross
+                contribution = -config.tech_death_cross
+                tech_score += contribution
                 key_signals.append("Death Cross")
+                score_components['sma_trend']['cross'] = {'signal': 'death', 'contribution': contribution}
         
         # RSI
         if pd.notna(current['rsi']):
             rsi = current['rsi']
             if 45 < rsi < 55:
-                tech_score += config.tech_rsi_neutral
+                contribution = config.tech_rsi_neutral
+                tech_score += contribution
                 key_signals.append(f"RSI neutral ({rsi:.1f})")
+                score_components['rsi'] = {'zone': 'neutral', 'value': float(rsi), 'contribution': contribution}
             elif 55 <= rsi < 70:
-                tech_score += config.tech_rsi_bullish
+                contribution = config.tech_rsi_bullish
+                tech_score += contribution
                 key_signals.append(f"RSI bullish ({rsi:.1f})")
+                score_components['rsi'] = {'zone': 'bullish', 'value': float(rsi), 'contribution': contribution}
             elif 30 < rsi <= 45:
-                tech_score += config.tech_rsi_weak_bullish
+                contribution = config.tech_rsi_weak_bullish
+                tech_score += contribution
+                score_components['rsi'] = {'zone': 'weak_bullish', 'value': float(rsi), 'contribution': contribution}
             elif rsi >= 70:
-                tech_score -= config.tech_rsi_overbought
+                contribution = -config.tech_rsi_overbought
+                tech_score += contribution
                 key_signals.append(f"RSI overbought ({rsi:.1f})")
+                score_components['rsi'] = {'zone': 'overbought', 'value': float(rsi), 'contribution': contribution}
             elif rsi <= 30:
-                tech_score += config.tech_rsi_oversold  # ✅ BULLISH reversal signal
+                contribution = config.tech_rsi_oversold  # ✅ BULLISH reversal signal
+                tech_score += contribution
                 key_signals.append(f"RSI oversold ({rsi:.1f})")
+                score_components['rsi'] = {'zone': 'oversold', 'value': float(rsi), 'contribution': contribution}
+        
+        score_components['total_score'] = tech_score
         
         # ADX - Trend Strength Indicator from TREND timeframe (1h)
         adx = None
@@ -1259,10 +1292,11 @@ def calculate_technical_score(
             "rsi": float(current['rsi']) if pd.notna(current['rsi']) else None,
             "sma_20": float(current['sma_20']) if pd.notna(current['sma_20']) else None,
             "sma_50": float(sma_50_for_comparison) if pd.notna(sma_50_for_comparison) else None,  # From trend df!
-            "adx": float(adx) if adx is not None else None
+            "adx": float(adx) if adx is not None else None,
+            "technical_indicator_id": None  # Will be set if DB save succeeds
         }
         
-        # Save technical indicators to database
+        # Save technical indicators to database WITH SCORE AND COMPONENTS
         if db is not None:
             try:
                 from db_helpers import save_technical_indicators_to_db
@@ -1290,14 +1324,21 @@ def calculate_technical_score(
                     from datetime import timezone as tz
                     timestamp = timestamp.replace(tzinfo=tz.utc)
                 
-                save_technical_indicators_to_db(
+                # Save with score and components
+                tech_record = save_technical_indicators_to_db(
                     ticker_symbol=ticker_symbol,
                     interval='5m',  # Primary timeframe
                     timestamp=timestamp,
                     indicators=indicators_to_save,
+                    technical_score=float(tech_score),
+                    technical_confidence=float(technical_confidence),
+                    score_components=score_components,
                     db=db
                 )
-                print(f"  💾 Technical indicators saved to DB")
+                
+                if tech_record and tech_record.id:
+                    result['technical_indicator_id'] = tech_record.id
+                    print(f"  💾 Technical indicators saved to DB (ID: {tech_record.id})")
                 
             except Exception as e:
                 print(f"  ⚠️ Could not save technical indicators to DB: {e}")
