@@ -995,7 +995,15 @@ def calculate_technical_score(
                 key_signals.append("Death Cross")
                 score_components['sma_trend']['cross'] = {'signal': 'death', 'contribution': contribution}
         
-        # RSI
+        # ===== DETECT TREND DIRECTION (for trend-aware scoring) =====
+        sma_trend_direction = 0
+        if pd.notna(current.get('sma_20')) and pd.notna(sma_50_for_comparison):
+            if current['sma_20'] > sma_50_for_comparison:
+                sma_trend_direction = 1  # Bullish trend (Golden Cross)
+            elif current['sma_20'] < sma_50_for_comparison:
+                sma_trend_direction = -1  # Bearish trend (Death Cross)
+        
+        # RSI (TREND-AWARE)
         if pd.notna(current['rsi']):
             rsi = current['rsi']
             if 45 < rsi < 55:
@@ -1018,10 +1026,115 @@ def calculate_technical_score(
                 key_signals.append(f"RSI overbought ({rsi:.1f})")
                 score_components['rsi'] = {'zone': 'overbought', 'value': float(rsi), 'contribution': contribution}
             elif rsi <= 30:
-                contribution = config.tech_rsi_oversold  # ✅ BULLISH reversal signal
-                tech_score += contribution
-                key_signals.append(f"RSI oversold ({rsi:.1f})")
-                score_components['rsi'] = {'zone': 'oversold', 'value': float(rsi), 'contribution': contribution}
+                # TREND-AWARE: Oversold only bullish in uptrends or neutral
+                if sma_trend_direction >= 0:  # Bullish or neutral trend
+                    contribution = config.tech_rsi_oversold  # +15 (pullback buy opportunity!)
+                    tech_score += contribution
+                    key_signals.append(f"RSI oversold ({rsi:.1f})")
+                    score_components['rsi'] = {'zone': 'oversold_bullish_trend', 'value': float(rsi), 'contribution': contribution}
+                else:  # Bearish trend (Death Cross)
+                    contribution = 0  # Ignore oversold in downtrend (falling knife!)
+                    score_components['rsi'] = {'zone': 'oversold_bearish_trend', 'value': float(rsi), 'contribution': 0}
+                    key_signals.append(f"RSI oversold (ignored in downtrend)")
+        
+        # ===== NEW INDICATORS =====
+        
+        # MACD Score
+        if 'macd_histogram' in current and pd.notna(current['macd_histogram']):
+            macd_hist = current['macd_histogram']
+            
+            if macd_hist > 0:
+                macd_score = config.tech_macd_weight
+                key_signals.append("MACD bullish")
+            elif macd_hist < 0:
+                macd_score = -config.tech_macd_weight
+            else:
+                macd_score = 0
+            
+            tech_score += macd_score
+            score_components['macd'] = {'histogram': float(macd_hist), 'contribution': macd_score}
+        
+        # Bollinger Bands Score (TREND-AWARE)
+        if all(pd.notna(current.get(x)) for x in ['bb_upper', 'bb_middle', 'bb_lower']):
+            bb_width = current['bb_upper'] - current['bb_lower']
+            if bb_width > 0:
+                bb_position = (current[close_col] - current['bb_lower']) / bb_width
+                
+                if bb_position > 0.8:
+                    bb_score = -int(config.tech_bollinger_weight * 0.7)
+                    key_signals.append("BB overbought")
+                elif bb_position < 0.2:
+                    if sma_trend_direction >= 0:
+                        bb_score = +int(config.tech_bollinger_weight * 0.7)
+                        key_signals.append("BB oversold (dip buy)")
+                    else:
+                        bb_score = 0
+                elif 0.4 <= bb_position <= 0.6:
+                    bb_score = +int(config.tech_bollinger_weight * 0.3)
+                else:
+                    bb_score = 0
+                
+                tech_score += bb_score
+                score_components['bollinger'] = {'position': float(bb_position), 'contribution': bb_score}
+        
+        # Stochastic Score (TREND-AWARE)
+        if 'stoch_k' in current and 'stoch_d' in current and pd.notna(current['stoch_k']):
+            stoch_k = current['stoch_k']
+            stoch_d = current['stoch_d']
+            
+            if stoch_k < 20:
+                if sma_trend_direction >= 0:
+                    stoch_score = +config.tech_stochastic_weight
+                    key_signals.append("Stoch oversold")
+                else:
+                    stoch_score = 0
+            elif stoch_k > 80:
+                stoch_score = -config.tech_stochastic_weight
+                key_signals.append("Stoch overbought")
+            else:
+                stoch_score = 0
+            
+            tech_score += stoch_score
+            score_components['stochastic'] = {'k': float(stoch_k), 'd': float(stoch_d), 'contribution': stoch_score}
+        
+        # CCI Score (TREND-AWARE)
+        if 'cci' in current and pd.notna(current['cci']):
+            cci = current['cci']
+            
+            if cci < -100:
+                if sma_trend_direction >= 0:
+                    cci_score = +config.tech_cci_weight
+                    key_signals.append("CCI oversold")
+                else:
+                    cci_score = 0
+            elif cci > 100:
+                cci_score = -config.tech_cci_weight
+                key_signals.append("CCI overbought")
+            else:
+                cci_score = 0
+            
+            tech_score += cci_score
+            score_components['cci'] = {'value': float(cci), 'contribution': cci_score}
+        
+        # Volume Score
+        if 'volume' in df.columns and len(df) >= 20:
+            volume_sma = df['volume'].rolling(20).mean().iloc[-1]
+            current_volume = current.get('volume', 0)
+            
+            if pd.notna(volume_sma) and volume_sma > 0:
+                volume_ratio = current_volume / volume_sma
+                
+                if volume_ratio > 1.5:
+                    volume_score = +config.tech_volume_weight
+                    key_signals.append("High volume")
+                elif volume_ratio < 0.8:
+                    volume_score = -int(config.tech_volume_weight * 0.5)
+                    key_signals.append("Low volume")
+                else:
+                    volume_score = 0
+                
+                tech_score += volume_score
+                score_components['volume'] = {'ratio': float(volume_ratio), 'contribution': volume_score}
         
         score_components['total_score'] = tech_score
         

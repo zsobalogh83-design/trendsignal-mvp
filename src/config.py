@@ -139,7 +139,7 @@ ADX_LOOKBACK = "30d"
 # TECHNICAL COMPONENT WEIGHTS
 # ==========================================
 
-# SMA Trend Weights
+# SMA Trend Weights (existing - total max ~60 points)
 TECH_SMA20_BULLISH = 25   # Price > SMA20
 TECH_SMA20_BEARISH = 15   # Price < SMA20
 TECH_SMA50_BULLISH = 20   # Price > SMA50
@@ -147,25 +147,50 @@ TECH_SMA50_BEARISH = 10   # Price < SMA50
 TECH_GOLDEN_CROSS = 15    # SMA20 > SMA50
 TECH_DEATH_CROSS = 15     # SMA20 < SMA50
 
-# RSI Weights
+# RSI Weights (existing - total max ~30 points)
 TECH_RSI_NEUTRAL = 20     # 45 < RSI < 55
 TECH_RSI_BULLISH = 30     # 55 <= RSI < 70
 TECH_RSI_WEAK_BULLISH = 10  # 30 < RSI <= 45
 TECH_RSI_OVERBOUGHT = 20  # RSI >= 70 (bearish, negative impact)
 TECH_RSI_OVERSOLD = 15    # RSI <= 30 (bullish reversal, positive impact)
 
+# NEW: Additional Indicator Weights
+TECH_MACD_WEIGHT = 10          # MACD histogram/crossover contribution
+TECH_BOLLINGER_WEIGHT = 15     # Bollinger Bands position/squeeze
+TECH_STOCHASTIC_WEIGHT = 5     # Stochastic oscillator
+TECH_CCI_WEIGHT = 5            # Commodity Channel Index
+TECH_VOLUME_WEIGHT = 10        # Volume confirmation
+TECH_ADX_WEIGHT = 0            # ADX (optional, already in risk)
+
 
 # ==========================================
 # RISK MANAGEMENT
 # ==========================================
 
+# Risk Component Weights
+RISK_VOLATILITY_WEIGHT = 0.40      # 40% - ATR-based volatility risk
+RISK_PROXIMITY_WEIGHT = 0.35       # 35% - S/R proximity risk  
+RISK_TREND_STRENGTH_WEIGHT = 0.25  # 25% - ADX trend strength risk
+
 # Stop-loss calculation
-STOP_LOSS_ATR_MULTIPLIER = 1.5
-MIN_STOP_LOSS_PCT = 0.02  # 2%
-MAX_STOP_LOSS_PCT = 0.05  # 5%
+STOP_LOSS_SR_BUFFER = 0.5          # S/R buffer multiplier (0.5×ATR below support)
+STOP_LOSS_ATR_MULTIPLIER = 2.0     # ATR-based stop multiplier (2×ATR)
+MIN_STOP_LOSS_PCT = 0.02           # 2% (deprecated - kept for compatibility)
+MAX_STOP_LOSS_PCT = 0.05           # 5% (deprecated - kept for compatibility)
 
 # Take-profit calculation
-RISK_REWARD_RATIO = 2.0  # Target R:R = 1:2
+TAKE_PROFIT_ATR_MULTIPLIER = 3.0   # ATR-based target multiplier (3×ATR, 1:1.5 R:R)
+RISK_REWARD_RATIO = 2.0            # Target R:R = 1:2 (deprecated - kept for compatibility)
+
+# S/R Distance Thresholds (for using S/R vs ATR fallback)
+SR_SUPPORT_MAX_DISTANCE_PCT = 5.0  # Max 5% distance to use support for stop-loss
+SR_RESISTANCE_MAX_DISTANCE_PCT = 8.0  # Max 8% distance to use resistance for take-profit
+
+# S/R DBSCAN Detection Parameters
+SR_DBSCAN_EPS = 4.0          # Clustering proximity threshold (4%)
+SR_DBSCAN_MIN_SAMPLES = 3    # Minimum pivots per cluster
+SR_DBSCAN_ORDER = 7          # Pivot detection window (7 bars each side)
+SR_DBSCAN_LOOKBACK = 180     # Historical lookback period (180 days = 6 months)
 
 
 # ==========================================
@@ -235,6 +260,13 @@ def save_config_to_file(config_instance):
             "TECH_RSI_WEAK_BULLISH": config_instance.tech_rsi_weak_bullish,
             "TECH_RSI_OVERBOUGHT": config_instance.tech_rsi_overbought,
             "TECH_RSI_OVERSOLD": config_instance.tech_rsi_oversold,
+            # NEW: Additional indicator weights
+            "TECH_MACD_WEIGHT": config_instance.tech_macd_weight,
+            "TECH_BOLLINGER_WEIGHT": config_instance.tech_bollinger_weight,
+            "TECH_STOCHASTIC_WEIGHT": config_instance.tech_stochastic_weight,
+            "TECH_CCI_WEIGHT": config_instance.tech_cci_weight,
+            "TECH_VOLUME_WEIGHT": config_instance.tech_volume_weight,
+            "TECH_ADX_WEIGHT": config_instance.tech_adx_weight,
             # Decay weights
             "DECAY_WEIGHTS": config_instance.decay_weights,
             # Technical indicator periods
@@ -270,6 +302,19 @@ def save_config_to_file(config_instance):
             "ATR_LOOKBACK": config_instance.atr_lookback,
             "STOCH_LOOKBACK": config_instance.stoch_lookback,
             "ADX_LOOKBACK": config_instance.adx_lookback,
+            # Risk management parameters
+            "RISK_VOLATILITY_WEIGHT": config_instance.risk_volatility_weight,
+            "RISK_PROXIMITY_WEIGHT": config_instance.risk_proximity_weight,
+            "RISK_TREND_STRENGTH_WEIGHT": config_instance.risk_trend_strength_weight,
+            "STOP_LOSS_SR_BUFFER": config_instance.stop_loss_sr_buffer,
+            "STOP_LOSS_ATR_MULTIPLIER": config_instance.stop_loss_atr_mult,
+            "TAKE_PROFIT_ATR_MULTIPLIER": config_instance.take_profit_atr_mult,
+            "SR_SUPPORT_MAX_DISTANCE_PCT": config_instance.sr_support_max_distance_pct,
+            "SR_RESISTANCE_MAX_DISTANCE_PCT": config_instance.sr_resistance_max_distance_pct,
+            "SR_DBSCAN_EPS": config_instance.sr_dbscan_eps,
+            "SR_DBSCAN_MIN_SAMPLES": config_instance.sr_dbscan_min_samples,
+            "SR_DBSCAN_ORDER": config_instance.sr_dbscan_order,
+            "SR_DBSCAN_LOOKBACK": config_instance.sr_dbscan_lookback,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -395,8 +440,28 @@ class TrendSignalConfig:
     tech_rsi_overbought: int = TECH_RSI_OVERBOUGHT
     tech_rsi_oversold: int = TECH_RSI_OVERSOLD
     
-    # Risk management
+    # NEW: Additional indicator weights
+    tech_macd_weight: int = TECH_MACD_WEIGHT
+    tech_bollinger_weight: int = TECH_BOLLINGER_WEIGHT
+    tech_stochastic_weight: int = TECH_STOCHASTIC_WEIGHT
+    tech_cci_weight: int = TECH_CCI_WEIGHT
+    tech_volume_weight: int = TECH_VOLUME_WEIGHT
+    tech_adx_weight: int = TECH_ADX_WEIGHT
+    
+    # Risk management parameters
+    risk_volatility_weight: float = RISK_VOLATILITY_WEIGHT
+    risk_proximity_weight: float = RISK_PROXIMITY_WEIGHT
+    risk_trend_strength_weight: float = RISK_TREND_STRENGTH_WEIGHT
+    stop_loss_sr_buffer: float = STOP_LOSS_SR_BUFFER
     stop_loss_atr_mult: float = STOP_LOSS_ATR_MULTIPLIER
+    take_profit_atr_mult: float = TAKE_PROFIT_ATR_MULTIPLIER
+    sr_support_max_distance_pct: float = SR_SUPPORT_MAX_DISTANCE_PCT
+    sr_resistance_max_distance_pct: float = SR_RESISTANCE_MAX_DISTANCE_PCT
+    sr_dbscan_eps: float = SR_DBSCAN_EPS
+    sr_dbscan_min_samples: int = SR_DBSCAN_MIN_SAMPLES
+    sr_dbscan_order: int = SR_DBSCAN_ORDER
+    sr_dbscan_lookback: int = SR_DBSCAN_LOOKBACK
+    # Legacy compatibility
     risk_reward_ratio: float = RISK_REWARD_RATIO
     
     def __post_init__(self):
@@ -463,6 +528,19 @@ class TrendSignalConfig:
             self.atr_lookback = saved_config.get("ATR_LOOKBACK", ATR_LOOKBACK)
             self.stoch_lookback = saved_config.get("STOCH_LOOKBACK", STOCH_LOOKBACK)
             self.adx_lookback = saved_config.get("ADX_LOOKBACK", ADX_LOOKBACK)
+            # Risk management parameters
+            self.risk_volatility_weight = saved_config.get("RISK_VOLATILITY_WEIGHT", RISK_VOLATILITY_WEIGHT)
+            self.risk_proximity_weight = saved_config.get("RISK_PROXIMITY_WEIGHT", RISK_PROXIMITY_WEIGHT)
+            self.risk_trend_strength_weight = saved_config.get("RISK_TREND_STRENGTH_WEIGHT", RISK_TREND_STRENGTH_WEIGHT)
+            self.stop_loss_sr_buffer = saved_config.get("STOP_LOSS_SR_BUFFER", STOP_LOSS_SR_BUFFER)
+            self.stop_loss_atr_mult = saved_config.get("STOP_LOSS_ATR_MULTIPLIER", STOP_LOSS_ATR_MULTIPLIER)
+            self.take_profit_atr_mult = saved_config.get("TAKE_PROFIT_ATR_MULTIPLIER", TAKE_PROFIT_ATR_MULTIPLIER)
+            self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
+            self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
+            self.sr_dbscan_eps = saved_config.get("SR_DBSCAN_EPS", SR_DBSCAN_EPS)
+            self.sr_dbscan_min_samples = saved_config.get("SR_DBSCAN_MIN_SAMPLES", SR_DBSCAN_MIN_SAMPLES)
+            self.sr_dbscan_order = saved_config.get("SR_DBSCAN_ORDER", SR_DBSCAN_ORDER)
+            self.sr_dbscan_lookback = saved_config.get("SR_DBSCAN_LOOKBACK", SR_DBSCAN_LOOKBACK)
             print("📝 Config loaded from file with custom weights")
         
         # Initialize nested dicts if not loaded (legacy compatibility)
@@ -584,6 +662,13 @@ class TrendSignalConfig:
             self.tech_rsi_weak_bullish = saved_config.get("TECH_RSI_WEAK_BULLISH", TECH_RSI_WEAK_BULLISH)
             self.tech_rsi_overbought = saved_config.get("TECH_RSI_OVERBOUGHT", TECH_RSI_OVERBOUGHT)
             self.tech_rsi_oversold = saved_config.get("TECH_RSI_OVERSOLD", TECH_RSI_OVERSOLD)
+            # NEW: Additional indicator weights
+            self.tech_macd_weight = saved_config.get("TECH_MACD_WEIGHT", TECH_MACD_WEIGHT)
+            self.tech_bollinger_weight = saved_config.get("TECH_BOLLINGER_WEIGHT", TECH_BOLLINGER_WEIGHT)
+            self.tech_stochastic_weight = saved_config.get("TECH_STOCHASTIC_WEIGHT", TECH_STOCHASTIC_WEIGHT)
+            self.tech_cci_weight = saved_config.get("TECH_CCI_WEIGHT", TECH_CCI_WEIGHT)
+            self.tech_volume_weight = saved_config.get("TECH_VOLUME_WEIGHT", TECH_VOLUME_WEIGHT)
+            self.tech_adx_weight = saved_config.get("TECH_ADX_WEIGHT", TECH_ADX_WEIGHT)
             # Technical indicator periods
             self.rsi_period = saved_config.get("RSI_PERIOD", RSI_PERIOD)
             self.sma_short_period = saved_config.get("SMA_SHORT_PERIOD", SMA_SHORT_PERIOD)
@@ -617,6 +702,19 @@ class TrendSignalConfig:
             self.atr_lookback = saved_config.get("ATR_LOOKBACK", ATR_LOOKBACK)
             self.stoch_lookback = saved_config.get("STOCH_LOOKBACK", STOCH_LOOKBACK)
             self.adx_lookback = saved_config.get("ADX_LOOKBACK", ADX_LOOKBACK)
+            # Risk management parameters
+            self.risk_volatility_weight = saved_config.get("RISK_VOLATILITY_WEIGHT", RISK_VOLATILITY_WEIGHT)
+            self.risk_proximity_weight = saved_config.get("RISK_PROXIMITY_WEIGHT", RISK_PROXIMITY_WEIGHT)
+            self.risk_trend_strength_weight = saved_config.get("RISK_TREND_STRENGTH_WEIGHT", RISK_TREND_STRENGTH_WEIGHT)
+            self.stop_loss_sr_buffer = saved_config.get("STOP_LOSS_SR_BUFFER", STOP_LOSS_SR_BUFFER)
+            self.stop_loss_atr_mult = saved_config.get("STOP_LOSS_ATR_MULTIPLIER", STOP_LOSS_ATR_MULTIPLIER)
+            self.take_profit_atr_mult = saved_config.get("TAKE_PROFIT_ATR_MULTIPLIER", TAKE_PROFIT_ATR_MULTIPLIER)
+            self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
+            self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
+            self.sr_dbscan_eps = saved_config.get("SR_DBSCAN_EPS", SR_DBSCAN_EPS)
+            self.sr_dbscan_min_samples = saved_config.get("SR_DBSCAN_MIN_SAMPLES", SR_DBSCAN_MIN_SAMPLES)
+            self.sr_dbscan_order = saved_config.get("SR_DBSCAN_ORDER", SR_DBSCAN_ORDER)
+            self.sr_dbscan_lookback = saved_config.get("SR_DBSCAN_LOOKBACK", SR_DBSCAN_LOOKBACK)
             print("🔄 Config reloaded from file")
     
     def validate(self) -> bool:
