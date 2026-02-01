@@ -136,10 +136,21 @@ ADX_LOOKBACK = "30d"
 
 
 # ==========================================
-# TECHNICAL COMPONENT WEIGHTS
+# TECHNICAL COMPONENT WEIGHTS (PERCENTAGE-BASED)
 # ==========================================
+# Each indicator produces a normalized score (-100 to +100)
+# These weights determine how much each contributes to final technical score
+# MUST SUM TO 1.0 (100%)
 
-# SMA Trend Weights (existing - total max ~60 points)
+TECH_SMA_WEIGHT = 0.30          # 30% - Trend (SMA20/50/200, Golden/Death Cross)
+TECH_RSI_WEIGHT = 0.25          # 25% - Momentum (RSI zones)
+TECH_MACD_WEIGHT = 0.20         # 20% - Momentum (MACD histogram/crossover)
+TECH_BOLLINGER_WEIGHT = 0.15    # 15% - Volatility (BB position)
+TECH_STOCHASTIC_WEIGHT = 0.05   # 5% - Momentum (Stochastic oscillator)
+TECH_VOLUME_WEIGHT = 0.05       # 5% - Confirmation (Volume ratio)
+
+# Deprecated - Legacy detailed weights (kept for backward compatibility)
+# These are now used WITHIN each component's internal scoring
 TECH_SMA20_BULLISH = 25   # Price > SMA20
 TECH_SMA20_BEARISH = 15   # Price < SMA20
 TECH_SMA50_BULLISH = 20   # Price > SMA50
@@ -147,20 +158,15 @@ TECH_SMA50_BEARISH = 10   # Price < SMA50
 TECH_GOLDEN_CROSS = 15    # SMA20 > SMA50
 TECH_DEATH_CROSS = 15     # SMA20 < SMA50
 
-# RSI Weights (existing - total max ~30 points)
 TECH_RSI_NEUTRAL = 20     # 45 < RSI < 55
 TECH_RSI_BULLISH = 30     # 55 <= RSI < 70
 TECH_RSI_WEAK_BULLISH = 10  # 30 < RSI <= 45
-TECH_RSI_OVERBOUGHT = 20  # RSI >= 70 (bearish, negative impact)
-TECH_RSI_OVERSOLD = 15    # RSI <= 30 (bullish reversal, positive impact)
+TECH_RSI_OVERBOUGHT = 20  # RSI >= 70
+TECH_RSI_OVERSOLD = 15    # RSI <= 30
 
-# NEW: Additional Indicator Weights
-TECH_MACD_WEIGHT = 10          # MACD histogram/crossover contribution
-TECH_BOLLINGER_WEIGHT = 15     # Bollinger Bands position/squeeze
-TECH_STOCHASTIC_WEIGHT = 5     # Stochastic oscillator
-TECH_CCI_WEIGHT = 5            # Commodity Channel Index
-TECH_VOLUME_WEIGHT = 10        # Volume confirmation
-TECH_ADX_WEIGHT = 0            # ADX (optional, already in risk)
+# NEW: Additional indicators (CCI, ADX)
+TECH_CCI_WEIGHT = 0.00    # 0% - Optional (can enable if needed)
+TECH_ADX_WEIGHT = 0.00    # 0% - Already in risk component
 
 
 # ==========================================
@@ -427,7 +433,17 @@ class TrendSignalConfig:
     sma_periods: Dict[str, int] = None
     macd_params: Dict[str, int] = None
     
-    # Technical component weights
+    # Technical component weights (percentage-based, sum to 1.0)
+    tech_sma_weight: float = TECH_SMA_WEIGHT
+    tech_rsi_weight: float = TECH_RSI_WEIGHT
+    tech_macd_weight: float = TECH_MACD_WEIGHT
+    tech_bollinger_weight: float = TECH_BOLLINGER_WEIGHT
+    tech_stochastic_weight: float = TECH_STOCHASTIC_WEIGHT
+    tech_volume_weight: float = TECH_VOLUME_WEIGHT
+    tech_cci_weight: float = TECH_CCI_WEIGHT
+    tech_adx_weight: float = TECH_ADX_WEIGHT
+    
+    # Legacy: Detailed weights (used within each component's internal scoring)
     tech_sma20_bullish: int = TECH_SMA20_BULLISH
     tech_sma20_bearish: int = TECH_SMA20_BEARISH
     tech_sma50_bullish: int = TECH_SMA50_BULLISH
@@ -439,14 +455,6 @@ class TrendSignalConfig:
     tech_rsi_weak_bullish: int = TECH_RSI_WEAK_BULLISH
     tech_rsi_overbought: int = TECH_RSI_OVERBOUGHT
     tech_rsi_oversold: int = TECH_RSI_OVERSOLD
-    
-    # NEW: Additional indicator weights
-    tech_macd_weight: int = TECH_MACD_WEIGHT
-    tech_bollinger_weight: int = TECH_BOLLINGER_WEIGHT
-    tech_stochastic_weight: int = TECH_STOCHASTIC_WEIGHT
-    tech_cci_weight: int = TECH_CCI_WEIGHT
-    tech_volume_weight: int = TECH_VOLUME_WEIGHT
-    tech_adx_weight: int = TECH_ADX_WEIGHT
     
     # Risk management parameters
     risk_volatility_weight: float = RISK_VOLATILITY_WEIGHT

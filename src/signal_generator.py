@@ -806,6 +806,171 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
     }
 
 
+# ==========================================
+# NORMALIZED TECHNICAL COMPONENT SCORING
+# ==========================================
+
+def calculate_sma_component_score(current, sma_20, sma_50, close_col, config) -> Tuple[float, Dict]:
+    """Calculate SMA trend score normalized to -100 to +100"""
+    sma_score = 0
+    details = {}
+    
+    if pd.notna(sma_20) and pd.notna(sma_50):
+        price = current[close_col]
+        
+        if price > sma_20:
+            sma_score += config.tech_sma20_bullish
+            details['sma20'] = 'bullish'
+        else:
+            sma_score -= config.tech_sma20_bearish
+            details['sma20'] = 'bearish'
+        
+        if price > sma_50:
+            sma_score += config.tech_sma50_bullish
+            details['sma50'] = 'bullish'
+        else:
+            sma_score -= config.tech_sma50_bearish
+            details['sma50'] = 'bearish'
+        
+        if sma_20 > sma_50:
+            sma_score += config.tech_golden_cross
+            details['cross'] = 'golden'
+        else:
+            sma_score -= config.tech_death_cross
+            details['cross'] = 'death'
+    
+    # Normalize: max +60, min -40 → -100 to +100
+    normalized = (sma_score / 60.0) * 100
+    return max(-100, min(100, normalized)), details
+
+
+def calculate_rsi_component_score(rsi, sma_trend_direction, config) -> Tuple[float, Dict]:
+    """Calculate RSI score normalized to -100 to +100 (TREND-AWARE)"""
+    rsi_score = 0
+    details = {'value': float(rsi) if pd.notna(rsi) else None}
+    
+    if pd.notna(rsi):
+        if 45 < rsi < 55:
+            rsi_score = config.tech_rsi_neutral
+            details['zone'] = 'neutral'
+        elif 55 <= rsi < 70:
+            rsi_score = config.tech_rsi_bullish
+            details['zone'] = 'bullish'
+        elif 30 < rsi <= 45:
+            rsi_score = config.tech_rsi_weak_bullish
+            details['zone'] = 'weak_bullish'
+        elif rsi >= 70:
+            rsi_score = -config.tech_rsi_overbought
+            details['zone'] = 'overbought'
+        elif rsi <= 30:
+            if sma_trend_direction >= 0:
+                rsi_score = config.tech_rsi_oversold
+                details['zone'] = 'oversold_bullish'
+            else:
+                rsi_score = 0
+                details['zone'] = 'oversold_ignored'
+    
+    # Normalize: max +30, min -20 → -100 to +100
+    normalized = (rsi_score / 30.0) * 100
+    return max(-100, min(100, normalized)), details
+
+
+def calculate_macd_component_score(current) -> Tuple[float, Dict]:
+    """Calculate MACD score normalized to -100 to +100"""
+    if 'macd_histogram' in current and pd.notna(current['macd_histogram']):
+        macd_hist = float(current['macd_histogram'])
+        normalized = max(-100, min(100, macd_hist * 20))
+        
+        details = {
+            'histogram': macd_hist,
+            'signal': 'bullish' if macd_hist > 0 else 'bearish'
+        }
+        return normalized, details
+    return 0, {}
+
+
+def calculate_bollinger_component_score(current, close_col, sma_trend_direction) -> Tuple[float, Dict]:
+    """Calculate Bollinger score normalized to -100 to +100 (TREND-AWARE)"""
+    if all(pd.notna(current.get(x)) for x in ['bb_upper', 'bb_middle', 'bb_lower']):
+        bb_width = current['bb_upper'] - current['bb_lower']
+        
+        if bb_width > 0:
+            price = current[close_col]
+            bb_position = (price - current['bb_lower']) / bb_width
+            
+            if bb_position > 0.8:
+                score = -70
+                zone = 'overbought'
+            elif bb_position < 0.2:
+                if sma_trend_direction >= 0:
+                    score = +70
+                    zone = 'oversold_bullish'
+                else:
+                    score = 0
+                    zone = 'oversold_ignored'
+            elif 0.4 <= bb_position <= 0.6:
+                score = +30
+                zone = 'neutral'
+            else:
+                score = 0
+                zone = 'other'
+            
+            details = {'position': float(bb_position), 'zone': zone}
+            return score, details
+    return 0, {}
+
+
+def calculate_stochastic_component_score(current, sma_trend_direction) -> Tuple[float, Dict]:
+    """Calculate Stochastic score normalized to -100 to +100 (TREND-AWARE)"""
+    if 'stoch_k' in current and pd.notna(current['stoch_k']):
+        stoch_k = float(current['stoch_k'])
+        
+        if stoch_k < 20:
+            if sma_trend_direction >= 0:
+                score = +100
+                zone = 'oversold_bullish'
+            else:
+                score = 0
+                zone = 'oversold_ignored'
+        elif stoch_k > 80:
+            score = -100
+            zone = 'overbought'
+        else:
+            score = 0
+            zone = 'neutral'
+        
+        details = {'k': stoch_k, 'zone': zone}
+        return score, details
+    return 0, {}
+
+
+def calculate_volume_component_score(df, current) -> Tuple[float, Dict]:
+    """Calculate Volume score normalized to -100 to +100"""
+    if 'volume' in df.columns and len(df) >= 20:
+        volume_sma = df['volume'].rolling(20).mean().iloc[-1]
+        current_volume = current.get('volume', 0)
+        
+        if pd.notna(volume_sma) and volume_sma > 0:
+            volume_ratio = current_volume / volume_sma
+            
+            if volume_ratio > 2.0:
+                score = +100
+            elif volume_ratio > 1.5:
+                score = +70
+            elif volume_ratio > 1.2:
+                score = +30
+            elif volume_ratio < 0.5:
+                score = -100
+            elif volume_ratio < 0.8:
+                score = -50
+            else:
+                score = 0
+            
+            details = {'ratio': float(volume_ratio)}
+            return score, details
+    return 0, {}
+
+
 def calculate_technical_score(
     df: pd.DataFrame, 
     ticker_symbol: str, 
@@ -943,200 +1108,105 @@ def calculate_technical_score(
         if 'macd' in current.index:
             print(f"  🔍 DEBUG: MACD value: {current['macd']}")
         
-        # Technical score
-        tech_score = 0
-        key_signals = []
-        
-        # ===== SCORE COMPONENTS TRACKING =====
-        score_components = {
-            'sma_trend': {},
-            'rsi': {},
-            'total_score': 0
-        }
-        
         # ===== LOAD CONFIG FOR TECHNICAL WEIGHTS =====
         from src.config import get_config
         config = get_config()
         if hasattr(config, 'reload'):
             config.reload()
         
-        # SMA trend - use SMA50 from trend timeframe if available
+        # ===== DETECT TREND DIRECTION =====
         sma_50_for_comparison = sma_50_value if pd.notna(sma_50_value) else current.get('sma_50')
-        
-        if pd.notna(current['sma_20']) and pd.notna(sma_50_for_comparison):
-            if current[close_col] > current['sma_20']:
-                contribution = config.tech_sma20_bullish
-                tech_score += contribution
-                key_signals.append("Price > SMA20")
-                score_components['sma_trend']['sma20'] = {'signal': 'bullish', 'contribution': contribution}
-            else:
-                contribution = -config.tech_sma20_bearish
-                tech_score += contribution
-                score_components['sma_trend']['sma20'] = {'signal': 'bearish', 'contribution': contribution}
-            
-            if current[close_col] > sma_50_for_comparison:
-                contribution = config.tech_sma50_bullish
-                tech_score += contribution
-                key_signals.append("Price > SMA50")
-                score_components['sma_trend']['sma50'] = {'signal': 'bullish', 'contribution': contribution}
-            else:
-                contribution = -config.tech_sma50_bearish
-                tech_score += contribution
-                score_components['sma_trend']['sma50'] = {'signal': 'bearish', 'contribution': contribution}
-            
-            if current['sma_20'] > sma_50_for_comparison:
-                contribution = config.tech_golden_cross
-                tech_score += contribution
-                key_signals.append("Golden Cross")
-                score_components['sma_trend']['cross'] = {'signal': 'golden', 'contribution': contribution}
-            else:
-                contribution = -config.tech_death_cross
-                tech_score += contribution
-                key_signals.append("Death Cross")
-                score_components['sma_trend']['cross'] = {'signal': 'death', 'contribution': contribution}
-        
-        # ===== DETECT TREND DIRECTION (for trend-aware scoring) =====
         sma_trend_direction = 0
+        
         if pd.notna(current.get('sma_20')) and pd.notna(sma_50_for_comparison):
             if current['sma_20'] > sma_50_for_comparison:
-                sma_trend_direction = 1  # Bullish trend (Golden Cross)
-            elif current['sma_20'] < sma_50_for_comparison:
-                sma_trend_direction = -1  # Bearish trend (Death Cross)
-        
-        # RSI (TREND-AWARE)
-        if pd.notna(current['rsi']):
-            rsi = current['rsi']
-            if 45 < rsi < 55:
-                contribution = config.tech_rsi_neutral
-                tech_score += contribution
-                key_signals.append(f"RSI neutral ({rsi:.1f})")
-                score_components['rsi'] = {'zone': 'neutral', 'value': float(rsi), 'contribution': contribution}
-            elif 55 <= rsi < 70:
-                contribution = config.tech_rsi_bullish
-                tech_score += contribution
-                key_signals.append(f"RSI bullish ({rsi:.1f})")
-                score_components['rsi'] = {'zone': 'bullish', 'value': float(rsi), 'contribution': contribution}
-            elif 30 < rsi <= 45:
-                contribution = config.tech_rsi_weak_bullish
-                tech_score += contribution
-                score_components['rsi'] = {'zone': 'weak_bullish', 'value': float(rsi), 'contribution': contribution}
-            elif rsi >= 70:
-                contribution = -config.tech_rsi_overbought
-                tech_score += contribution
-                key_signals.append(f"RSI overbought ({rsi:.1f})")
-                score_components['rsi'] = {'zone': 'overbought', 'value': float(rsi), 'contribution': contribution}
-            elif rsi <= 30:
-                # TREND-AWARE: Oversold only bullish in uptrends or neutral
-                if sma_trend_direction >= 0:  # Bullish or neutral trend
-                    contribution = config.tech_rsi_oversold  # +15 (pullback buy opportunity!)
-                    tech_score += contribution
-                    key_signals.append(f"RSI oversold ({rsi:.1f})")
-                    score_components['rsi'] = {'zone': 'oversold_bullish_trend', 'value': float(rsi), 'contribution': contribution}
-                else:  # Bearish trend (Death Cross)
-                    contribution = 0  # Ignore oversold in downtrend (falling knife!)
-                    score_components['rsi'] = {'zone': 'oversold_bearish_trend', 'value': float(rsi), 'contribution': 0}
-                    key_signals.append(f"RSI oversold (ignored in downtrend)")
-        
-        # ===== NEW INDICATORS =====
-        
-        # MACD Score
-        if 'macd_histogram' in current and pd.notna(current['macd_histogram']):
-            macd_hist = current['macd_histogram']
-            
-            if macd_hist > 0:
-                macd_score = config.tech_macd_weight
-                key_signals.append("MACD bullish")
-            elif macd_hist < 0:
-                macd_score = -config.tech_macd_weight
+                sma_trend_direction = 1  # Golden Cross (bullish)
             else:
-                macd_score = 0
-            
-            tech_score += macd_score
-            score_components['macd'] = {'histogram': float(macd_hist), 'contribution': macd_score}
+                sma_trend_direction = -1  # Death Cross (bearish)
         
-        # Bollinger Bands Score (TREND-AWARE)
-        if all(pd.notna(current.get(x)) for x in ['bb_upper', 'bb_middle', 'bb_lower']):
-            bb_width = current['bb_upper'] - current['bb_lower']
-            if bb_width > 0:
-                bb_position = (current[close_col] - current['bb_lower']) / bb_width
-                
-                if bb_position > 0.8:
-                    bb_score = -int(config.tech_bollinger_weight * 0.7)
-                    key_signals.append("BB overbought")
-                elif bb_position < 0.2:
-                    if sma_trend_direction >= 0:
-                        bb_score = +int(config.tech_bollinger_weight * 0.7)
-                        key_signals.append("BB oversold (dip buy)")
-                    else:
-                        bb_score = 0
-                elif 0.4 <= bb_position <= 0.6:
-                    bb_score = +int(config.tech_bollinger_weight * 0.3)
-                else:
-                    bb_score = 0
-                
-                tech_score += bb_score
-                score_components['bollinger'] = {'position': float(bb_position), 'contribution': bb_score}
+        # ===== CALCULATE COMPONENT SCORES (each normalized to -100/+100) =====
         
-        # Stochastic Score (TREND-AWARE)
-        if 'stoch_k' in current and 'stoch_d' in current and pd.notna(current['stoch_k']):
-            stoch_k = current['stoch_k']
-            stoch_d = current['stoch_d']
-            
-            if stoch_k < 20:
-                if sma_trend_direction >= 0:
-                    stoch_score = +config.tech_stochastic_weight
-                    key_signals.append("Stoch oversold")
-                else:
-                    stoch_score = 0
-            elif stoch_k > 80:
-                stoch_score = -config.tech_stochastic_weight
-                key_signals.append("Stoch overbought")
-            else:
-                stoch_score = 0
-            
-            tech_score += stoch_score
-            score_components['stochastic'] = {'k': float(stoch_k), 'd': float(stoch_d), 'contribution': stoch_score}
+        # 1. SMA Score
+        sma_score, sma_details = calculate_sma_component_score(
+            current, current.get('sma_20'), sma_50_for_comparison, close_col, config
+        )
         
-        # CCI Score (TREND-AWARE)
-        if 'cci' in current and pd.notna(current['cci']):
-            cci = current['cci']
-            
-            if cci < -100:
-                if sma_trend_direction >= 0:
-                    cci_score = +config.tech_cci_weight
-                    key_signals.append("CCI oversold")
-                else:
-                    cci_score = 0
-            elif cci > 100:
-                cci_score = -config.tech_cci_weight
-                key_signals.append("CCI overbought")
-            else:
-                cci_score = 0
-            
-            tech_score += cci_score
-            score_components['cci'] = {'value': float(cci), 'contribution': cci_score}
+        # 2. RSI Score (trend-aware)
+        rsi_score, rsi_details = calculate_rsi_component_score(
+            current.get('rsi'), sma_trend_direction, config
+        )
         
-        # Volume Score
-        if 'volume' in df.columns and len(df) >= 20:
-            volume_sma = df['volume'].rolling(20).mean().iloc[-1]
-            current_volume = current.get('volume', 0)
-            
-            if pd.notna(volume_sma) and volume_sma > 0:
-                volume_ratio = current_volume / volume_sma
-                
-                if volume_ratio > 1.5:
-                    volume_score = +config.tech_volume_weight
-                    key_signals.append("High volume")
-                elif volume_ratio < 0.8:
-                    volume_score = -int(config.tech_volume_weight * 0.5)
-                    key_signals.append("Low volume")
-                else:
-                    volume_score = 0
-                
-                tech_score += volume_score
-                score_components['volume'] = {'ratio': float(volume_ratio), 'contribution': volume_score}
+        # 3. MACD Score
+        macd_score, macd_details = calculate_macd_component_score(current)
         
-        score_components['total_score'] = tech_score
+        # 4. Bollinger Score (trend-aware)
+        bb_score, bb_details = calculate_bollinger_component_score(
+            current, close_col, sma_trend_direction
+        )
+        
+        # 5. Stochastic Score (trend-aware)
+        stoch_score, stoch_details = calculate_stochastic_component_score(
+            current, sma_trend_direction
+        )
+        
+        # 6. Volume Score
+        volume_score, volume_details = calculate_volume_component_score(df, current)
+        
+        # ===== WEIGHTED TECHNICAL SCORE =====
+        tech_score = (
+            sma_score * config.tech_sma_weight +
+            rsi_score * config.tech_rsi_weight +
+            macd_score * config.tech_macd_weight +
+            bb_score * config.tech_bollinger_weight +
+            stoch_score * config.tech_stochastic_weight +
+            volume_score * config.tech_volume_weight
+        )
+        
+        # Clamp to -100/+100
+        tech_score = max(-100, min(100, tech_score))
+        
+        # ===== BUILD KEY SIGNALS =====
+        key_signals = []
+        if sma_details.get('cross') == 'golden':
+            key_signals.append("Golden Cross")
+        elif sma_details.get('cross') == 'death':
+            key_signals.append("Death Cross")
+        
+        if sma_details.get('sma20') == 'bullish':
+            key_signals.append("Price > SMA20")
+        if sma_details.get('sma50') == 'bullish':
+            key_signals.append("Price > SMA50")
+        
+        if rsi_details.get('zone') == 'oversold_bullish':
+            key_signals.append(f"RSI oversold ({rsi_details.get('value', 0):.1f})")
+        elif rsi_details.get('zone') == 'overbought':
+            key_signals.append(f"RSI overbought ({rsi_details.get('value', 0):.1f})")
+        
+        if macd_details.get('signal') == 'bullish':
+            key_signals.append("MACD bullish")
+        elif macd_details.get('signal') == 'bearish':
+            key_signals.append("MACD bearish")
+        
+        if bb_details.get('zone') == 'oversold_bullish':
+            key_signals.append("BB dip buy")
+        
+        if stoch_details.get('zone') == 'oversold_bullish':
+            key_signals.append("Stoch oversold")
+        
+        if volume_details.get('ratio', 1.0) > 1.5:
+            key_signals.append("High volume")
+        
+        # ===== SCORE COMPONENTS TRACKING =====
+        score_components = {
+            'sma': {'score': round(sma_score, 2), 'weight': config.tech_sma_weight, 'contribution': round(sma_score * config.tech_sma_weight, 2), 'details': sma_details},
+            'rsi': {'score': round(rsi_score, 2), 'weight': config.tech_rsi_weight, 'contribution': round(rsi_score * config.tech_rsi_weight, 2), 'details': rsi_details},
+            'macd': {'score': round(macd_score, 2), 'weight': config.tech_macd_weight, 'contribution': round(macd_score * config.tech_macd_weight, 2), 'details': macd_details},
+            'bollinger': {'score': round(bb_score, 2), 'weight': config.tech_bollinger_weight, 'contribution': round(bb_score * config.tech_bollinger_weight, 2), 'details': bb_details},
+            'stochastic': {'score': round(stoch_score, 2), 'weight': config.tech_stochastic_weight, 'contribution': round(stoch_score * config.tech_stochastic_weight, 2), 'details': stoch_details},
+            'volume': {'score': round(volume_score, 2), 'weight': config.tech_volume_weight, 'contribution': round(volume_score * config.tech_volume_weight, 2), 'details': volume_details},
+            'total_score': round(tech_score, 2)
+        }
+
         
         # ADX - Trend Strength Indicator from TREND timeframe (1h)
         adx = None
