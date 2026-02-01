@@ -610,6 +610,12 @@ export function Configuration() {
           rsiWeakBullish: techConfig.tech_rsi_weak_bullish,
           rsiOverbought: techConfig.tech_rsi_overbought,
           rsiOversold: techConfig.tech_rsi_oversold,
+          macdWeight: techConfig.tech_macd_weight,
+          bollingerWeight: techConfig.tech_bollinger_weight,
+          stochasticWeight: techConfig.tech_stochastic_weight,
+          cciWeight: techConfig.tech_cci_weight,
+          volumeWeight: techConfig.tech_volume_weight,
+          adxWeight: techConfig.tech_adx_weight,
         });
         console.log('✅ Technical weights loaded:', techConfig);
 
@@ -729,6 +735,12 @@ export function Configuration() {
           tech_rsi_weak_bullish: technicalWeights.rsiWeakBullish,
           tech_rsi_overbought: technicalWeights.rsiOverbought,
           tech_rsi_oversold: technicalWeights.rsiOversold,
+          tech_macd_weight: technicalWeights.macdWeight,
+          tech_bollinger_weight: technicalWeights.bollingerWeight,
+          tech_stochastic_weight: technicalWeights.stochasticWeight,
+          tech_cci_weight: technicalWeights.cciWeight,
+          tech_volume_weight: technicalWeights.volumeWeight,
+          tech_adx_weight: technicalWeights.adxWeight,
         };
 
         const techResponse = await fetch('http://localhost:8000/api/v1/config/technical-weights', {
@@ -1499,6 +1511,193 @@ function TechnicalTab({ weights, setWeights, indicatorParams, setIndicatorParams
           ℹ️ These values determine how much each indicator affects the technical score. Higher values = stronger influence.<br/>
           <strong>Note:</strong> RSI Overbought subtracts from score (bearish), RSI Oversold adds to score (bullish reversal).
         </div>
+
+      {/* Additional Indicator Weights */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        borderRadius: '12px',
+        border: '1px solid rgba(99, 102, 241, 0.2)',
+        padding: '24px',
+        marginBottom: '24px',
+        marginTop: '32px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          📊 Additional Indicator Weights
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Configure contribution of additional technical indicators (trend-aware)
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+          {/* MACD */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              📉 MACD Weight
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              value={weights.macdWeight}
+              onChange={(e) => setWeights({ ...weights, macdWeight: parseInt(e.target.value) || 0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Histogram/crossover (default: 10)
+            </div>
+          </div>
+
+          {/* Bollinger Bands */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              📊 Bollinger Weight
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              value={weights.bollingerWeight}
+              onChange={(e) => setWeights({ ...weights, bollingerWeight: parseInt(e.target.value) || 0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Band position (default: 15)
+            </div>
+          </div>
+
+          {/* Stochastic */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              🎯 Stochastic Weight
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              value={weights.stochasticWeight}
+              onChange={(e) => setWeights({ ...weights, stochasticWeight: parseInt(e.target.value) || 0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              K/D oscillator (default: 5)
+            </div>
+          </div>
+
+          {/* CCI */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              📈 CCI Weight
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              value={weights.cciWeight}
+              onChange={(e) => setWeights({ ...weights, cciWeight: parseInt(e.target.value) || 0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Commodity Channel (default: 5)
+            </div>
+          </div>
+
+          {/* Volume */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              📊 Volume Weight
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              value={weights.volumeWeight}
+              onChange={(e) => setWeights({ ...weights, volumeWeight: parseInt(e.target.value) || 0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Volume confirmation (default: 10)
+            </div>
+          </div>
+
+          {/* ADX */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              💪 ADX Weight
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="50"
+              value={weights.adxWeight}
+              onChange={(e) => setWeights({ ...weights, adxWeight: parseInt(e.target.value) || 0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Trend strength (default: 0, in risk calc)
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '16px',
+          padding: '12px',
+          background: 'rgba(59, 130, 246, 0.1)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#94a3b8'
+        }}>
+          💡 <strong>Trend-Aware Logic:</strong> Oversold signals (RSI, BB, Stoch, CCI) only contribute in <strong>bullish trends</strong> (Golden Cross). In bearish trends (Death Cross), they are ignored to avoid "falling knife" trades.
+        </div>
+      </div>
+
       </div>
       {/* ===== INDICATOR PARAMETERS SECTION ===== */}
       <div style={{

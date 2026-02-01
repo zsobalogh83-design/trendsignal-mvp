@@ -75,6 +75,13 @@ class TechnicalWeightsUpdate(BaseModel):
     tech_rsi_weak_bullish: Optional[int] = Field(None, ge=0, le=100)
     tech_rsi_overbought: Optional[int] = Field(None, ge=0, le=100)
     tech_rsi_oversold: Optional[int] = Field(None, ge=0, le=100)
+    # NEW: Additional indicator weights
+    tech_macd_weight: Optional[int] = Field(None, ge=0, le=50)
+    tech_bollinger_weight: Optional[int] = Field(None, ge=0, le=50)
+    tech_stochastic_weight: Optional[int] = Field(None, ge=0, le=50)
+    tech_cci_weight: Optional[int] = Field(None, ge=0, le=50)
+    tech_volume_weight: Optional[int] = Field(None, ge=0, le=50)
+    tech_adx_weight: Optional[int] = Field(None, ge=0, le=50)
 
 class TechnicalWeightsResponse(BaseModel):
     """Response model for technical component weights"""
@@ -89,6 +96,13 @@ class TechnicalWeightsResponse(BaseModel):
     tech_rsi_weak_bullish: int
     tech_rsi_overbought: int
     tech_rsi_oversold: int
+    # NEW: Additional indicator weights
+    tech_macd_weight: int
+    tech_bollinger_weight: int
+    tech_stochastic_weight: int
+    tech_cci_weight: int
+    tech_volume_weight: int
+    tech_adx_weight: int
 
 # ===== NEW: INDICATOR PARAMETERS MODELS =====
 
@@ -453,7 +467,13 @@ async def get_technical_weights():
             tech_rsi_bullish=config.tech_rsi_bullish,
             tech_rsi_weak_bullish=config.tech_rsi_weak_bullish,
             tech_rsi_overbought=config.tech_rsi_overbought,
-            tech_rsi_oversold=config.tech_rsi_oversold
+            tech_rsi_oversold=config.tech_rsi_oversold,
+            tech_macd_weight=config.tech_macd_weight,
+            tech_bollinger_weight=config.tech_bollinger_weight,
+            tech_stochastic_weight=config.tech_stochastic_weight,
+            tech_cci_weight=config.tech_cci_weight,
+            tech_volume_weight=config.tech_volume_weight,
+            tech_adx_weight=config.tech_adx_weight
         )
     except Exception as e:
         logger.error(f"Error getting technical weights: {e}")
@@ -493,6 +513,20 @@ async def update_technical_weights(updates: TechnicalWeightsUpdate):
             config_updates["TECH_RSI_OVERBOUGHT"] = updates.tech_rsi_overbought
         if updates.tech_rsi_oversold is not None:
             config_updates["TECH_RSI_OVERSOLD"] = updates.tech_rsi_oversold
+        
+        # NEW: Additional indicator weights
+        if updates.tech_macd_weight is not None:
+            config_updates["TECH_MACD_WEIGHT"] = updates.tech_macd_weight
+        if updates.tech_bollinger_weight is not None:
+            config_updates["TECH_BOLLINGER_WEIGHT"] = updates.tech_bollinger_weight
+        if updates.tech_stochastic_weight is not None:
+            config_updates["TECH_STOCHASTIC_WEIGHT"] = updates.tech_stochastic_weight
+        if updates.tech_cci_weight is not None:
+            config_updates["TECH_CCI_WEIGHT"] = updates.tech_cci_weight
+        if updates.tech_volume_weight is not None:
+            config_updates["TECH_VOLUME_WEIGHT"] = updates.tech_volume_weight
+        if updates.tech_adx_weight is not None:
+            config_updates["TECH_ADX_WEIGHT"] = updates.tech_adx_weight
         
         if not config_updates:
             raise HTTPException(
