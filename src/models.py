@@ -180,7 +180,18 @@ class TechnicalIndicator(Base):
     obv = Column(BigInteger)
     
     close_price = Column(Float)
+    
+    # Technical score breakdown (NEW)
+    technical_score = Column(Float)  # Final calculated technical score
+    technical_confidence = Column(Float)  # Confidence level
+    
+    # Score components (JSON string with detailed breakdown)
+    score_components = Column(Text)  # JSON: {sma_contribution, rsi_contribution, etc.}
+    
     calculated_at = Column(DateTime, server_default=func.now())
+    
+    # Relationships
+    signals = relationship("Signal", back_populates="technical_indicator", lazy="dynamic")
 
 
 class Signal(Base):
@@ -191,6 +202,9 @@ class Signal(Base):
     id = Column(Integer, primary_key=True, index=True)
     ticker_id = Column(Integer, ForeignKey("tickers.id"))
     ticker_symbol = Column(String(10), nullable=False, index=True)
+    
+    # Link to technical indicators snapshot
+    technical_indicator_id = Column(Integer, ForeignKey("technical_indicators.id"), nullable=True)
     
     # Decision
     decision = Column(String(20), nullable=False)  # BUY/SELL/HOLD
@@ -223,3 +237,4 @@ class Signal(Base):
     
     # Relationships
     ticker = relationship("Ticker", back_populates="signals", lazy="select")
+    technical_indicator = relationship("TechnicalIndicator", back_populates="signals", lazy="select")
