@@ -176,6 +176,36 @@ class IndicatorParametersResponse(BaseModel):
     adx_timeframe: str
     adx_lookback: str
 
+# ===== NEW: RISK PARAMETERS MODELS =====
+
+class RiskParametersUpdate(BaseModel):
+    """Model for updating risk management parameters"""
+    # Risk Component Weights
+    risk_volatility_weight: Optional[float] = Field(None, ge=0, le=1)
+    risk_proximity_weight: Optional[float] = Field(None, ge=0, le=1)
+    risk_trend_strength_weight: Optional[float] = Field(None, ge=0, le=1)
+    # Stop-Loss / Take-Profit Multipliers
+    stop_loss_sr_buffer: Optional[float] = Field(None, ge=0.1, le=2.0)
+    stop_loss_atr_mult: Optional[float] = Field(None, ge=0.5, le=5.0)
+    take_profit_atr_mult: Optional[float] = Field(None, ge=1.0, le=10.0)
+    # S/R Distance Thresholds
+    sr_support_max_distance_pct: Optional[float] = Field(None, ge=1.0, le=20.0)
+    sr_resistance_max_distance_pct: Optional[float] = Field(None, ge=1.0, le=20.0)
+
+class RiskParametersResponse(BaseModel):
+    """Response model for risk management parameters"""
+    # Risk Component Weights
+    risk_volatility_weight: float
+    risk_proximity_weight: float
+    risk_trend_strength_weight: float
+    # Stop-Loss / Take-Profit Multipliers
+    stop_loss_sr_buffer: float
+    stop_loss_atr_mult: float
+    take_profit_atr_mult: float
+    # S/R Distance Thresholds
+    sr_support_max_distance_pct: float
+    sr_resistance_max_distance_pct: float
+
 # ===== ENDPOINTS =====
 
 @router.get("/signal", response_model=SignalConfigResponse)
@@ -636,6 +666,102 @@ async def update_indicator_parameters(updates: IndicatorParametersUpdate):
         raise
     except Exception as e:
         logger.error(f"Error updating indicator parameters: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+# ===== NEW: RISK PARAMETERS ENDPOINTS =====
+
+@router.get("/risk-parameters", response_model=RiskParametersResponse)
+async def get_risk_parameters():
+    """Get current risk management parameters"""
+    try:
+        from src.config import get_config
+        config = get_config()
+        
+        return RiskParametersResponse(
+            risk_volatility_weight=config.risk_volatility_weight,
+            risk_proximity_weight=config.risk_proximity_weight,
+            risk_trend_strength_weight=config.risk_trend_strength_weight,
+            stop_loss_sr_buffer=config.stop_loss_sr_buffer,
+            stop_loss_atr_mult=config.stop_loss_atr_mult,
+            take_profit_atr_mult=config.take_profit_atr_mult,
+            sr_support_max_distance_pct=config.sr_support_max_distance_pct,
+            sr_resistance_max_distance_pct=config.sr_resistance_max_distance_pct,
+        )
+    except Exception as e:
+        logger.error(f"Error getting risk parameters: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.put("/risk-parameters", response_model=RiskParametersResponse)
+async def update_risk_parameters(updates: RiskParametersUpdate):
+    """Update risk management parameters"""
+    try:
+        from src.config import get_config, update_config_values
+        
+        config = get_config()
+        config_updates = {}
+        
+        # Validate component weights sum to 1.0 if all provided
+        weights_provided = all([
+            updates.risk_volatility_weight is not None,
+            updates.risk_proximity_weight is not None,
+            updates.risk_trend_strength_weight is not None
+        ])
+        
+        if weights_provided:
+            total = (updates.risk_volatility_weight + 
+                    updates.risk_proximity_weight + 
+                    updates.risk_trend_strength_weight)
+            if abs(total - 1.0) > 0.01:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Risk component weights must sum to 1.0, got {total:.3f}"
+                )
+        
+        # Risk Component Weights
+        if updates.risk_volatility_weight is not None:
+            config_updates["RISK_VOLATILITY_WEIGHT"] = updates.risk_volatility_weight
+        if updates.risk_proximity_weight is not None:
+            config_updates["RISK_PROXIMITY_WEIGHT"] = updates.risk_proximity_weight
+        if updates.risk_trend_strength_weight is not None:
+            config_updates["RISK_TREND_STRENGTH_WEIGHT"] = updates.risk_trend_strength_weight
+        
+        # Stop-Loss / Take-Profit Multipliers
+        if updates.stop_loss_sr_buffer is not None:
+            config_updates["STOP_LOSS_SR_BUFFER"] = updates.stop_loss_sr_buffer
+        if updates.stop_loss_atr_mult is not None:
+            config_updates["STOP_LOSS_ATR_MULTIPLIER"] = updates.stop_loss_atr_mult
+        if updates.take_profit_atr_mult is not None:
+            config_updates["TAKE_PROFIT_ATR_MULTIPLIER"] = updates.take_profit_atr_mult
+        
+        # S/R Distance Thresholds
+        if updates.sr_support_max_distance_pct is not None:
+            config_updates["SR_SUPPORT_MAX_DISTANCE_PCT"] = updates.sr_support_max_distance_pct
+        if updates.sr_resistance_max_distance_pct is not None:
+            config_updates["SR_RESISTANCE_MAX_DISTANCE_PCT"] = updates.sr_resistance_max_distance_pct
+        
+        if not config_updates:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No updates provided"
+            )
+        
+        update_config_values(config, config_updates)
+        
+        logger.info(f"Risk parameters updated: {config_updates}")
+        
+        return await get_risk_parameters()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating risk parameters: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

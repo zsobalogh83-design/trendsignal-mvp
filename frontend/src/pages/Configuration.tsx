@@ -21,6 +21,317 @@ const LOOKBACK_OPTIONS = [
   { value: '180d', label: '180d' },
 ];
 
+function RiskTab({ params, setParams }: any) {
+  return (
+    <div>
+      {/* Risk Component Weights */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          ⚖️ Risk Component Weights
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Configure how risk components are weighted (must sum to 100%)
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+          {/* Volatility Weight */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              🌡️ Volatility (ATR)
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={params.volatilityWeight}
+                onChange={(e) => setParams({ ...params, volatilityWeight: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '80px',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+              <span style={{ color: '#94a3b8', fontSize: '14px' }}>%</span>
+            </div>
+          </div>
+
+          {/* Proximity Weight */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              📍 S/R Proximity
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={params.proximityWeight}
+                onChange={(e) => setParams({ ...params, proximityWeight: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '80px',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+              <span style={{ color: '#94a3b8', fontSize: '14px' }}>%</span>
+            </div>
+          </div>
+
+          {/* Trend Strength Weight */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              💪 Trend Strength (ADX)
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={params.trendStrengthWeight}
+                onChange={(e) => setParams({ ...params, trendStrengthWeight: parseInt(e.target.value) || 0 })}
+                style={{
+                  width: '80px',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  color: '#f1f5f9',
+                  fontSize: '14px'
+                }}
+              />
+              <span style={{ color: '#94a3b8', fontSize: '14px' }}>%</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '16px',
+          padding: '12px',
+          background: 'rgba(59, 130, 246, 0.1)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#94a3b8'
+        }}>
+          ℹ️ Total: {params.volatilityWeight + params.proximityWeight + params.trendStrengthWeight}% 
+          {(params.volatilityWeight + params.proximityWeight + params.trendStrengthWeight) !== 100 && 
+            <span style={{ color: '#ef4444', marginLeft: '8px' }}>⚠️ Must sum to 100%</span>
+          }
+        </div>
+      </div>
+
+      {/* Stop-Loss / Take-Profit Multipliers */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          🎯 Stop-Loss / Take-Profit Calculation
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          ATR-based multipliers for stop-loss and take-profit levels
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
+          {/* S/R Buffer */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              S/R Buffer (×ATR)
+            </label>
+            <input
+              type="number"
+              min="0.1"
+              max="2.0"
+              step="0.1"
+              value={params.stopLossSrBuffer}
+              onChange={(e) => setParams({ ...params, stopLossSrBuffer: parseFloat(e.target.value) || 0.5 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Buffer below support (default: 0.5×)
+            </div>
+          </div>
+
+          {/* Stop-Loss ATR Multiplier */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              Stop-Loss (×ATR)
+            </label>
+            <input
+              type="number"
+              min="0.5"
+              max="5.0"
+              step="0.5"
+              value={params.stopLossAtrMult}
+              onChange={(e) => setParams({ ...params, stopLossAtrMult: parseFloat(e.target.value) || 2.0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              ATR-based stop (default: 2×)
+            </div>
+          </div>
+
+          {/* Take-Profit ATR Multiplier */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              Take-Profit (×ATR)
+            </label>
+            <input
+              type="number"
+              min="1.0"
+              max="10.0"
+              step="0.5"
+              value={params.takeProfitAtrMult}
+              onChange={(e) => setParams({ ...params, takeProfitAtrMult: parseFloat(e.target.value) || 3.0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              ATR-based target (default: 3×)
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '16px',
+          padding: '12px',
+          background: 'rgba(59, 130, 246, 0.1)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#94a3b8'
+        }}>
+          ℹ️ Risk:Reward Ratio: 1:{(params.takeProfitAtrMult / params.stopLossAtrMult).toFixed(2)}
+          {(params.takeProfitAtrMult / params.stopLossAtrMult) < 1.5 && 
+            <span style={{ color: '#f59e0b', marginLeft: '8px' }}>⚠️ R:R below 1:1.5 (risky)</span>
+          }
+        </div>
+      </div>
+
+      {/* S/R Distance Thresholds */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          📏 S/R Distance Thresholds
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Maximum distance to use support/resistance levels (otherwise use ATR fallback)
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          {/* Support Max Distance */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              Support Max Distance (%)
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              step="0.5"
+              value={params.srSupportMaxDistPct}
+              onChange={(e) => setParams({ ...params, srSupportMaxDistPct: parseFloat(e.target.value) || 5.0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Max % below price for stop-loss (default: 5%)
+            </div>
+          </div>
+
+          {/* Resistance Max Distance */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              Resistance Max Distance (%)
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="20"
+              step="0.5"
+              value={params.srResistanceMaxDistPct}
+              onChange={(e) => setParams({ ...params, srResistanceMaxDistPct: parseFloat(e.target.value) || 8.0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Max % above price for take-profit (default: 8%)
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '16px',
+          padding: '12px',
+          background: 'rgba(59, 130, 246, 0.1)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#94a3b8'
+        }}>
+          ℹ️ If S/R is beyond these distances, ATR-based fallback is used instead
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Configuration() {
   const [activeTab, setActiveTab] = useState(0);
   const [showTickerModal, setShowTickerModal] = useState(false);
@@ -82,7 +393,22 @@ export function Configuration() {
     atrPeriod: 14, atrTimeframe: '1d', atrLookback: '180d',
     stochPeriod: 14, stochTimeframe: '15m', stochLookback: '3d',
     adxPeriod: 14, adxTimeframe: '1h', adxLookback: '30d',
-  });;
+  })
+
+  // ===== RISK PARAMETERS STATE =====
+  const [riskParams, setRiskParams] = useState({
+    // Risk Component Weights
+    volatilityWeight: 40,
+    proximityWeight: 35,
+    trendStrengthWeight: 25,
+    // Stop-Loss / Take-Profit
+    stopLossSrBuffer: 0.5,
+    stopLossAtrMult: 2.0,
+    takeProfitAtrMult: 3.0,
+    // S/R Distance Thresholds
+    srSupportMaxDistPct: 5.0,
+    srResistanceMaxDistPct: 8.0,
+  });;;
 
   // ===== LOAD CONFIG FROM BACKEND ON MOUNT =====
   useEffect(() => {
@@ -161,6 +487,23 @@ export function Configuration() {
           adxPeriod: ic.adx_period, adxTimeframe: ic.adx_timeframe, adxLookback: ic.adx_lookback,
         });
         console.log('✅ Indicator parameters loaded:', ic);
+
+      // ===== NEW: Load risk parameters =====
+      const riskResponse = await fetch('http://localhost:8000/api/v1/config/risk-parameters');
+      if (riskResponse.ok) {
+        const rc = await riskResponse.json();
+        setRiskParams({
+          volatilityWeight: Math.round(rc.risk_volatility_weight * 100),
+          proximityWeight: Math.round(rc.risk_proximity_weight * 100),
+          trendStrengthWeight: Math.round(rc.risk_trend_strength_weight * 100),
+          stopLossSrBuffer: rc.stop_loss_sr_buffer,
+          stopLossAtrMult: rc.stop_loss_atr_mult,
+          takeProfitAtrMult: rc.take_profit_atr_mult,
+          srSupportMaxDistPct: rc.sr_support_max_distance_pct,
+          srResistanceMaxDistPct: rc.sr_resistance_max_distance_pct,
+        });
+        console.log('✅ Risk parameters loaded:', rc);
+      }
       }
       }
     } catch (error) {
@@ -273,6 +616,38 @@ export function Configuration() {
 
         if (indicatorResponse.ok) {
           console.log('✅ Indicator parameters saved');
+
+        // ===== NEW: Save risk parameters =====
+        const rp = riskParams;
+        
+        // Validate weights sum to 100
+        const riskWeightTotal = rp.volatilityWeight + rp.proximityWeight + rp.trendStrengthWeight;
+        if (riskWeightTotal !== 100) {
+          alert(`⚠️ Risk component weights must sum to 100%, currently: ${riskWeightTotal}%`);
+          setSaving(false);
+          return;
+        }
+        
+        const riskPayload = {
+          risk_volatility_weight: rp.volatilityWeight / 100,
+          risk_proximity_weight: rp.proximityWeight / 100,
+          risk_trend_strength_weight: rp.trendStrengthWeight / 100,
+          stop_loss_sr_buffer: rp.stopLossSrBuffer,
+          stop_loss_atr_mult: rp.stopLossAtrMult,
+          take_profit_atr_mult: rp.takeProfitAtrMult,
+          sr_support_max_distance_pct: rp.srSupportMaxDistPct,
+          sr_resistance_max_distance_pct: rp.srResistanceMaxDistPct,
+        };
+
+        const riskResponse = await fetch('http://localhost:8000/api/v1/config/risk-parameters', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(riskPayload)
+        });
+
+        if (riskResponse.ok) {
+          console.log('✅ Risk parameters saved');
+        }
         }
         }
         
@@ -315,6 +690,7 @@ export function Configuration() {
     { id: 2, label: '💭 Sentiment' },
     { id: 3, label: '📈 Technical' },
     { id: 4, label: '🎯 Signals' },
+    { id: 5, label: '🛡️ Risk' },
   ];
 
   const getPriorityBadge = (priority: string) => {
@@ -445,6 +821,7 @@ export function Configuration() {
         {activeTab === 2 && <SentimentTab weights={sentimentWeights} setWeights={setSentimentWeights} />}
         {activeTab === 3 && <TechnicalTab weights={technicalWeights} setWeights={setTechnicalWeights} indicatorParams={indicatorParams} setIndicatorParams={setIndicatorParams} />}
         {activeTab === 4 && <SignalsTab componentWeights={componentWeights} setComponentWeights={setComponentWeights} thresholds={thresholds} setThresholds={setThresholds} />}
+        {activeTab === 5 && <RiskTab params={riskParams} setParams={setRiskParams} />}
 
         {/* Add Ticker Modal */}
         {showTickerModal && (
@@ -1671,4 +2048,8 @@ function SignalsTab({ componentWeights, setComponentWeights, thresholds, setThre
       </div>
     </div>
   );
+
+// Risk Management Tab
+
+
 }

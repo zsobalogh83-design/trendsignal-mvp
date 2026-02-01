@@ -473,20 +473,26 @@ class SignalGenerator:
         risk_data: Dict
     ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
         """
-        Calculate entry, stop-loss, take-profit levels.
+        Calculate entry, stop-loss, take-profit levels using DYNAMIC config parameters.
         
         S/R levels now include distance information:
         - Uses nearest S/R regardless of distance
-        - Stop-loss: 0.5× ATR buffer below support (not 1.5×)
+        - Stop-loss: config.stop_loss_sr_buffer× ATR buffer below support
         - User can see if S/R is too close and decide not to trade
         
         Stop-loss buffer logic:
         - Support = psychological level where buyers step in
         - Stop BELOW support = only triggers if support truly breaks
-        - Small buffer (0.5× ATR) prevents spike-outs while confirming breaks
+        - Small buffer (default 0.5× ATR) prevents spike-outs while confirming breaks
         """
         if decision == "HOLD" or current_price is None:
             return None, None, None, None
+        
+        # ===== RELOAD CONFIG FOR DYNAMIC PARAMETERS =====
+        from src.config import get_config
+        config = get_config()
+        if hasattr(config, 'reload'):
+            config.reload()
         
         # Get data
         atr = technical_data.get("atr", current_price * 0.02)
@@ -501,35 +507,35 @@ class SignalGenerator:
             if nearest_support:
                 support_distance_pct = ((current_price - nearest_support) / current_price) * 100
                 
-                # Only use support if it's within 5% distance (day trading best practice)
-                if support_distance_pct <= 5.0:
-                    # 0.5× ATR buffer below support
-                    stop_loss = nearest_support - (atr * 0.5)
+                # Use config threshold (default 5%)
+                if support_distance_pct <= config.sr_support_max_distance_pct:
+                    # Use config S/R buffer (default 0.5× ATR)
+                    stop_loss = nearest_support - (atr * config.stop_loss_sr_buffer)
                     print(f"  ✅ Support-based stop: {nearest_support:.2f} (-{support_distance_pct:.1f}%)")
                 else:
-                    # Support too far, use ATR fallback (day trading: 2× ATR)
-                    stop_loss = current_price - (atr * 2.0)
+                    # Support too far, use ATR fallback (config multiplier, default 2×)
+                    stop_loss = current_price - (atr * config.stop_loss_atr_mult)
                     print(f"  ⚠️ Support too far ({support_distance_pct:.1f}%), ATR stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
             else:
-                # Fallback: 2× ATR (day trading standard, volatility-adaptive)
-                stop_loss = current_price - (atr * 2.0)
+                # Fallback: config ATR multiplier (default 2×)
+                stop_loss = current_price - (atr * config.stop_loss_atr_mult)
                 print(f"  ℹ️ No support found, ATR-based stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
             
             # Take-profit: Use resistance if available AND within reasonable distance
             if nearest_resistance:
                 resistance_distance_pct = ((nearest_resistance - current_price) / current_price) * 100
                 
-                # Only use resistance if it's within 8% distance
-                if resistance_distance_pct <= 8.0:
+                # Use config threshold (default 8%)
+                if resistance_distance_pct <= config.sr_resistance_max_distance_pct:
                     take_profit = nearest_resistance
                     print(f"  ✅ Resistance-based target: {nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%)")
                 else:
-                    # Resistance too far, use ATR fallback (day trading: 3× ATR for 1:1.5 R:R)
-                    take_profit = current_price + (atr * 3.0)
+                    # Resistance too far, use ATR fallback (config multiplier, default 3×)
+                    take_profit = current_price + (atr * config.take_profit_atr_mult)
                     print(f"  ⚠️ Resistance too far ({resistance_distance_pct:.1f}%), ATR target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
             else:
-                # Fallback: 3× ATR (1:1.5 R:R ratio, day trading standard)
-                take_profit = current_price + (atr * 3.0)
+                # Fallback: config ATR multiplier (default 3×)
+                take_profit = current_price + (atr * config.take_profit_atr_mult)
                 print(f"  ℹ️ No resistance found, ATR-based target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
         
         else:  # SELL
@@ -537,35 +543,35 @@ class SignalGenerator:
             if nearest_resistance:
                 resistance_distance_pct = ((nearest_resistance - current_price) / current_price) * 100
                 
-                # Only use resistance if it's within 5% distance
-                if resistance_distance_pct <= 5.0:
-                    # 0.5× ATR buffer above resistance
-                    stop_loss = nearest_resistance + (atr * 0.5)
+                # Use config threshold (default 5%)
+                if resistance_distance_pct <= config.sr_support_max_distance_pct:
+                    # Use config S/R buffer (default 0.5× ATR)
+                    stop_loss = nearest_resistance + (atr * config.stop_loss_sr_buffer)
                     print(f"  ✅ Resistance-based stop: {nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%)")
                 else:
-                    # Resistance too far, use ATR fallback (day trading: 2× ATR)
-                    stop_loss = current_price + (atr * 2.0)
+                    # Resistance too far, use ATR fallback (config multiplier, default 2×)
+                    stop_loss = current_price + (atr * config.stop_loss_atr_mult)
                     print(f"  ⚠️ Resistance too far ({resistance_distance_pct:.1f}%), ATR stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
             else:
-                # Fallback: 2× ATR (day trading standard, volatility-adaptive)
-                stop_loss = current_price + (atr * 2.0)
+                # Fallback: config ATR multiplier (default 2×)
+                stop_loss = current_price + (atr * config.stop_loss_atr_mult)
                 print(f"  ℹ️ No resistance found, ATR-based stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
             
             # Take-profit: Use support if available AND within reasonable distance
             if nearest_support:
                 support_distance_pct = ((current_price - nearest_support) / current_price) * 100
                 
-                # Only use support if it's within 8% distance
-                if support_distance_pct <= 8.0:
+                # Use config threshold (default 8%)
+                if support_distance_pct <= config.sr_resistance_max_distance_pct:
                     take_profit = nearest_support
                     print(f"  ✅ Support-based target: {nearest_support:.2f} (-{support_distance_pct:.1f}%)")
                 else:
-                    # Support too far, use ATR fallback (day trading: 3× ATR for 1:1.5 R:R)
-                    take_profit = current_price - (atr * 3.0)
+                    # Support too far, use ATR fallback (config multiplier, default 3×)
+                    take_profit = current_price - (atr * config.take_profit_atr_mult)
                     print(f"  ⚠️ Support too far ({support_distance_pct:.1f}%), ATR target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
             else:
-                # Fallback: 3× ATR (1:1.5 R:R ratio, day trading standard)
-                take_profit = current_price - (atr * 3.0)
+                # Fallback: config ATR multiplier (default 3×)
+                take_profit = current_price - (atr * config.take_profit_atr_mult)
                 print(f"  ℹ️ No support found, ATR-based target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
         
         # Calculate Risk/Reward ratio
@@ -1468,21 +1474,27 @@ def calculate_risk_score(
             trend_confidence = 0.60
         
         # ===== AGGREGATE RISK SCORE =====
+        # Load dynamic weights from config
+        from src.config import get_config
+        config = get_config()
+        if hasattr(config, 'reload'):
+            config.reload()
+        
         risk_score = (
-            volatility_risk * 0.40 +
-            proximity_risk * 0.35 +
-            trend_risk * 0.25
-        ) * 200  # Scale to -100 to +100 range (was ×100 giving -50 to +50)
+            volatility_risk * config.risk_volatility_weight +
+            proximity_risk * config.risk_proximity_weight +
+            trend_risk * config.risk_trend_strength_weight
+        ) * 200  # Scale to -100 to +100 range
         
         # ===== RISK CONFIDENCE =====
         risk_confidence = (
-            vol_confidence * 0.40 +
-            proximity_confidence * 0.35 +
-            trend_confidence * 0.25
+            vol_confidence * config.risk_volatility_weight +
+            proximity_confidence * config.risk_proximity_weight +
+            trend_confidence * config.risk_trend_strength_weight
         )
         
         print(f"  ✅ Risk: {risk_score:+.1f} | ATR: {atr_pct:.2f}% | {vol_status} | {proximity_status} | {trend_status}")
-        print(f"     Components: Vol={volatility_risk:+.1f} (40%), Prox={proximity_risk:+.1f} (35%), Trend={trend_risk:+.1f} (25%)")
+        print(f"     Components: Vol={volatility_risk:+.1f} ({config.risk_volatility_weight:.0%}), Prox={proximity_risk:+.1f} ({config.risk_proximity_weight:.0%}), Trend={trend_risk:+.1f} ({config.risk_trend_strength_weight:.0%})")
         print(f"     Confidence: {risk_confidence:.0%}")
         
         return {
