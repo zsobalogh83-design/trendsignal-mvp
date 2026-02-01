@@ -136,22 +136,27 @@ def calculate_stochastic(
 def detect_support_resistance(
     df: pd.DataFrame,
     lookback_days: int = 180,  # 6 months for swing trading
-    proximity_pct: float = 0.04  # 4% clustering tolerance
+    proximity_pct: float = 0.04,  # 4% clustering tolerance
+    order: int = 7,  # NEW: Configurable pivot order
+    min_samples: int = 3  # NEW: Configurable min cluster size
 ) -> Dict[str, list]:
     """
     Detect support and resistance levels using blue chip swing trading best practices.
     
     Strategy:
-    - Stricter pivot detection (order=7, requires 7 bars on each side)
-    - 6-month lookback for swing trading
-    - DBSCAN-style clustering with 4% tolerance
+    - Stricter pivot detection (configurable order, default=7)
+    - 6-month lookback for swing trading (configurable)
+    - DBSCAN-style clustering with configurable tolerance
+    - Minimum cluster size validation (configurable min_samples)
     - Returns ALL detected S/R levels with distance information
     - User/system decides which levels are significant enough to use
     
     Args:
         df: DataFrame with OHLC data
         lookback_days: Days to look back (default 180 = 6 months)
-        proximity_pct: Cluster proximity threshold (default 4%)
+        proximity_pct: Cluster proximity threshold (default 4% = 0.04)
+        order: Pivot detection window (default 7 bars each side)
+        min_samples: Minimum pivots per cluster (default 3)
     
     Returns:
         {
@@ -177,8 +182,8 @@ def detect_support_resistance(
         else:
             current_price = float(recent_df['Close'].iloc[-1])
     
-    # STRICTER PIVOT DETECTION: order=7 (requires 7 bars on each side)
-    order = 7
+    # STRICTER PIVOT DETECTION: configurable order (default 7 bars each side)
+    # order parameter passed from function arguments
     supports = []
     resistances = []
     
@@ -228,9 +233,9 @@ def detect_support_resistance(
         if current_float == max_value:
             resistances.append(current_float)
     
-    # CLUSTER nearby levels with 4% tolerance
-    supports = cluster_levels(supports, proximity_pct)
-    resistances = cluster_levels(resistances, proximity_pct)
+    # CLUSTER nearby levels with proximity_pct tolerance and min_samples validation
+    supports = cluster_levels(supports, proximity_pct, min_samples)
+    resistances = cluster_levels(resistances, proximity_pct, min_samples)
     
     # BUILD RESULTS with distance information
     support_levels = []
@@ -261,16 +266,17 @@ def detect_support_resistance(
     }
 
 
-def cluster_levels(levels: list, proximity_pct: float = 0.02) -> list:
+def cluster_levels(levels: list, proximity_pct: float = 0.02, min_samples: int = 3) -> list:
     """
-    Cluster nearby price levels
+    Cluster nearby price levels with minimum cluster size validation
     
     Args:
         levels: List of price levels
         proximity_pct: Proximity threshold (2% = 0.02)
+        min_samples: Minimum number of pivots required for a valid cluster (default 3)
     
     Returns:
-        List of clustered representative levels
+        List of clustered representative levels (only clusters with >= min_samples)
     """
     if not levels:
         return []
@@ -285,12 +291,13 @@ def cluster_levels(levels: list, proximity_pct: float = 0.02) -> list:
         if abs(level - cluster_mean) / cluster_mean <= proximity_pct:
             current_cluster.append(level)
         else:
-            # Save current cluster and start new
-            clusters.append(np.mean(current_cluster))
+            # Save current cluster ONLY if it has enough samples
+            if len(current_cluster) >= min_samples:
+                clusters.append(np.mean(current_cluster))
             current_cluster = [level]
     
-    # Don't forget last cluster
-    if current_cluster:
+    # Don't forget last cluster (validate min_samples)
+    if current_cluster and len(current_cluster) >= min_samples:
         clusters.append(np.mean(current_cluster))
     
     return clusters
@@ -332,11 +339,19 @@ class TechnicalAnalyzer:
         
         # Detect support/resistance with blue chip swing trading parameters
         sr_config = self.config.support_resistance if hasattr(self.config, 'support_resistance') else {}
+        
+        # Load DBSCAN parameters from config (with fallbacks to defaults)
+        sr_lookback = getattr(self.config, 'sr_dbscan_lookback', sr_config.get('lookback_days', 180))
+        sr_proximity = getattr(self.config, 'sr_dbscan_eps', sr_config.get('proximity_pct', 0.04))
+        sr_order = getattr(self.config, 'sr_dbscan_order', 7)
+        sr_min_samples = getattr(self.config, 'sr_dbscan_min_samples', 3)
+        
         sr_levels = detect_support_resistance(
             df,
-            lookback_days=sr_config.get('lookback_days', 180),  # 6 months default
-            proximity_pct=sr_config.get('proximity_pct', 0.04),  # 4% default
-            min_distance_pct=sr_config.get('min_distance_pct', 0.025)  # 2.5% default
+            lookback_days=sr_lookback,
+            proximity_pct=sr_proximity,
+            order=sr_order,
+            min_samples=sr_min_samples
         )
         
         # Calculate component scores

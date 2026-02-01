@@ -328,6 +328,143 @@ function RiskTab({ params, setParams }: any) {
           ℹ️ If S/R is beyond these distances, ATR-based fallback is used instead
         </div>
       </div>
+
+      {/* S/R DBSCAN Detection Parameters */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px',
+        marginTop: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          🔍 S/R Detection (DBSCAN)
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Advanced parameters for support/resistance level detection
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          {/* EPS (Clustering Proximity) */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              Clustering Distance (EPS) %
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="10"
+              step="0.5"
+              value={params.srDbscanEps}
+              onChange={(e) => setParams({ ...params, srDbscanEps: parseFloat(e.target.value) || 4.0 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Pivot points within EPS% clustered together (default: 4%)
+            </div>
+          </div>
+
+          {/* Min Samples */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              Min Cluster Size
+            </label>
+            <input
+              type="number"
+              min="2"
+              max="10"
+              value={params.srDbscanMinSamples}
+              onChange={(e) => setParams({ ...params, srDbscanMinSamples: parseInt(e.target.value) || 3 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Minimum pivots to form valid S/R level (default: 3)
+            </div>
+          </div>
+
+          {/* Pivot Order */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              Pivot Order (bars)
+            </label>
+            <input
+              type="number"
+              min="3"
+              max="14"
+              value={params.srDbscanOrder}
+              onChange={(e) => setParams({ ...params, srDbscanOrder: parseInt(e.target.value) || 7 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Bars on each side for pivot detection (default: 7)
+            </div>
+          </div>
+
+          {/* Lookback Days */}
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>
+              Lookback Period (days)
+            </label>
+            <input
+              type="number"
+              min="30"
+              max="365"
+              step="30"
+              value={params.srDbscanLookback}
+              onChange={(e) => setParams({ ...params, srDbscanLookback: parseInt(e.target.value) || 180 })}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                background: 'rgba(15, 23, 42, 0.6)',
+                color: '#f1f5f9',
+                fontSize: '14px'
+              }}
+            />
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Historical data window (default: 180 days = 6 months)
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '16px',
+          padding: '12px',
+          background: 'rgba(59, 130, 246, 0.1)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#94a3b8'
+        }}>
+          💡 Higher EPS = Fewer, broader S/R zones | Higher min_samples = Stronger, tested levels<br/>
+          💡 Higher order = Smoother pivots | Longer lookback = More significant long-term levels
+        </div>
+      </div>
+
     </div>
   );
 }
@@ -408,6 +545,11 @@ export function Configuration() {
     // S/R Distance Thresholds
     srSupportMaxDistPct: 5.0,
     srResistanceMaxDistPct: 8.0,
+    // DBSCAN S/R Detection
+    srDbscanEps: 4.0,
+    srDbscanMinSamples: 3,
+    srDbscanOrder: 7,
+    srDbscanLookback: 180,
   });;;
 
   // ===== LOAD CONFIG FROM BACKEND ON MOUNT =====
@@ -501,6 +643,10 @@ export function Configuration() {
           takeProfitAtrMult: rc.take_profit_atr_mult,
           srSupportMaxDistPct: rc.sr_support_max_distance_pct,
           srResistanceMaxDistPct: rc.sr_resistance_max_distance_pct,
+          srDbscanEps: rc.sr_dbscan_eps,
+          srDbscanMinSamples: rc.sr_dbscan_min_samples,
+          srDbscanOrder: rc.sr_dbscan_order,
+          srDbscanLookback: rc.sr_dbscan_lookback,
         });
         console.log('✅ Risk parameters loaded:', rc);
       }
@@ -637,6 +783,10 @@ export function Configuration() {
           take_profit_atr_mult: rp.takeProfitAtrMult,
           sr_support_max_distance_pct: rp.srSupportMaxDistPct,
           sr_resistance_max_distance_pct: rp.srResistanceMaxDistPct,
+          sr_dbscan_eps: rp.srDbscanEps,
+          sr_dbscan_min_samples: rp.srDbscanMinSamples,
+          sr_dbscan_order: rp.srDbscanOrder,
+          sr_dbscan_lookback: rp.srDbscanLookback,
         };
 
         const riskResponse = await fetch('http://localhost:8000/api/v1/config/risk-parameters', {
