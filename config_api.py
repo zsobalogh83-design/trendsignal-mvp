@@ -191,6 +191,11 @@ class RiskParametersUpdate(BaseModel):
     # S/R Distance Thresholds
     sr_support_max_distance_pct: Optional[float] = Field(None, ge=1.0, le=20.0)
     sr_resistance_max_distance_pct: Optional[float] = Field(None, ge=1.0, le=20.0)
+    # S/R DBSCAN Parameters
+    sr_dbscan_eps: Optional[float] = Field(None, ge=1.0, le=10.0)
+    sr_dbscan_min_samples: Optional[int] = Field(None, ge=2, le=10)
+    sr_dbscan_order: Optional[int] = Field(None, ge=3, le=14)
+    sr_dbscan_lookback: Optional[int] = Field(None, ge=30, le=365)
 
 class RiskParametersResponse(BaseModel):
     """Response model for risk management parameters"""
@@ -205,6 +210,11 @@ class RiskParametersResponse(BaseModel):
     # S/R Distance Thresholds
     sr_support_max_distance_pct: float
     sr_resistance_max_distance_pct: float
+    # S/R DBSCAN Parameters
+    sr_dbscan_eps: float
+    sr_dbscan_min_samples: int
+    sr_dbscan_order: int
+    sr_dbscan_lookback: int
 
 # ===== ENDPOINTS =====
 
@@ -690,6 +700,10 @@ async def get_risk_parameters():
             take_profit_atr_mult=config.take_profit_atr_mult,
             sr_support_max_distance_pct=config.sr_support_max_distance_pct,
             sr_resistance_max_distance_pct=config.sr_resistance_max_distance_pct,
+            sr_dbscan_eps=config.sr_dbscan_eps,
+            sr_dbscan_min_samples=config.sr_dbscan_min_samples,
+            sr_dbscan_order=config.sr_dbscan_order,
+            sr_dbscan_lookback=config.sr_dbscan_lookback,
         )
     except Exception as e:
         logger.error(f"Error getting risk parameters: {e}")
@@ -745,6 +759,16 @@ async def update_risk_parameters(updates: RiskParametersUpdate):
             config_updates["SR_SUPPORT_MAX_DISTANCE_PCT"] = updates.sr_support_max_distance_pct
         if updates.sr_resistance_max_distance_pct is not None:
             config_updates["SR_RESISTANCE_MAX_DISTANCE_PCT"] = updates.sr_resistance_max_distance_pct
+        
+        # S/R DBSCAN Parameters
+        if updates.sr_dbscan_eps is not None:
+            config_updates["SR_DBSCAN_EPS"] = updates.sr_dbscan_eps
+        if updates.sr_dbscan_min_samples is not None:
+            config_updates["SR_DBSCAN_MIN_SAMPLES"] = updates.sr_dbscan_min_samples
+        if updates.sr_dbscan_order is not None:
+            config_updates["SR_DBSCAN_ORDER"] = updates.sr_dbscan_order
+        if updates.sr_dbscan_lookback is not None:
+            config_updates["SR_DBSCAN_LOOKBACK"] = updates.sr_dbscan_lookback
         
         if not config_updates:
             raise HTTPException(

@@ -159,24 +159,13 @@ TECH_RSI_OVERSOLD = 15    # RSI <= 30 (bullish reversal, positive impact)
 # RISK MANAGEMENT
 # ==========================================
 
-# Risk Component Weights
-RISK_VOLATILITY_WEIGHT = 0.40      # 40% - ATR-based volatility risk
-RISK_PROXIMITY_WEIGHT = 0.35       # 35% - S/R proximity risk  
-RISK_TREND_STRENGTH_WEIGHT = 0.25  # 25% - ADX trend strength risk
-
 # Stop-loss calculation
-STOP_LOSS_SR_BUFFER = 0.5          # S/R buffer multiplier (0.5×ATR below support)
-STOP_LOSS_ATR_MULTIPLIER = 2.0     # ATR-based stop multiplier (2×ATR)
-MIN_STOP_LOSS_PCT = 0.02           # 2% (deprecated - kept for compatibility)
-MAX_STOP_LOSS_PCT = 0.05           # 5% (deprecated - kept for compatibility)
+STOP_LOSS_ATR_MULTIPLIER = 1.5
+MIN_STOP_LOSS_PCT = 0.02  # 2%
+MAX_STOP_LOSS_PCT = 0.05  # 5%
 
 # Take-profit calculation
-TAKE_PROFIT_ATR_MULTIPLIER = 3.0   # ATR-based target multiplier (3×ATR, 1:1.5 R:R)
-RISK_REWARD_RATIO = 2.0            # Target R:R = 1:2 (deprecated - kept for compatibility)
-
-# S/R Distance Thresholds (for using S/R vs ATR fallback)
-SR_SUPPORT_MAX_DISTANCE_PCT = 5.0  # Max 5% distance to use support for stop-loss
-SR_RESISTANCE_MAX_DISTANCE_PCT = 8.0  # Max 8% distance to use resistance for take-profit
+RISK_REWARD_RATIO = 2.0  # Target R:R = 1:2
 
 
 # ==========================================
@@ -281,15 +270,6 @@ def save_config_to_file(config_instance):
             "ATR_LOOKBACK": config_instance.atr_lookback,
             "STOCH_LOOKBACK": config_instance.stoch_lookback,
             "ADX_LOOKBACK": config_instance.adx_lookback,
-            # Risk management parameters
-            "RISK_VOLATILITY_WEIGHT": config_instance.risk_volatility_weight,
-            "RISK_PROXIMITY_WEIGHT": config_instance.risk_proximity_weight,
-            "RISK_TREND_STRENGTH_WEIGHT": config_instance.risk_trend_strength_weight,
-            "STOP_LOSS_SR_BUFFER": config_instance.stop_loss_sr_buffer,
-            "STOP_LOSS_ATR_MULTIPLIER": config_instance.stop_loss_atr_mult,
-            "TAKE_PROFIT_ATR_MULTIPLIER": config_instance.take_profit_atr_mult,
-            "SR_SUPPORT_MAX_DISTANCE_PCT": config_instance.sr_support_max_distance_pct,
-            "SR_RESISTANCE_MAX_DISTANCE_PCT": config_instance.sr_resistance_max_distance_pct,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -415,16 +395,8 @@ class TrendSignalConfig:
     tech_rsi_overbought: int = TECH_RSI_OVERBOUGHT
     tech_rsi_oversold: int = TECH_RSI_OVERSOLD
     
-    # Risk management parameters
-    risk_volatility_weight: float = RISK_VOLATILITY_WEIGHT
-    risk_proximity_weight: float = RISK_PROXIMITY_WEIGHT
-    risk_trend_strength_weight: float = RISK_TREND_STRENGTH_WEIGHT
-    stop_loss_sr_buffer: float = STOP_LOSS_SR_BUFFER
+    # Risk management
     stop_loss_atr_mult: float = STOP_LOSS_ATR_MULTIPLIER
-    take_profit_atr_mult: float = TAKE_PROFIT_ATR_MULTIPLIER
-    sr_support_max_distance_pct: float = SR_SUPPORT_MAX_DISTANCE_PCT
-    sr_resistance_max_distance_pct: float = SR_RESISTANCE_MAX_DISTANCE_PCT
-    # Legacy compatibility
     risk_reward_ratio: float = RISK_REWARD_RATIO
     
     def __post_init__(self):
@@ -491,15 +463,6 @@ class TrendSignalConfig:
             self.atr_lookback = saved_config.get("ATR_LOOKBACK", ATR_LOOKBACK)
             self.stoch_lookback = saved_config.get("STOCH_LOOKBACK", STOCH_LOOKBACK)
             self.adx_lookback = saved_config.get("ADX_LOOKBACK", ADX_LOOKBACK)
-            # Risk management parameters
-            self.risk_volatility_weight = saved_config.get("RISK_VOLATILITY_WEIGHT", RISK_VOLATILITY_WEIGHT)
-            self.risk_proximity_weight = saved_config.get("RISK_PROXIMITY_WEIGHT", RISK_PROXIMITY_WEIGHT)
-            self.risk_trend_strength_weight = saved_config.get("RISK_TREND_STRENGTH_WEIGHT", RISK_TREND_STRENGTH_WEIGHT)
-            self.stop_loss_sr_buffer = saved_config.get("STOP_LOSS_SR_BUFFER", STOP_LOSS_SR_BUFFER)
-            self.stop_loss_atr_mult = saved_config.get("STOP_LOSS_ATR_MULTIPLIER", STOP_LOSS_ATR_MULTIPLIER)
-            self.take_profit_atr_mult = saved_config.get("TAKE_PROFIT_ATR_MULTIPLIER", TAKE_PROFIT_ATR_MULTIPLIER)
-            self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
-            self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
             print("📝 Config loaded from file with custom weights")
         
         # Initialize nested dicts if not loaded (legacy compatibility)
@@ -519,6 +482,23 @@ class TrendSignalConfig:
                 'slow': self.macd_slow,
                 'signal': self.macd_signal
             }
+        
+        # ===== AUTO-MIGRATION: Save new parameters to file =====
+        # Check if saved_config is missing any of the new parameters
+        if saved_config:
+            new_params = [
+                'SR_DBSCAN_EPS', 'SR_DBSCAN_MIN_SAMPLES', 'SR_DBSCAN_ORDER', 'SR_DBSCAN_LOOKBACK',
+                'RSI_TIMEFRAME', 'SMA_SHORT_TIMEFRAME', 'MACD_TIMEFRAME',
+                'RISK_VOLATILITY_WEIGHT', 'RISK_PROXIMITY_WEIGHT'
+            ]
+            
+            missing_params = [p for p in new_params if p not in saved_config]
+            
+            if missing_params:
+                print(f"🔄 Auto-migration: Detected {len(missing_params)} new parameters")
+                print(f"   New params: {', '.join(missing_params[:3])}...")
+                save_config_to_file(self)
+                print("✅ Config auto-migrated with new parameters")
     
     # Uppercase property aliases for backward compatibility
     @property
@@ -637,15 +617,6 @@ class TrendSignalConfig:
             self.atr_lookback = saved_config.get("ATR_LOOKBACK", ATR_LOOKBACK)
             self.stoch_lookback = saved_config.get("STOCH_LOOKBACK", STOCH_LOOKBACK)
             self.adx_lookback = saved_config.get("ADX_LOOKBACK", ADX_LOOKBACK)
-            # Risk management parameters
-            self.risk_volatility_weight = saved_config.get("RISK_VOLATILITY_WEIGHT", RISK_VOLATILITY_WEIGHT)
-            self.risk_proximity_weight = saved_config.get("RISK_PROXIMITY_WEIGHT", RISK_PROXIMITY_WEIGHT)
-            self.risk_trend_strength_weight = saved_config.get("RISK_TREND_STRENGTH_WEIGHT", RISK_TREND_STRENGTH_WEIGHT)
-            self.stop_loss_sr_buffer = saved_config.get("STOP_LOSS_SR_BUFFER", STOP_LOSS_SR_BUFFER)
-            self.stop_loss_atr_mult = saved_config.get("STOP_LOSS_ATR_MULTIPLIER", STOP_LOSS_ATR_MULTIPLIER)
-            self.take_profit_atr_mult = saved_config.get("TAKE_PROFIT_ATR_MULTIPLIER", TAKE_PROFIT_ATR_MULTIPLIER)
-            self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
-            self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
             print("🔄 Config reloaded from file")
     
     def validate(self) -> bool:

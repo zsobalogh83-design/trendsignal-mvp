@@ -228,13 +228,21 @@ def get_price_data_from_db(
     """Get price data from database as DataFrame"""
     try:
         from datetime import timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        # Add 50% buffer to catch slightly older data (e.g., 2d → 3d lookback)
+        buffered_days = int(days * 1.5)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=buffered_days)
+        
+        print(f"🔍 DEBUG: get_price_data_from_db - {ticker_symbol} ({interval})")
+        print(f"   Requested days: {days}, buffered: {buffered_days}")
+        print(f"   Cutoff: {cutoff}")
         
         records = db.query(PriceData).filter(
             PriceData.ticker_symbol == ticker_symbol,
             PriceData.interval == interval,
             PriceData.timestamp >= cutoff
         ).order_by(PriceData.timestamp).all()
+        
+        print(f"   Query returned: {len(records) if records else 0} records")
         
         if not records:
             return None
