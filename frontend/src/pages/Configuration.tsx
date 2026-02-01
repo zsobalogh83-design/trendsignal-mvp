@@ -517,7 +517,19 @@ export function Configuration() {
     rsiWeakBullish: 10,
     rsiOverbought: 20,
     rsiOversold: 15,  // Bullish reversal (not 20)
-  })
+  });
+
+  // ===== TECHNICAL COMPONENT WEIGHTS (%) STATE =====
+  const [techComponentWeights, setTechComponentWeights] = useState({
+    smaWeight: 30,
+    rsiWeight: 25,
+    macdWeight: 20,
+    bollingerWeight: 15,
+    stochasticWeight: 5,
+    volumeWeight: 5,
+    cciWeight: 0,
+    adxWeight: 0,
+  });
 
   // ===== INDICATOR PARAMETERS STATE =====
   const [indicatorParams, setIndicatorParams] = useState({
@@ -635,6 +647,23 @@ export function Configuration() {
           adxPeriod: ic.adx_period, adxTimeframe: ic.adx_timeframe, adxLookback: ic.adx_lookback,
         });
         console.log('✅ Indicator parameters loaded:', ic);
+
+      // Load technical component weights (%)
+      const tcwResponse = await fetch('http://localhost:8000/api/v1/config/technical-component-weights');
+      if (tcwResponse.ok) {
+        const tcw = await tcwResponse.json();
+        setTechComponentWeights({
+          smaWeight: Math.round(tcw.tech_sma_weight * 100),
+          rsiWeight: Math.round(tcw.tech_rsi_weight * 100),
+          macdWeight: Math.round(tcw.tech_macd_weight * 100),
+          bollingerWeight: Math.round(tcw.tech_bollinger_weight * 100),
+          stochasticWeight: Math.round(tcw.tech_stochastic_weight * 100),
+          volumeWeight: Math.round(tcw.tech_volume_weight * 100),
+          cciWeight: Math.round(tcw.tech_cci_weight * 100),
+          adxWeight: Math.round(tcw.tech_adx_weight * 100),
+        });
+        console.log('✅ Technical component weights loaded:', tcw);
+      }
 
       // ===== NEW: Load risk parameters =====
       const riskResponse = await fetch('http://localhost:8000/api/v1/config/risk-parameters');
@@ -774,6 +803,38 @@ export function Configuration() {
 
         if (indicatorResponse.ok) {
           console.log('✅ Indicator parameters saved');
+
+        // Save technical component weights (%)
+        const tcw = techComponentWeights;
+        const tcwTotal = tcw.smaWeight + tcw.rsiWeight + tcw.macdWeight + tcw.bollingerWeight + 
+                         tcw.stochasticWeight + tcw.volumeWeight + tcw.cciWeight + tcw.adxWeight;
+        
+        if (tcwTotal !== 100) {
+          alert(`⚠️ Technical component weights must sum to 100%, currently: ${tcwTotal}%`);
+          setSaving(false);
+          return;
+        }
+        
+        const tcwPayload = {
+          tech_sma_weight: tcw.smaWeight / 100,
+          tech_rsi_weight: tcw.rsiWeight / 100,
+          tech_macd_weight: tcw.macdWeight / 100,
+          tech_bollinger_weight: tcw.bollingerWeight / 100,
+          tech_stochastic_weight: tcw.stochasticWeight / 100,
+          tech_volume_weight: tcw.volumeWeight / 100,
+          tech_cci_weight: tcw.cciWeight / 100,
+          tech_adx_weight: tcw.adxWeight / 100,
+        };
+
+        const tcwResponse = await fetch('http://localhost:8000/api/v1/config/technical-component-weights', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tcwPayload)
+        });
+
+        if (tcwResponse.ok) {
+          console.log('✅ Technical component weights saved');
+        }
 
         // ===== NEW: Save risk parameters =====
         const rp = riskParams;
@@ -981,7 +1042,7 @@ export function Configuration() {
         {activeTab === 0 && <TickersTab tickers={tickers} onAddNew={() => setShowTickerModal(true)} getPriorityBadge={getPriorityBadge} />}
         {activeTab === 1 && <NewsSourcesTab />}
         {activeTab === 2 && <SentimentTab weights={sentimentWeights} setWeights={setSentimentWeights} />}
-        {activeTab === 3 && <TechnicalTab weights={technicalWeights} setWeights={setTechnicalWeights} indicatorParams={indicatorParams} setIndicatorParams={setIndicatorParams} />}
+        {activeTab === 3 && <TechnicalTab weights={technicalWeights} setWeights={setTechnicalWeights} indicatorParams={indicatorParams} setIndicatorParams={setIndicatorParams} techComponentWeights={techComponentWeights} setTechComponentWeights={setTechComponentWeights} />}
         {activeTab === 4 && <SignalsTab componentWeights={componentWeights} setComponentWeights={setComponentWeights} thresholds={thresholds} setThresholds={setThresholds} />}
         {activeTab === 5 && <RiskTab params={riskParams} setParams={setRiskParams} />}
 
@@ -1233,9 +1294,145 @@ function SentimentTab({ weights, setWeights }: any) {
 }
 
 // Technical Tab
-function TechnicalTab({ weights, setWeights, indicatorParams, setIndicatorParams }: any) {
+function TechnicalTab({ weights, setWeights, indicatorParams, setIndicatorParams, techComponentWeights, setTechComponentWeights }: any) {
   return (
     <div>
+      {/* Technical Component Weights (Percentage-Based) */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
+        border: '1px solid rgba(99, 102, 241, 0.3)',
+        borderRadius: '16px',
+        padding: '24px',
+        marginBottom: '24px'
+      }}>
+        <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
+          ⚖️ Technical Component Weights (%)
+        </div>
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+          Configure how each technical indicator contributes to final technical score (must sum to 100%)
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>📈 SMA Trend</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="number" min="0" max="100" value={techComponentWeights.smaWeight}
+                onChange={(e) => setTechComponentWeights({...techComponentWeights, smaWeight: parseInt(e.target.value) || 0})}
+                style={{ width: '70px', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>%</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>⚡ RSI</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="number" min="0" max="100" value={techComponentWeights.rsiWeight}
+                onChange={(e) => setTechComponentWeights({...techComponentWeights, rsiWeight: parseInt(e.target.value) || 0})}
+                style={{ width: '70px', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>%</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>📉 MACD</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="number" min="0" max="100" value={techComponentWeights.macdWeight}
+                onChange={(e) => setTechComponentWeights({...techComponentWeights, macdWeight: parseInt(e.target.value) || 0})}
+                style={{ width: '70px', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>%</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>📊 Bollinger</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="number" min="0" max="100" value={techComponentWeights.bollingerWeight}
+                onChange={(e) => setTechComponentWeights({...techComponentWeights, bollingerWeight: parseInt(e.target.value) || 0})}
+                style={{ width: '70px', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>%</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>🎯 Stochastic</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="number" min="0" max="100" value={techComponentWeights.stochasticWeight}
+                onChange={(e) => setTechComponentWeights({...techComponentWeights, stochasticWeight: parseInt(e.target.value) || 0})}
+                style={{ width: '70px', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>%</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>📊 Volume</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="number" min="0" max="100" value={techComponentWeights.volumeWeight}
+                onChange={(e) => setTechComponentWeights({...techComponentWeights, volumeWeight: parseInt(e.target.value) || 0})}
+                style={{ width: '70px', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>%</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>📈 CCI</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="number" min="0" max="100" value={techComponentWeights.cciWeight}
+                onChange={(e) => setTechComponentWeights({...techComponentWeights, cciWeight: parseInt(e.target.value) || 0})}
+                style={{ width: '70px', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>%</span>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', color: '#94a3b8', marginBottom: '6px' }}>💪 ADX</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input type="number" min="0" max="100" value={techComponentWeights.adxWeight}
+                onChange={(e) => setTechComponentWeights({...techComponentWeights, adxWeight: parseInt(e.target.value) || 0})}
+                style={{ width: '70px', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.3)',
+                  background: 'rgba(15, 23, 42, 0.6)', color: '#f1f5f9', fontSize: '13px' }} />
+              <span style={{ color: '#94a3b8', fontSize: '13px' }}>%</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '12px',
+          padding: '12px',
+          background: 'rgba(59, 130, 246, 0.1)',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#94a3b8'
+        }}>
+          ℹ️ Total: {techComponentWeights.smaWeight + techComponentWeights.rsiWeight + techComponentWeights.macdWeight + 
+                     techComponentWeights.bollingerWeight + techComponentWeights.stochasticWeight + techComponentWeights.volumeWeight +
+                     techComponentWeights.cciWeight + techComponentWeights.adxWeight}%
+          {(techComponentWeights.smaWeight + techComponentWeights.rsiWeight + techComponentWeights.macdWeight + 
+            techComponentWeights.bollingerWeight + techComponentWeights.stochasticWeight + techComponentWeights.volumeWeight +
+            techComponentWeights.cciWeight + techComponentWeights.adxWeight) !== 100 && 
+            <span style={{ color: '#ef4444', marginLeft: '8px' }}>⚠️ Must sum to 100%</span>
+          }
+        </div>
+
+        <div style={{
+          marginTop: '12px',
+          padding: '12px',
+          background: 'rgba(34, 197, 94, 0.1)',
+          borderRadius: '8px',
+          fontSize: '11px',
+          color: '#94a3b8'
+        }}>
+          💡 <strong>Trend-Aware:</strong> Oversold signals (RSI, BB, Stochastic) only contribute in bullish trends (Golden Cross). 
+          Set to 0% to disable any indicator.
+        </div>
+      </div>
+
       <div style={{
         background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
         border: '1px solid rgba(99, 102, 241, 0.3)',
