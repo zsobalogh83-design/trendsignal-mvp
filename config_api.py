@@ -90,6 +90,92 @@ class TechnicalWeightsResponse(BaseModel):
     tech_rsi_overbought: int
     tech_rsi_oversold: int
 
+# ===== NEW: INDICATOR PARAMETERS MODELS =====
+
+class IndicatorParametersUpdate(BaseModel):
+    """Model for updating technical indicator parameters"""
+    # RSI
+    rsi_period: Optional[int] = Field(None, ge=5, le=50)
+    rsi_timeframe: Optional[str] = None
+    rsi_lookback: Optional[str] = None
+    # SMA Short
+    sma_short_period: Optional[int] = Field(None, ge=5, le=100)
+    sma_short_timeframe: Optional[str] = None
+    sma_short_lookback: Optional[str] = None
+    # SMA Medium
+    sma_medium_period: Optional[int] = Field(None, ge=20, le=200)
+    sma_medium_timeframe: Optional[str] = None
+    sma_medium_lookback: Optional[str] = None
+    # SMA Long
+    sma_long_period: Optional[int] = Field(None, ge=100, le=300)
+    sma_long_timeframe: Optional[str] = None
+    sma_long_lookback: Optional[str] = None
+    # MACD
+    macd_fast: Optional[int] = Field(None, ge=5, le=50)
+    macd_slow: Optional[int] = Field(None, ge=10, le=100)
+    macd_signal: Optional[int] = Field(None, ge=5, le=50)
+    macd_timeframe: Optional[str] = None
+    macd_lookback: Optional[str] = None
+    # Bollinger Bands
+    bb_period: Optional[int] = Field(None, ge=10, le=50)
+    bb_std_dev: Optional[float] = Field(None, ge=1.0, le=3.0)
+    bb_timeframe: Optional[str] = None
+    bb_lookback: Optional[str] = None
+    # ATR
+    atr_period: Optional[int] = Field(None, ge=5, le=50)
+    atr_timeframe: Optional[str] = None
+    atr_lookback: Optional[str] = None
+    # Stochastic
+    stoch_period: Optional[int] = Field(None, ge=5, le=50)
+    stoch_timeframe: Optional[str] = None
+    stoch_lookback: Optional[str] = None
+    # ADX
+    adx_period: Optional[int] = Field(None, ge=5, le=50)
+    adx_timeframe: Optional[str] = None
+    adx_lookback: Optional[str] = None
+
+class IndicatorParametersResponse(BaseModel):
+    """Response model for technical indicator parameters"""
+    # RSI
+    rsi_period: int
+    rsi_timeframe: str
+    rsi_lookback: str
+    # SMA Short
+    sma_short_period: int
+    sma_short_timeframe: str
+    sma_short_lookback: str
+    # SMA Medium
+    sma_medium_period: int
+    sma_medium_timeframe: str
+    sma_medium_lookback: str
+    # SMA Long
+    sma_long_period: int
+    sma_long_timeframe: str
+    sma_long_lookback: str
+    # MACD
+    macd_fast: int
+    macd_slow: int
+    macd_signal: int
+    macd_timeframe: str
+    macd_lookback: str
+    # Bollinger Bands
+    bb_period: int
+    bb_std_dev: float
+    bb_timeframe: str
+    bb_lookback: str
+    # ATR
+    atr_period: int
+    atr_timeframe: str
+    atr_lookback: str
+    # Stochastic
+    stoch_period: int
+    stoch_timeframe: str
+    stoch_lookback: str
+    # ADX
+    adx_period: int
+    adx_timeframe: str
+    adx_lookback: str
+
 # ===== ENDPOINTS =====
 
 @router.get("/signal", response_model=SignalConfigResponse)
@@ -389,3 +475,168 @@ async def update_technical_weights(updates: TechnicalWeightsUpdate):
             detail=str(e)
         )
 
+
+# ===== NEW: INDICATOR PARAMETERS ENDPOINTS =====
+
+@router.get("/indicator-parameters", response_model=IndicatorParametersResponse)
+async def get_indicator_parameters():
+    """Get current technical indicator parameters"""
+    try:
+        from src.config import get_config
+        config = get_config()
+        
+        return IndicatorParametersResponse(
+            # RSI
+            rsi_period=config.rsi_period,
+            rsi_timeframe=config.rsi_timeframe,
+            rsi_lookback=config.rsi_lookback,
+            # SMA Short
+            sma_short_period=config.sma_short_period,
+            sma_short_timeframe=config.sma_short_timeframe,
+            sma_short_lookback=config.sma_short_lookback,
+            # SMA Medium
+            sma_medium_period=config.sma_medium_period,
+            sma_medium_timeframe=config.sma_medium_timeframe,
+            sma_medium_lookback=config.sma_medium_lookback,
+            # SMA Long
+            sma_long_period=config.sma_long_period,
+            sma_long_timeframe=config.sma_long_timeframe,
+            sma_long_lookback=config.sma_long_lookback,
+            # MACD
+            macd_fast=config.macd_fast,
+            macd_slow=config.macd_slow,
+            macd_signal=config.macd_signal,
+            macd_timeframe=config.macd_timeframe,
+            macd_lookback=config.macd_lookback,
+            # Bollinger Bands
+            bb_period=config.bb_period,
+            bb_std_dev=config.bb_std_dev,
+            bb_timeframe=config.bb_timeframe,
+            bb_lookback=config.bb_lookback,
+            # ATR
+            atr_period=config.atr_period,
+            atr_timeframe=config.atr_timeframe,
+            atr_lookback=config.atr_lookback,
+            # Stochastic
+            stoch_period=config.stoch_period,
+            stoch_timeframe=config.stoch_timeframe,
+            stoch_lookback=config.stoch_lookback,
+            # ADX
+            adx_period=config.adx_period,
+            adx_timeframe=config.adx_timeframe,
+            adx_lookback=config.adx_lookback,
+        )
+    except Exception as e:
+        logger.error(f"Error getting indicator parameters: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.put("/indicator-parameters", response_model=IndicatorParametersResponse)
+async def update_indicator_parameters(updates: IndicatorParametersUpdate):
+    """Update technical indicator parameters"""
+    try:
+        from src.config import get_config, update_config_values
+        
+        config = get_config()
+        config_updates = {}
+        
+        # RSI
+        if updates.rsi_period is not None:
+            config_updates["RSI_PERIOD"] = updates.rsi_period
+        if updates.rsi_timeframe is not None:
+            config_updates["RSI_TIMEFRAME"] = updates.rsi_timeframe
+        if updates.rsi_lookback is not None:
+            config_updates["RSI_LOOKBACK"] = updates.rsi_lookback
+        
+        # SMA Short
+        if updates.sma_short_period is not None:
+            config_updates["SMA_SHORT_PERIOD"] = updates.sma_short_period
+        if updates.sma_short_timeframe is not None:
+            config_updates["SMA_SHORT_TIMEFRAME"] = updates.sma_short_timeframe
+        if updates.sma_short_lookback is not None:
+            config_updates["SMA_SHORT_LOOKBACK"] = updates.sma_short_lookback
+        
+        # SMA Medium
+        if updates.sma_medium_period is not None:
+            config_updates["SMA_MEDIUM_PERIOD"] = updates.sma_medium_period
+        if updates.sma_medium_timeframe is not None:
+            config_updates["SMA_MEDIUM_TIMEFRAME"] = updates.sma_medium_timeframe
+        if updates.sma_medium_lookback is not None:
+            config_updates["SMA_MEDIUM_LOOKBACK"] = updates.sma_medium_lookback
+        
+        # SMA Long
+        if updates.sma_long_period is not None:
+            config_updates["SMA_LONG_PERIOD"] = updates.sma_long_period
+        if updates.sma_long_timeframe is not None:
+            config_updates["SMA_LONG_TIMEFRAME"] = updates.sma_long_timeframe
+        if updates.sma_long_lookback is not None:
+            config_updates["SMA_LONG_LOOKBACK"] = updates.sma_long_lookback
+        
+        # MACD
+        if updates.macd_fast is not None:
+            config_updates["MACD_FAST"] = updates.macd_fast
+        if updates.macd_slow is not None:
+            config_updates["MACD_SLOW"] = updates.macd_slow
+        if updates.macd_signal is not None:
+            config_updates["MACD_SIGNAL"] = updates.macd_signal
+        if updates.macd_timeframe is not None:
+            config_updates["MACD_TIMEFRAME"] = updates.macd_timeframe
+        if updates.macd_lookback is not None:
+            config_updates["MACD_LOOKBACK"] = updates.macd_lookback
+        
+        # Bollinger Bands
+        if updates.bb_period is not None:
+            config_updates["BB_PERIOD"] = updates.bb_period
+        if updates.bb_std_dev is not None:
+            config_updates["BB_STD_DEV"] = updates.bb_std_dev
+        if updates.bb_timeframe is not None:
+            config_updates["BB_TIMEFRAME"] = updates.bb_timeframe
+        if updates.bb_lookback is not None:
+            config_updates["BB_LOOKBACK"] = updates.bb_lookback
+        
+        # ATR
+        if updates.atr_period is not None:
+            config_updates["ATR_PERIOD"] = updates.atr_period
+        if updates.atr_timeframe is not None:
+            config_updates["ATR_TIMEFRAME"] = updates.atr_timeframe
+        if updates.atr_lookback is not None:
+            config_updates["ATR_LOOKBACK"] = updates.atr_lookback
+        
+        # Stochastic
+        if updates.stoch_period is not None:
+            config_updates["STOCH_PERIOD"] = updates.stoch_period
+        if updates.stoch_timeframe is not None:
+            config_updates["STOCH_TIMEFRAME"] = updates.stoch_timeframe
+        if updates.stoch_lookback is not None:
+            config_updates["STOCH_LOOKBACK"] = updates.stoch_lookback
+        
+        # ADX
+        if updates.adx_period is not None:
+            config_updates["ADX_PERIOD"] = updates.adx_period
+        if updates.adx_timeframe is not None:
+            config_updates["ADX_TIMEFRAME"] = updates.adx_timeframe
+        if updates.adx_lookback is not None:
+            config_updates["ADX_LOOKBACK"] = updates.adx_lookback
+        
+        if not config_updates:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No updates provided"
+            )
+        
+        update_config_values(config, config_updates)
+        
+        logger.info(f"Indicator parameters updated: {config_updates}")
+        
+        return await get_indicator_parameters()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating indicator parameters: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
