@@ -606,7 +606,7 @@ export function Configuration() {
         console.log('✅ Decay weights loaded:', decayConfig);
       }
 
-      // Load technical weights
+      // Load technical weights (signal scores only)
       const techResponse = await fetch('http://localhost:8000/api/v1/config/technical-weights');
       if (techResponse.ok) {
         const techConfig = await techResponse.json();
@@ -622,14 +622,8 @@ export function Configuration() {
           rsiWeakBullish: techConfig.tech_rsi_weak_bullish,
           rsiOverbought: techConfig.tech_rsi_overbought,
           rsiOversold: techConfig.tech_rsi_oversold,
-          macdWeight: techConfig.tech_macd_weight,
-          bollingerWeight: techConfig.tech_bollinger_weight,
-          stochasticWeight: techConfig.tech_stochastic_weight,
-          cciWeight: techConfig.tech_cci_weight,
-          volumeWeight: techConfig.tech_volume_weight,
-          adxWeight: techConfig.tech_adx_weight,
         });
-        console.log('✅ Technical weights loaded:', techConfig);
+        console.log('✅ Technical signal scores loaded:', techConfig);
 
       // ===== NEW: Load indicator parameters =====
       const indicatorResponse = await fetch('http://localhost:8000/api/v1/config/indicator-parameters');
@@ -751,8 +745,8 @@ export function Configuration() {
           console.log('✅ Decay weights saved');
         }
 
-        // Save technical weights too
-        const techPayload = {
+        // ===== STEP 1: Save technical signal scores (SMA/RSI signal point values) =====
+        const techSignalScoresPayload = {
           tech_sma20_bullish: technicalWeights.sma20Bullish,
           tech_sma20_bearish: technicalWeights.sma20Bearish,
           tech_sma50_bullish: technicalWeights.sma50Bullish,
@@ -764,22 +758,16 @@ export function Configuration() {
           tech_rsi_weak_bullish: technicalWeights.rsiWeakBullish,
           tech_rsi_overbought: technicalWeights.rsiOverbought,
           tech_rsi_oversold: technicalWeights.rsiOversold,
-          tech_macd_weight: technicalWeights.macdWeight,
-          tech_bollinger_weight: technicalWeights.bollingerWeight,
-          tech_stochastic_weight: technicalWeights.stochasticWeight,
-          tech_cci_weight: technicalWeights.cciWeight,
-          tech_volume_weight: technicalWeights.volumeWeight,
-          tech_adx_weight: technicalWeights.adxWeight,
         };
 
-        const techResponse = await fetch('http://localhost:8000/api/v1/config/technical-weights', {
+        const techSignalResponse = await fetch('http://localhost:8000/api/v1/config/technical-weights', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(techPayload)
+          body: JSON.stringify(techSignalScoresPayload)
         });
 
-        if (techResponse.ok) {
-          console.log('✅ Technical weights saved');
+        if (techSignalResponse.ok) {
+          console.log('✅ Technical signal scores saved');
 
         // ===== NEW: Save indicator parameters =====
         const ip = indicatorParams;
