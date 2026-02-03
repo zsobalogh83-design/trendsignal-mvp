@@ -24,13 +24,21 @@ except ImportError:
     HAS_HUNGARIAN = False
     print("⚠️ Hungarian news module not available")
 
-# Import GNews collector
+# Import Yahoo Finance collector
 try:
-    from src.gnews_collector import GNewsCollector
-    HAS_GNEWS = True
+    from src.yahoo_collector import YahooFinanceCollector
+    HAS_YAHOO = True
 except ImportError:
-    HAS_GNEWS = False
-    print("⚠️ GNews module not available")
+    HAS_YAHOO = False
+    print("⚠️ Yahoo Finance module not available")
+
+# Import Finnhub collector
+try:
+    from src.finnhub_collector import FinnhubCollector
+    HAS_FINNHUB = True
+except ImportError:
+    HAS_FINNHUB = False
+    print("⚠️ Finnhub module not available")
 
 if TYPE_CHECKING:
     from src.multilingual_sentiment import MultilingualSentimentAnalyzer
@@ -43,22 +51,30 @@ class NewsCollector:
         self.config = config or get_config()
         self.db = db  # Optional database session
         
-        # Initialize GNews collector
-        if HAS_GNEWS and self.config.gnews_api_key:
+        # Initialize Yahoo Finance collector (always available, no API key needed)
+        if HAS_YAHOO:
             try:
-                self.gnews_collector = GNewsCollector(self.config.gnews_api_key)
-                print("✅ GNews collector ready (100 req/day, real-time)")
+                self.yahoo_collector = YahooFinanceCollector()
             except Exception as e:
-                self.gnews_collector = None
-                print(f"⚠️ GNews collector init failed: {e}")
+                self.yahoo_collector = None
+                print(f"⚠️ Yahoo collector init failed: {e}")
         else:
-            self.gnews_collector = None
+            self.yahoo_collector = None
+        
+        # Initialize Finnhub collector
+        if HAS_FINNHUB and self.config.finnhub_api_key:
+            try:
+                self.finnhub_collector = FinnhubCollector(self.config.finnhub_api_key)
+            except Exception as e:
+                self.finnhub_collector = None
+                print(f"⚠️ Finnhub collector init failed: {e}")
+        else:
+            self.finnhub_collector = None
         
         # Initialize Hungarian collector
         if HAS_HUNGARIAN:
             try:
                 self.hungarian_collector = HungarianNewsCollector(config)
-                print("✅ Hungarian news collector ready")
             except Exception as e:
                 self.hungarian_collector = None
                 print(f"⚠️ Hungarian collector init failed: {e}")
@@ -69,7 +85,7 @@ class NewsCollector:
         self,
         ticker_symbol: str,
         company_name: str,
-        lookback_hours: int = 24,
+        lookback_hours: int = 72,  # Increased to 72h for better coverage
         save_to_db: bool = True
     ) -> List[NewsItem]:
         """
@@ -80,7 +96,7 @@ class NewsCollector:
         Args:
             ticker_symbol: Stock ticker
             company_name: Company name
-            lookback_hours: Hours to look back
+            lookback_hours: Hours to look back (default: 72h for stable coverage)
             save_to_db: If True and db session available, save to database
         
         Returns:
@@ -92,34 +108,34 @@ class NewsCollector:
         sentiment_analyzer = MultilingualSentimentAnalyzer(self.config, ticker_symbol)
         
         # ===== MULTI-SOURCE STRATEGY =====
-        # Priority: GNews (real-time) > Alpha Vantage (financial focus) > NewsAPI (delayed)
+        # Priority: Yahoo Finance (unlimited) > Finnhub (60/min) > Alpha Vantage (25/day backup)
         
-        # US Blue Chips: Prioritize GNews + Alpha Vantage
+        # US Blue Chips: Prioritize Yahoo + Finnhub
         is_us_ticker = not ticker_symbol.endswith('.BD')
         
-        # 1. GNews (real-time, no delay) - PRIORITY for US tickers
-        if self.gnews_collector and is_us_ticker:
-            gnews_items = self._collect_from_gnews(
-                ticker_symbol, company_name, lookback_hours, sentiment_analyzer
+        # 1. Yahoo Finance RSS (unlimited, real-time) - PRIMARY for US tickers
+        if self.yahoo_collector and is_us_ticker:
+            yahoo_items = self._collect_from_yahoo(
+                ticker_symbol, lookback_hours, sentiment_analyzer
             )
-            all_news.extend(gnews_items)
-            print(f"  📰 GNews: {len(gnews_items)} articles")
+            all_news.extend(yahoo_items)
+            print(f"  📰 Yahoo Finance: {len(yahoo_items)} articles")
         
-        # 2. Alpha Vantage (financial focus) - ONLY for US tickers (conserve 25 req/day limit)
-        if is_us_ticker and self.config.alphavantage_key:
+        # 2. Finnhub API (60 req/min) - SECONDARY for US tickers
+        if self.finnhub_collector and is_us_ticker and len(all_news) < 10:
+            finnhub_items = self._collect_from_finnhub(
+                ticker_symbol, lookback_hours, sentiment_analyzer
+            )
+            all_news.extend(finnhub_items)
+            print(f"  📰 Finnhub: {len(finnhub_items)} articles")
+        
+        # 3. Alpha Vantage (25 req/day) - BACKUP ONLY if insufficient news
+        if is_us_ticker and self.config.alphavantage_key and len(all_news) < 5:
             alphavantage_items = self._collect_from_alphavantage(
                 ticker_symbol, lookback_hours, sentiment_analyzer
             )
             all_news.extend(alphavantage_items)
-            print(f"  📰 Alpha Vantage: {len(alphavantage_items)} articles")
-        
-        # 3. NewsAPI (legacy, 24h delay) - Fallback if no GNews
-        if not self.gnews_collector and self.config.newsapi_key:
-            newsapi_items = self._collect_from_newsapi(
-                ticker_symbol, company_name, lookback_hours, sentiment_analyzer
-            )
-            all_news.extend(newsapi_items)
-            print(f"  📰 NewsAPI (delayed): {len(newsapi_items)} articles")
+            print(f"  📰 Alpha Vantage (backup): {len(alphavantage_items)} articles")
         
         # Collect Hungarian news for BÉT tickers
         if self.hungarian_collector and ticker_symbol.endswith('.BD'):
@@ -160,22 +176,21 @@ class NewsCollector:
         except Exception as e:
             print(f"⚠️ Could not save news to DB: {e}")
     
-    def _collect_from_gnews(
+    def _collect_from_yahoo(
         self,
         ticker_symbol: str,
-        company_name: str,
         lookback_hours: int,
         sentiment_analyzer: 'MultilingualSentimentAnalyzer'
     ) -> List[NewsItem]:
         """
-        Collect from GNews API (real-time, no 24h delay)
+        Collect from Yahoo Finance RSS (unlimited, real-time)
         
-        Priority for US blue chip tickers
+        Primary source for US blue chip tickers
         """
         try:
-            news_items = self.gnews_collector.collect_news(
+            news_items = self.yahoo_collector.collect_news(
                 ticker_symbol=ticker_symbol,
-                max_articles=10
+                max_articles=20
             )
             
             # Convert to NewsItem format with sentiment analysis
@@ -196,78 +211,71 @@ class NewsCollector:
                     description=item.get('description', ''),
                     url=item['url'],
                     published_at=item['published_at'],
-                    source=f"GNews-{item['source']}",
+                    source="Yahoo Finance",
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
                     sentiment_label=sentiment['label'],
-                    credibility=0.85  # GNews high credibility
+                    credibility=0.90  # Yahoo Finance high credibility
                 )
                 analyzed_items.append(news_item)
             
             return analyzed_items
             
         except Exception as e:
-            print(f"  ❌ GNews collection error: {e}")
+            print(f"  ❌ Yahoo Finance collection error: {e}")
             return []
     
-    def _collect_from_newsapi(
+    def _collect_from_finnhub(
         self,
         ticker_symbol: str,
-        company_name: str,
         lookback_hours: int,
         sentiment_analyzer: 'MultilingualSentimentAnalyzer'
     ) -> List[NewsItem]:
-        """Collect from NewsAPI with timezone-aware datetimes"""
-        url = "https://newsapi.org/v2/everything"
+        """
+        Collect from Finnhub API (60 req/min)
         
-        # FIXED: Use timezone-aware datetimes
-        to_date = datetime.now(timezone.utc)
-        from_date = to_date - timedelta(hours=lookback_hours)
-        
-        params = {
-            'q': f'{ticker_symbol} OR "{company_name}"',
-            'from': from_date.isoformat(),
-            'to': to_date.isoformat(),
-            'language': 'en',
-            'sortBy': 'publishedAt',
-            'apiKey': self.config.newsapi_key
-        }
-        
+        Secondary source for US blue chip tickers
+        """
         try:
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
+            # Convert hours to days (Finnhub uses days)
+            lookback_days = max(1, lookback_hours // 24)
             
-            news_items = []
-            for article in data.get('articles', []):
-                text = f"{article.get('title', '')}. {article.get('description', '')}"
+            news_items = self.finnhub_collector.collect_news(
+                ticker_symbol=ticker_symbol,
+                lookback_days=lookback_days,
+                max_articles=20
+            )
+            
+            # Convert to NewsItem format with sentiment analysis
+            analyzed_items = []
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+            
+            for item in news_items:
+                # Filter by time
+                if item['published_at'] < cutoff_time:
+                    continue
+                
+                # Analyze sentiment
+                text = f"{item['title']}. {item.get('description', '')}"
                 sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
                 
-                # FIXED: Parse with timezone awareness
-                published_str = article.get('publishedAt', '')
-                if published_str:
-                    published_at = datetime.fromisoformat(published_str.replace('Z', '+00:00'))
-                else:
-                    published_at = datetime.now(timezone.utc)
-                
                 news_item = NewsItem(
-                    title=article.get('title', ''),
-                    description=article.get('description', ''),
-                    url=article.get('url', ''),
-                    published_at=published_at,
-                    source='NewsAPI',
+                    title=item['title'],
+                    description=item.get('description', ''),
+                    url=item['url'],
+                    published_at=item['published_at'],
+                    source=f"Finnhub-{item['source']}",
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
                     sentiment_label=sentiment['label'],
-                    credibility=0.85
+                    credibility=0.85  # Finnhub high credibility
                 )
-                news_items.append(news_item)
+                analyzed_items.append(news_item)
             
-            print(f"✅ NewsAPI: Collected {len(news_items)} news items")
-            return news_items
+            return analyzed_items
             
         except Exception as e:
-            print(f"❌ NewsAPI error: {e}")
+            print(f"  ❌ Finnhub collection error: {e}")
             return []
     
     def _collect_from_alphavantage(
@@ -357,8 +365,8 @@ class NewsCollector:
 
 
 if __name__ == "__main__":
-    print("✅ Enhanced News Collector with Database Integration")
-    print("🌐 English: NewsAPI + Alpha Vantage")
+    print("✅ Enhanced News Collector v2.0 - Stable Sources")
+    print("📰 Yahoo Finance (unlimited) + Finnhub (60 req/min)")
     print("🇭🇺 Hungarian: Portfolio.hu + RSS feeds")
     print("🕐 Timezone-aware datetime handling")
     print("💾 Database persistence support")

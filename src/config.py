@@ -20,6 +20,7 @@ from pathlib import Path
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")  # GNews API (real-time, no delay)
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")  # Finnhub API (60 req/min)
 
 # For development/testing (replace with your keys)
 if not NEWSAPI_KEY:
@@ -28,6 +29,8 @@ if not ALPHAVANTAGE_KEY:
     ALPHAVANTAGE_KEY = "Q3R3ZCIBFDJI8BU9"
 if not GNEWS_API_KEY:
     GNEWS_API_KEY = "422e63bafec92ab1e705b47455a16ce5"
+if not FINNHUB_API_KEY:
+    FINNHUB_API_KEY = "d60j2mpr01qto1rdbjmgd60j2mpr01qto1rdbjn0"  # Finnhub free tier
 
 
 # ==========================================
@@ -349,12 +352,24 @@ def load_config_from_file():
 
 def update_config_values(config_instance, updates: dict):
     """Update configuration values and save to file"""
+    
+    # Mapping from JSON keys to dataclass attribute names
+    key_mapping = {
+        "STOP_LOSS_ATR_MULTIPLIER": "stop_loss_atr_mult",
+        "TAKE_PROFIT_ATR_MULTIPLIER": "take_profit_atr_mult",
+        "SR_SUPPORT_MAX_DISTANCE_PCT": "sr_support_max_distance_pct",
+        "SR_RESISTANCE_MAX_DISTANCE_PCT": "sr_resistance_max_distance_pct",
+    }
+    
     for key, value in updates.items():
-        # Use lowercase attribute names (dataclass convention)
-        attr_name = key.lower()
+        # Use mapping if available, otherwise use lowercase
+        attr_name = key_mapping.get(key, key.lower())
+        
         if hasattr(config_instance, attr_name):
             setattr(config_instance, attr_name, value)
             print(f"  ✓ Updated {key} = {value}")
+        else:
+            print(f"  ⚠️ Attribute not found: {attr_name} (from key: {key})")
     
     save_config_to_file(config_instance)
     print(f"✅ Configuration updated with {len(updates)} changes")
@@ -373,6 +388,7 @@ class TrendSignalConfig:
     newsapi_key: str = NEWSAPI_KEY
     alphavantage_key: str = ALPHAVANTAGE_KEY
     gnews_api_key: str = GNEWS_API_KEY  # GNews API (real-time news, no 24h delay)
+    finnhub_api_key: str = FINNHUB_API_KEY  # Finnhub API (60 req/min)
     
     # Decay model
     decay_weights: Dict[str, float] = None
