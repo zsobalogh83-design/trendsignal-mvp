@@ -2,9 +2,11 @@
 Database Integration Helpers
 Functions to save and retrieve news, price data, and technical indicators
 
-VERSION: 1.2 - Cache Staleness Check
+VERSION: 1.3 - Stricter Cache + Lock Fix
 DATE: 2026-02-03
-CHANGES: Added freshness validation to prevent using outdated price data
+CHANGES: 
+- v1.2: Added freshness validation to prevent using outdated price data
+- v1.3: Reduced 1h cache threshold from 2h to 1h for accurate SMA_50 calculation
 """
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
@@ -290,7 +292,7 @@ def get_price_data_from_db(
                 print(f"   ✅ Cache FRESH (5m data is {age_minutes:.1f} min old)")
         
         elif interval == '1h':
-            max_age_hours = 2  # 1h data should be max 2 hours old
+            max_age_hours = 1  # 1h data should be max 1 hour old (strict for accurate SMA_50)
             age_hours = time_diff.total_seconds() / 3600
             if age_hours > max_age_hours:
                 print(f"   ⚠️ Cache STALE (1h data is {age_hours:.1f} hours old, max: {max_age_hours}) → force refresh")
