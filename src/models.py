@@ -238,3 +238,133 @@ class Signal(Base):
     # Relationships
     ticker = relationship("Ticker", back_populates="signals", lazy="select")
     technical_indicator = relationship("TechnicalIndicator", back_populates="signals", lazy="select")
+    calculation = relationship("SignalCalculation", back_populates="signal", uselist=False, cascade="all, delete-orphan", lazy="select")
+
+
+class SignalCalculation(Base):
+    """Optimized audit trail with key values as columns + detailed JSON"""
+    __tablename__ = "signal_calculations"
+    __table_args__ = {'extend_existing': True}
+    
+    id = Column(Integer, primary_key=True, index=True)
+    signal_id = Column(Integer, ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    ticker_symbol = Column(String(10), nullable=False, index=True)
+    calculated_at = Column(DateTime, server_default=func.now(), index=True)
+    
+    # ===== INPUT VALUES (frequently queried, indexed columns) =====
+    
+    # Price & Technical Indicators
+    current_price = Column(Float, index=True)
+    atr = Column(Float)
+    atr_pct = Column(Float, index=True)
+    rsi = Column(Float, index=True)
+    macd = Column(Float)
+    macd_signal = Column(Float)
+    sma_20 = Column(Float)
+    sma_50 = Column(Float)
+    sma_200 = Column(Float)
+    adx = Column(Float)
+    bb_upper = Column(Float)
+    bb_lower = Column(Float)
+    
+    # Risk Metrics
+    volatility = Column(Float, index=True)
+    nearest_support = Column(Float)
+    nearest_resistance = Column(Float)
+    
+    # News
+    news_count = Column(Integer, index=True)
+    
+    # ===== SCORE VALUES (core calculations, indexed) =====
+    
+    sentiment_score = Column(Float, index=True)
+    sentiment_confidence = Column(Float, index=True)
+    technical_score = Column(Float, index=True)
+    technical_confidence = Column(Float, index=True)
+    risk_score = Column(Float, index=True)
+    risk_confidence = Column(Float)
+    combined_score = Column(Float, index=True)
+    
+    # ===== CONFIGURATION WEIGHTS (at time of calculation) =====
+    
+    weight_sentiment = Column(Float, index=True)
+    weight_technical = Column(Float, index=True)
+    weight_risk = Column(Float, index=True)
+    
+    # Thresholds
+    threshold_buy = Column(Float)
+    threshold_sell = Column(Float)
+    threshold_hold_zone = Column(Float)
+    
+    # ===== TECHNICAL PARAMETERS (config at time of calculation) =====
+    
+    config_rsi_oversold = Column(Float)
+    config_rsi_overbought = Column(Float)
+    config_adx_strong = Column(Float)
+    config_atr_stop_multiplier = Column(Float)
+    config_atr_profit_multiplier = Column(Float)
+    config_sr_support_max_distance_pct = Column(Float)
+    config_sr_resistance_max_distance_pct = Column(Float)
+    config_sr_buffer = Column(Float)
+    config_dbscan_eps = Column(Float)
+    config_dbscan_min_samples = Column(Integer)
+    config_dbscan_order = Column(Integer)
+    config_dbscan_lookback = Column(Integer)
+    
+    # ===== RISK PARAMETERS (config at time of calculation) =====
+    
+    config_risk_volatility_weight = Column(Float)
+    config_risk_proximity_weight = Column(Float)
+    config_risk_trend_strength_weight = Column(Float)
+    
+    # ===== TECHNICAL COMPONENT WEIGHTS (config at time of calculation) =====
+    
+    config_tech_sma_weight = Column(Float)
+    config_tech_rsi_weight = Column(Float)
+    config_tech_macd_weight = Column(Float)
+    config_tech_bollinger_weight = Column(Float)
+    config_tech_stochastic_weight = Column(Float)
+    config_tech_volume_weight = Column(Float)
+    
+    # ===== OUTPUT VALUES (final recommendations) =====
+    
+    decision = Column(String(20), index=True)  # BUY/SELL/HOLD
+    strength = Column(String(20))  # STRONG/MODERATE/WEAK/NEUTRAL
+    entry_price = Column(Float)
+    stop_loss = Column(Float)
+    take_profit = Column(Float)
+    risk_reward_ratio = Column(Float)
+    
+    # ===== CONTRIBUTIONS (weighted scores) =====
+    
+    sentiment_contribution = Column(Float)
+    technical_contribution = Column(Float)
+    risk_contribution = Column(Float)
+    
+    # ===== DETAILED JSON DATA (for full audit trail) =====
+    
+    # News details (array of news items with full metadata)
+    news_inputs = Column(Text)  # JSON: [{title, source, sentiment_score, published_at, time_decay, weight}, ...]
+    
+    # Config snapshot (complete configuration)
+    config_snapshot = Column(Text)  # JSON: {weights, thresholds, technical_params, risk_params}
+    
+    # Technical details (key signals, indicator breakdown)
+    technical_details = Column(Text)  # JSON: {key_signals: [...], components: {...}}
+    
+    # Risk details (component breakdown)
+    risk_details = Column(Text)  # JSON: {components: {volatility: {...}, proximity: {...}, trend_strength: {...}}}
+    
+    # Reasoning (full decision logic)
+    reasoning = Column(Text)  # JSON: {sentiment: {...}, technical: {...}, risk: {...}}
+    
+    # Entry/Exit calculation details
+    entry_exit_details = Column(Text)  # JSON: {stop_loss: {method, calculation}, take_profit: {method, calculation}}
+    
+    # ===== METADATA =====
+    
+    calculation_duration_ms = Column(Integer)
+    
+    # Relationships
+    signal = relationship("Signal", back_populates="calculation", lazy="select")
+

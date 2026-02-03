@@ -19,7 +19,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.database import get_db
-from models import Ticker, Signal
+from models import Ticker, Signal, SignalCalculation  # ✅ ADD SignalCalculation
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,19 @@ def save_signal_to_db(signal, db: Session):
         db.add(db_signal)
         db.commit()
         db.refresh(db_signal)
+        
+        # ===== SAVE AUDIT TRAIL =====
+        # Check if signal has _audit_record attribute (created by SignalGenerator._save_audit_trail)
+        if hasattr(signal, '_audit_record') and signal._audit_record:
+            try:
+                audit_record = signal._audit_record
+                audit_record.signal_id = db_signal.id  # Link to saved signal
+                db.add(audit_record)
+                db.commit()
+                logger.info(f"✅ Saved audit trail for signal #{db_signal.id}")
+            except Exception as audit_error:
+                logger.error(f"❌ Failed to save audit trail for signal #{db_signal.id}: {audit_error}")
+                # Don't rollback the signal - audit trail is optional
         
         logger.info(f"✅ Saved signal for {signal.ticker_symbol} to database (ID: {db_signal.id})")
         return db_signal

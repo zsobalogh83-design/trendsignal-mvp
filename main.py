@@ -2,13 +2,15 @@
 TrendSignal MVP - Main Orchestrator with Database Integration
 Run complete analysis for specified tickers with DB persistence
 
-Version: 1.1 - Database Support
-Date: 2024-12-30
+Version: 1.2 - Audit Trail Support
+Date: 2025-02-03
 """
 
 import sys
 from pathlib import Path
 from typing import Optional, List, Dict
+import json
+from datetime import datetime
 
 # Add src to path
 src_path = Path(__file__).parent / 'src'
@@ -16,16 +18,92 @@ sys.path.insert(0, str(src_path))
 
 from config import TrendSignalConfig, get_config
 from news_collector import NewsCollector
-from signal_generator import SignalGenerator, generate_signals_for_tickers
+from signal_generator import SignalGenerator, generate_signals_for_tickers, TradingSignal
 from utils import fetch_price_data, fetch_dual_timeframe, display_dataframe_summary
 
 # Database imports (optional)
 try:
     from database import SessionLocal
+    from models import Signal as SignalModel, Ticker as TickerModel, SignalCalculation
     HAS_DATABASE = True
 except ImportError:
     HAS_DATABASE = False
     print("⚠️ Database not available, running without persistence")
+
+
+# ==========================================
+# HELPER: SAVE SIGNAL TO DATABASE
+# ==========================================
+
+def save_signal_to_db(signal: TradingSignal, db) -> Optional[int]:
+    """
+    Save signal and its audit trail to database
+    
+    Args:
+        signal: TradingSignal object to save
+        db: Database session
+    
+    Returns:
+        signal_id if saved successfully, None otherwise
+    """
+    if not HAS_DATABASE or db is None:
+        return None
+    
+    try:
+        # 1. Get or create ticker
+        ticker = db.query(TickerModel).filter(TickerModel.symbol == signal.ticker_symbol).first()
+        if not ticker:
+            ticker = TickerModel(
+                symbol=signal.ticker_symbol,
+                name=signal.ticker_name,
+                is_active=True
+            )
+            db.add(ticker)
+            db.flush()  # Get ticker ID
+        
+        # 2. Create signal record
+        signal_record = SignalModel(
+            ticker_id=ticker.id,
+            ticker_symbol=signal.ticker_symbol,
+            technical_indicator_id=signal.technical_indicator_id,
+            decision=signal.decision,
+            strength=signal.strength,
+            combined_score=signal.combined_score,
+            sentiment_score=signal.sentiment_score,
+            technical_score=signal.technical_score,
+            risk_score=signal.risk_score,
+            overall_confidence=signal.overall_confidence,
+            sentiment_confidence=signal.sentiment_confidence,
+            technical_confidence=signal.technical_confidence,
+            entry_price=signal.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            risk_reward_ratio=signal.risk_reward_ratio,
+            reasoning_json=json.dumps(signal.reasoning, default=str) if signal.reasoning else None,
+            status='active',
+            created_at=signal.timestamp
+        )
+        
+        db.add(signal_record)
+        db.flush()  # Get signal ID
+        
+        # 3. Save audit trail if available
+        if hasattr(signal, '_audit_record') and signal._audit_record:
+            audit_record = signal._audit_record
+            audit_record.signal_id = signal_record.id
+            db.add(audit_record)
+        
+        db.commit()
+        
+        print(f"💾 Saved signal #{signal_record.id} to database with audit trail")
+        return signal_record.id
+        
+    except Exception as e:
+        print(f"❌ Failed to save signal to database: {e}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        return None
 
 
 # ==========================================
@@ -136,6 +214,10 @@ def run_analysis(
         
         # 4. Display result
         signal.display()
+        
+        # 5. Save to database (AFTER display, so user sees result immediately)
+        if db:
+            save_signal_to_db(signal, db)
         
         return signal
         

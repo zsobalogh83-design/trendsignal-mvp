@@ -5,9 +5,16 @@ SQLite setup for TrendSignal MVP
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from pathlib import Path
+import os
 
-# Database URL - SQLite in project root
-DATABASE_URL = "sqlite:///./trendsignal.db"
+# Database URL - SQLite in PROJECT ROOT (parent directory of src/)
+# This ensures we use the main trendsignal.db, not src/trendsignal.db
+BASE_DIR = Path(__file__).resolve().parent.parent  # Go up from src/ to project root
+DATABASE_PATH = BASE_DIR / "trendsignal.db"
+DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+
+print(f"📁 Database path: {DATABASE_PATH}")
 
 # Create engine
 engine = create_engine(
