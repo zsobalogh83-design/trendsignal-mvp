@@ -342,6 +342,54 @@ class SignalGenerator:
             }
         )
         
+        # ===== SAVE AUDIT TRAIL (for debugging) =====
+        # NOTE: This will be saved to signals table first, then audit trail
+        # The audit trail includes full calculation details for debugging
+        self._save_audit_trail(
+            signal=signal,
+            sentiment_data=sentiment_data,
+            technical_data=technical_data,
+            risk_data=risk_data,
+            config_snapshot={
+                "weights": {
+                    "sentiment": sentiment_weight,
+                    "technical": technical_weight,
+                    "risk": risk_weight
+                },
+                "thresholds": {
+                    "buy": getattr(self.config, 'BUY_THRESHOLD', getattr(self.config, 'moderate_buy_score', 50)),
+                    "sell": getattr(self.config, 'SELL_THRESHOLD', getattr(self.config, 'moderate_sell_score', -50)),
+                    "hold_zone": getattr(self.config, 'HOLD_ZONE_THRESHOLD', 15)
+                },
+                "technical_params": {
+                    "rsi_oversold": getattr(self.config, 'rsi_oversold_threshold', 30),
+                    "rsi_overbought": getattr(self.config, 'rsi_overbought_threshold', 70),
+                    "adx_strong": 25,
+                    "atr_multiplier_stop": getattr(self.config, 'stop_loss_atr_mult', 2.0),
+                    "atr_multiplier_profit": getattr(self.config, 'take_profit_atr_mult', 3.0)
+                },
+                "risk_params": {
+                    "volatility_weight": getattr(self.config, 'risk_volatility_weight', 0.40),
+                    "proximity_weight": getattr(self.config, 'risk_proximity_weight', 0.35),
+                    "trend_strength_weight": getattr(self.config, 'risk_trend_strength_weight', 0.25)
+                },
+                # ===== ADDITIONAL CONFIG PARAMS FOR ML =====
+                "sr_support_max_distance_pct": getattr(self.config, 'sr_support_max_distance_pct', 5.0),
+                "sr_resistance_max_distance_pct": getattr(self.config, 'sr_resistance_max_distance_pct', 8.0),
+                "sr_buffer": getattr(self.config, 'stop_loss_sr_buffer', 0.5),
+                "dbscan_eps": getattr(self.config, 'sr_dbscan_eps', 4.0),
+                "dbscan_min_samples": getattr(self.config, 'sr_dbscan_min_samples', 3),
+                "dbscan_order": getattr(self.config, 'sr_dbscan_order', 7),
+                "dbscan_lookback": getattr(self.config, 'sr_dbscan_lookback', 180),
+                "tech_sma_weight": getattr(self.config, 'tech_sma_weight', 0.30),
+                "tech_rsi_weight": getattr(self.config, 'tech_rsi_weight', 0.25),
+                "tech_macd_weight": getattr(self.config, 'tech_macd_weight', 0.20),
+                "tech_bollinger_weight": getattr(self.config, 'tech_bollinger_weight', 0.15),
+                "tech_stochastic_weight": getattr(self.config, 'tech_stochastic_weight', 0.05),
+                "tech_volume_weight": getattr(self.config, 'tech_volume_weight', 0.05)
+            }
+        )
+        
         return signal
     
     def _determine_decision(
@@ -585,6 +633,261 @@ class SignalGenerator:
             round(take_profit, 2),
             round(rr_ratio, 2)
         )
+    
+    def _save_audit_trail(
+        self,
+        signal: TradingSignal,
+        sentiment_data: Dict,
+        technical_data: Dict,
+        risk_data: Dict,
+        config_snapshot: Dict
+    ):
+        """
+        Save detailed audit trail for debugging and analysis
+        
+        This creates a comprehensive record of how the signal was calculated,
+        including all inputs, intermediate calculations, and configuration used.
+        
+        Args:
+            signal: The generated TradingSignal object
+            sentiment_data: Raw sentiment data with news items
+            technical_data: Raw technical data with indicators
+            risk_data: Raw risk data with components
+            config_snapshot: Configuration at time of generation
+        """
+        import json
+        
+        try:
+            # Try to import database components
+            try:
+                from database import SessionLocal
+                from models import SignalCalculation
+                db_available = True
+            except ImportError:
+                db_available = False
+                logger.warning("Database not available, skipping audit trail save")
+                return
+            
+            if not db_available:
+                return
+            
+            db = SessionLocal()
+            
+            try:
+                # ===== PREPARE INPUT DATA =====
+                
+                # News inputs
+                news_items = sentiment_data.get("all_news", [])
+                news_inputs = []
+                for item in news_items[:20]:  # Limit to 20 most recent
+                    news_inputs.append({
+                        "title": item.get("title", ""),
+                        "source": item.get("source", "Unknown"),
+                        "sentiment_score": item.get("sentiment_score", 0),
+                        "published_at": item.get("published_at", "").isoformat() if isinstance(item.get("published_at"), datetime) else str(item.get("published_at", "")),
+                        "time_decay": item.get("time_decay", 1.0),
+                        "weight": item.get("credibility_weight", 1.0)
+                    })
+                
+                # Technical inputs
+                technical_inputs = {
+                    "current_price": technical_data.get("current_price"),
+                    "atr": technical_data.get("atr"),
+                    "atr_pct": technical_data.get("atr_pct"),
+                    "rsi": technical_data.get("rsi"),
+                    "macd": technical_data.get("macd"),
+                    "macd_signal": technical_data.get("macd_signal"),
+                    "sma_20": technical_data.get("sma_20"),
+                    "sma_50": technical_data.get("sma_50"),
+                    "sma_200": technical_data.get("sma_200"),
+                    "adx": technical_data.get("adx"),
+                    "bb_upper": technical_data.get("bb_upper"),
+                    "bb_lower": technical_data.get("bb_lower")
+                }
+                
+                # Risk inputs
+                risk_inputs = {
+                    "volatility": risk_data.get("volatility"),
+                    "nearest_support": risk_data.get("nearest_support"),
+                    "nearest_resistance": risk_data.get("nearest_resistance"),
+                    "support_levels": risk_data.get("support", []),
+                    "resistance_levels": risk_data.get("resistance", []),
+                    "components": risk_data.get("components", {})
+                }
+                
+                # ===== PREPARE INTERMEDIATE CALCULATIONS =====
+                
+                # Sentiment calculation
+                sentiment_calculation = {
+                    "raw_scores": [item.get("sentiment_score", 0) for item in news_items[:10]],
+                    "time_decay_applied": [item.get("time_decay", 1.0) for item in news_items[:10]],
+                    "credibility_weights": [item.get("credibility_weight", 1.0) for item in news_items[:10]],
+                    "weighted_avg": sentiment_data.get("weighted_avg", 0),
+                    "confidence": sentiment_data.get("confidence", 0.5),
+                    "news_count": len(news_items)
+                }
+                
+                # Technical calculation
+                technical_calculation = {
+                    "score": technical_data.get("score", 0),
+                    "confidence": technical_data.get("confidence", 0.5),
+                    "key_signals": technical_data.get("key_signals", [])
+                }
+                
+                # Risk calculation
+                risk_calculation = {
+                    "score": risk_data.get("score", 0),
+                    "confidence": risk_data.get("confidence", 0.5),
+                    "components": risk_data.get("components", {})
+                }
+                
+                # Final weighting
+                final_weighting = {
+                    "sentiment_weighted": signal.sentiment_score * config_snapshot["weights"]["sentiment"],
+                    "technical_weighted": signal.technical_score * config_snapshot["weights"]["technical"],
+                    "risk_weighted": signal.risk_score * config_snapshot["weights"]["risk"],
+                    "combined": signal.combined_score
+                }
+                
+                # ===== PREPARE OUTPUT DATA =====
+                
+                # Decision logic
+                decision_logic = {
+                    "combined_score": signal.combined_score,
+                    "decision": signal.decision,
+                    "strength": signal.strength,
+                    "reasoning": signal.reasoning if signal.reasoning else {}
+                }
+                
+                # Entry/Exit calculation
+                nearest_support, nearest_resistance = parse_support_resistance(risk_data)
+                
+                entry_exit_calculation = {
+                    "entry_price": signal.entry_price,
+                    "stop_loss": {
+                        "value": signal.stop_loss,
+                        "method": "support/resistance" if nearest_support or nearest_resistance else "ATR-based",
+                        "nearest_sr": nearest_support if signal.decision == "BUY" else nearest_resistance,
+                        "atr": technical_data.get("atr")
+                    },
+                    "take_profit": {
+                        "value": signal.take_profit,
+                        "method": "support/resistance" if nearest_support or nearest_resistance else "ATR-based",
+                        "nearest_sr": nearest_resistance if signal.decision == "BUY" else nearest_support,
+                        "atr": technical_data.get("atr")
+                    },
+                    "risk_reward_ratio": signal.risk_reward_ratio
+                }
+                
+                # ===== CREATE AUDIT RECORD (Optimized Structure) =====
+                
+                audit_record = SignalCalculation(
+                    signal_id=None,  # Will be set after signal is saved
+                    ticker_symbol=signal.ticker_symbol,
+                    calculated_at=signal.timestamp,
+                    
+                    # ===== INPUT VALUES (columns) =====
+                    current_price=technical_data.get("current_price"),
+                    atr=technical_data.get("atr"),
+                    atr_pct=technical_data.get("atr_pct"),
+                    rsi=technical_data.get("rsi"),
+                    macd=technical_data.get("macd"),
+                    macd_signal=technical_data.get("macd_signal"),
+                    sma_20=technical_data.get("sma_20"),
+                    sma_50=technical_data.get("sma_50"),
+                    sma_200=technical_data.get("sma_200"),
+                    adx=technical_data.get("adx"),
+                    bb_upper=technical_data.get("bb_upper"),
+                    bb_lower=technical_data.get("bb_lower"),
+                    volatility=risk_data.get("volatility"),
+                    nearest_support=risk_data.get("nearest_support"),
+                    nearest_resistance=risk_data.get("nearest_resistance"),
+                    news_count=len(news_items),
+                    
+                    # ===== SCORE VALUES (columns) =====
+                    sentiment_score=signal.sentiment_score,
+                    sentiment_confidence=signal.sentiment_confidence,
+                    technical_score=signal.technical_score,
+                    technical_confidence=signal.technical_confidence,
+                    risk_score=signal.risk_score,
+                    risk_confidence=risk_data.get("confidence", 0.5),
+                    combined_score=signal.combined_score,
+                    
+                    # ===== CONFIGURATION WEIGHTS (columns) =====
+                    weight_sentiment=config_snapshot["weights"]["sentiment"],
+                    weight_technical=config_snapshot["weights"]["technical"],
+                    weight_risk=config_snapshot["weights"]["risk"],
+                    threshold_buy=config_snapshot["thresholds"]["buy"],
+                    threshold_sell=config_snapshot["thresholds"]["sell"],
+                    threshold_hold_zone=config_snapshot["thresholds"]["hold_zone"],
+                    
+                    # ===== TECHNICAL PARAMETERS (columns) =====
+                    config_rsi_oversold=config_snapshot["technical_params"].get("rsi_oversold", 30),
+                    config_rsi_overbought=config_snapshot["technical_params"].get("rsi_overbought", 70),
+                    config_adx_strong=config_snapshot["technical_params"].get("adx_strong", 25),
+                    config_atr_stop_multiplier=config_snapshot["technical_params"].get("atr_multiplier_stop", 2.0),
+                    config_atr_profit_multiplier=config_snapshot["technical_params"].get("atr_multiplier_profit", 3.0),
+                    config_sr_support_max_distance_pct=config_snapshot.get("sr_support_max_distance_pct", 5.0),
+                    config_sr_resistance_max_distance_pct=config_snapshot.get("sr_resistance_max_distance_pct", 8.0),
+                    config_sr_buffer=config_snapshot.get("sr_buffer", 0.5),
+                    config_dbscan_eps=config_snapshot.get("dbscan_eps", 4.0),
+                    config_dbscan_min_samples=config_snapshot.get("dbscan_min_samples", 3),
+                    config_dbscan_order=config_snapshot.get("dbscan_order", 7),
+                    config_dbscan_lookback=config_snapshot.get("dbscan_lookback", 180),
+                    
+                    # ===== RISK PARAMETERS (columns) =====
+                    config_risk_volatility_weight=config_snapshot["risk_params"]["volatility_weight"],
+                    config_risk_proximity_weight=config_snapshot["risk_params"]["proximity_weight"],
+                    config_risk_trend_strength_weight=config_snapshot["risk_params"]["trend_strength_weight"],
+                    
+                    # ===== TECHNICAL COMPONENT WEIGHTS (columns) =====
+                    config_tech_sma_weight=config_snapshot.get("tech_sma_weight", 0.30),
+                    config_tech_rsi_weight=config_snapshot.get("tech_rsi_weight", 0.25),
+                    config_tech_macd_weight=config_snapshot.get("tech_macd_weight", 0.20),
+                    config_tech_bollinger_weight=config_snapshot.get("tech_bollinger_weight", 0.15),
+                    config_tech_stochastic_weight=config_snapshot.get("tech_stochastic_weight", 0.05),
+                    config_tech_volume_weight=config_snapshot.get("tech_volume_weight", 0.05),
+                    
+                    # ===== OUTPUT VALUES (columns) =====
+                    decision=signal.decision,
+                    strength=signal.strength,
+                    entry_price=signal.entry_price,
+                    stop_loss=signal.stop_loss,
+                    take_profit=signal.take_profit,
+                    risk_reward_ratio=signal.risk_reward_ratio,
+                    
+                    # ===== CONTRIBUTIONS (columns) =====
+                    sentiment_contribution=signal.sentiment_score * config_snapshot["weights"]["sentiment"],
+                    technical_contribution=signal.technical_score * config_snapshot["weights"]["technical"],
+                    risk_contribution=signal.risk_score * config_snapshot["weights"]["risk"],
+                    
+                    # ===== DETAILED JSON DATA =====
+                    news_inputs=json.dumps(news_inputs, default=str),
+                    config_snapshot=json.dumps(config_snapshot, default=str),
+                    technical_details=json.dumps(technical_calculation, default=str),
+                    risk_details=json.dumps(risk_calculation, default=str),
+                    reasoning=json.dumps(decision_logic, default=str),
+                    entry_exit_details=json.dumps(entry_exit_calculation, default=str),
+                    
+                    # ===== METADATA =====
+                    calculation_duration_ms=None
+                )
+                
+                # Store temporarily in signal object for later save
+                # (Will be saved after signal is inserted into DB and we have signal_id)
+                if not hasattr(signal, '_audit_record'):
+                    signal._audit_record = audit_record
+                
+                logger.info(f"✅ Audit trail prepared for {signal.ticker_symbol}")
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to save audit trail: {e}")
+            import traceback
+            traceback.print_exc()
+            # Don't raise - audit trail is optional
 
 
 # ==========================================
@@ -802,7 +1105,26 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
             "finbert": finbert_conf_normalized,
             "volume": volume_factor,
             "consistency": consistency
-        }
+        },
+        # ✅ ADD: Full news list for audit trail
+        "all_news": [
+            {
+                "title": item.title,
+                "source": getattr(item, 'source', 'Unknown'),
+                "sentiment_score": item.sentiment_score,
+                "sentiment_confidence": item.sentiment_confidence,
+                "published_at": item.published_at,
+                "credibility_weight": item.credibility,
+                "time_decay": (
+                    decay_weights.get('0-2h', 1.0) if (now - item.published_at).total_seconds() / 3600 < 2 else
+                    decay_weights.get('2-6h', 0.85) if (now - item.published_at).total_seconds() / 3600 < 6 else
+                    decay_weights.get('6-12h', 0.60) if (now - item.published_at).total_seconds() / 3600 < 12 else
+                    decay_weights.get('12-24h', 0.35) if (now - item.published_at).total_seconds() / 3600 < 24 else
+                    0.0
+                )
+            }
+            for item in news_items
+        ]
     }
 
 
