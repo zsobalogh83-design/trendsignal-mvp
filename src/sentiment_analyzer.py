@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
-from config import TrendSignalConfig, get_config, USE_FINBERT
+from src.config import TrendSignalConfig, get_config, USE_FINBERT
 
 
 # ==========================================
