@@ -1,6 +1,10 @@
 """
 Database Integration Helpers
 Functions to save and retrieve news, price data, and technical indicators
+
+VERSION: 1.2 - Cache Staleness Check
+DATE: 2026-02-03
+CHANGES: Added freshness validation to prevent using outdated price data
 """
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
@@ -225,7 +229,18 @@ def get_price_data_from_db(
     days: int,
     db: Session
 ) -> Optional[pd.DataFrame]:
-    """Get price data from database as DataFrame"""
+    """
+    Get price data from database as DataFrame with STALENESS CHECK
+    
+    Args:
+        ticker_symbol: Stock ticker
+        interval: Data interval ('5m', '1h', '1d')
+        days: Number of days to look back
+        db: Database session
+    
+    Returns:
+        DataFrame with price data or None if cache is stale/empty
+    """
     try:
         from datetime import timedelta
         # Add 50% buffer to catch slightly older data (e.g., 2d → 3d lookback)
@@ -245,7 +260,63 @@ def get_price_data_from_db(
         print(f"   Query returned: {len(records) if records else 0} records")
         
         if not records:
+            print(f"   ⚠️ No records found → force yfinance download")
             return None
+        
+        # ✅ CRITICAL: Check if cache is STALE (data too old)
+        latest_timestamp = records[-1].timestamp  # Most recent record
+        
+        # Ensure timezone-aware comparison (fix for naive datetimes from DB)
+        if latest_timestamp.tzinfo is None:
+            # If naive, assume UTC
+            latest_timestamp = latest_timestamp.replace(tzinfo=timezone.utc)
+        
+        now = datetime.now(timezone.utc)
+        
+        print(f"   Latest timestamp: {latest_timestamp}")
+        print(f"   Current time: {now}")
+        
+        # Calculate time difference
+        time_diff = now - latest_timestamp
+        
+        # Freshness thresholds by interval
+        if interval == '5m':
+            max_age_minutes = 10  # 5m data should be max 10 minutes old
+            age_minutes = time_diff.total_seconds() / 60
+            if age_minutes > max_age_minutes:
+                print(f"   ⚠️ Cache STALE (5m data is {age_minutes:.1f} min old, max: {max_age_minutes}) → force refresh")
+                return None
+            else:
+                print(f"   ✅ Cache FRESH (5m data is {age_minutes:.1f} min old)")
+        
+        elif interval == '1h':
+            max_age_hours = 2  # 1h data should be max 2 hours old
+            age_hours = time_diff.total_seconds() / 3600
+            if age_hours > max_age_hours:
+                print(f"   ⚠️ Cache STALE (1h data is {age_hours:.1f} hours old, max: {max_age_hours}) → force refresh")
+                return None
+            else:
+                print(f"   ✅ Cache FRESH (1h data is {age_hours:.1f} hours old)")
+        
+        elif interval == '15m':
+            max_age_minutes = 30  # 15m data should be max 30 minutes old
+            age_minutes = time_diff.total_seconds() / 60
+            if age_minutes > max_age_minutes:
+                print(f"   ⚠️ Cache STALE (15m data is {age_minutes:.1f} min old, max: {max_age_minutes}) → force refresh")
+                return None
+            else:
+                print(f"   ✅ Cache FRESH (15m data is {age_minutes:.1f} min old)")
+        
+        elif interval == '1d':
+            # Daily data: check if we have today's data
+            latest_date = latest_timestamp.date()
+            today_date = now.date()
+            
+            if latest_date < today_date:
+                print(f"   ⚠️ No data for today ({latest_date} < {today_date}) → force refresh")
+                return None
+            else:
+                print(f"   ✅ Cache FRESH (daily data includes today: {latest_date})")
         
         # Convert to DataFrame
         data = {
@@ -266,6 +337,8 @@ def get_price_data_from_db(
         
     except Exception as e:
         print(f"❌ Error loading price data from DB: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
