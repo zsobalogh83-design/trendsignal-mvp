@@ -1,9 +1,12 @@
 """
-TrendSignal MVP - Utilities Module with Database Integration - DEBUG VERSION
+TrendSignal MVP - Utilities Module with Database Integration - OPTIMIZED 2× BUFFER
 Helper functions and utilities with DB persistence for price data
 
-Version: 1.1 - Database Support + DEBUG
-Date: 2025-02-01
+Version: 1.2 - Optimized Backfill (2× Buffer Rule)
+Date: 2026-02-03
+Changes:
+- v1.1: Database Support + DEBUG
+- v1.2: Optimized periods based on 2× buffer of max indicator lookback (SMA_200)
 """
 
 import yfinance as yf
@@ -97,6 +100,8 @@ def _period_to_days(period: str) -> int:
         '1d': 1,
         '2d': 2,
         '5d': 5,
+        '7d': 7,
+        '10d': 10,
         '1mo': 30,
         '3mo': 90,
         '6mo': 180,
@@ -112,34 +117,51 @@ def fetch_dual_timeframe(
     db: Optional[Session] = None
 ) -> Dict[str, Optional[pd.DataFrame]]:
     """
-    Fetch MULTI-timeframe data for comprehensive analysis with DB caching
+    Fetch MULTI-timeframe data with OPTIMIZED 2× BUFFER STRATEGY
+    
+    DESIGN PRINCIPLE:
+    Each interval fetches 2× the maximum indicator period calculated from that timeframe.
+    
+    TIMEFRAME-SPECIFIC CALCULATIONS:
+    - 5m timeframe indicators: SMA_20, RSI_14, MACD_26 → Max: 26 × 2 = 52 candles → 2d period
+    - 1h timeframe indicators: SMA_50, SMA_200, ADX_28 → Max: 200 × 2 = 400 candles → 3mo period
+    - 15m timeframe: Intraday S/R pivots (~3d detection) × 2 = 6d → 7d period
+    - 1d timeframe: Swing S/R DBSCAN (180d lookback) × 2 = 360d → 1y period
+    
+    EXPECTED CANDLE COUNTS:
+    - 5m: ~156 candles (2 trading days)
+    - 1h: ~585 candles (90 calendar days)
+    - 15m: ~273 candles (7 calendar days)
+    - 1d: ~252 candles (1 year)
+    
+    Total per ticker: ~1,266 candles (~5 MB per ticker)
     """
     print(f"\n🔍 DEBUG: ===== fetch_dual_timeframe START for {ticker_symbol} =====")
-    print(f"   📊 Fetching multi-timeframe data for {ticker_symbol}...")
+    print(f"   📊 Fetching optimized 2× buffer multi-timeframe data...")
     
-    # Intraday momentum (5m, 2 days)
-    print(f"\n🔍 DEBUG: Fetching 5m data...")
+    # Intraday momentum (5m, 2 days = 2× MACD_26 buffer)
+    print(f"\n🔍 DEBUG: Fetching 5m data (2d for 2× MACD buffer)...")
     df_5m = fetch_price_data(ticker_symbol, interval='5m', period='2d', db=db)
     print(f"🔍 DEBUG: df_5m result: {type(df_5m)}, length: {len(df_5m) if df_5m is not None else 'None'}")
     
-    # Trend context (1h, 30 days)
-    print(f"\n🔍 DEBUG: Fetching 1h trend data...")
-    df_1h_trend = fetch_price_data(ticker_symbol, interval='1h', period='30d', db=db)
+    # Trend context (1h, 3 months = 2× SMA_200 buffer)
+    print(f"\n🔍 DEBUG: Fetching 1h trend data (3mo for 2× SMA_200 buffer)...")
+    df_1h_trend = fetch_price_data(ticker_symbol, interval='1h', period='3mo', db=db)
     print(f"🔍 DEBUG: df_1h_trend result: length: {len(df_1h_trend) if df_1h_trend is not None else 'None'}")
     
-    # Volatility context (1h, 3 days)
-    print(f"\n🔍 DEBUG: Fetching 1h volatility data...")
-    df_1h_vol = fetch_price_data(ticker_symbol, interval='1h', period='3d', db=db)
+    # Volatility context (reuse 1h trend data for efficiency)
+    print(f"\n🔍 DEBUG: Using 1h trend data for volatility analysis...")
+    df_1h_vol = df_1h_trend
     print(f"🔍 DEBUG: df_1h_vol result: length: {len(df_1h_vol) if df_1h_vol is not None else 'None'}")
     
-    # S/R levels (15m, 3 days)
-    print(f"\n🔍 DEBUG: Fetching 15m S/R data...")
-    df_15m = fetch_price_data(ticker_symbol, interval='15m', period='3d', db=db)
+    # S/R levels (15m, 7 days = 2× intraday S/R buffer)
+    print(f"\n🔍 DEBUG: Fetching 15m S/R data (7d)...")
+    df_15m = fetch_price_data(ticker_symbol, interval='15m', period='7d', db=db)
     print(f"🔍 DEBUG: df_15m result: length: {len(df_15m) if df_15m is not None else 'None'}")
     
-    # NEW: Daily data for swing S/R calculation (1d, 6 months)
-    print(f"\n🔍 DEBUG: Fetching 1d daily data...")
-    df_daily = fetch_price_data(ticker_symbol, interval='1d', period='6mo', db=db)
+    # Daily data for swing S/R calculation (1d, 1 year = 2× swing S/R buffer)
+    print(f"\n🔍 DEBUG: Fetching 1d daily data (1y for 2× swing S/R buffer)...")
+    df_daily = fetch_price_data(ticker_symbol, interval='1d', period='1y', db=db)
     print(f"🔍 DEBUG: df_daily result: length: {len(df_daily) if df_daily is not None else 'None'}")
     
     # NEW: Calculate swing S/R levels from daily data
