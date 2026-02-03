@@ -64,6 +64,6 @@ def get_db():
 def init_db():
     """Create all tables in the database"""
     # Import models to register them with Base
-    import models  # This registers all models
+    import src.models  # This registers all models
     Base.metadata.create_all(bind=engine)
     print("✅ Database tables created successfully!")

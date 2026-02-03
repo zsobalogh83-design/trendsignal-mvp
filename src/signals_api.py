@@ -19,7 +19,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.database import get_db
-from models import Ticker, Signal, SignalCalculation  # ✅ ADD SignalCalculation
+from src.models import Ticker, Signal, SignalCalculation  # ✅ ADD SignalCalculation
 
 logger = logging.getLogger(__name__)
 
