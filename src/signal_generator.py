@@ -793,12 +793,16 @@ class SignalGenerator:
                     rsi=technical_data.get("rsi"),
                     macd=technical_data.get("macd"),
                     macd_signal=technical_data.get("macd_signal"),
+                    macd_histogram=technical_data.get("macd_histogram"),
                     sma_20=technical_data.get("sma_20"),
                     sma_50=technical_data.get("sma_50"),
                     sma_200=technical_data.get("sma_200"),
                     adx=technical_data.get("adx"),
                     bb_upper=technical_data.get("bb_upper"),
+                    bb_middle=technical_data.get("bb_middle"),
                     bb_lower=technical_data.get("bb_lower"),
+                    stoch_k=technical_data.get("stoch_k"),
+                    stoch_d=technical_data.get("stoch_d"),
                     volatility=risk_data.get("volatility"),
                     nearest_support=risk_data.get("nearest_support"),
                     nearest_resistance=risk_data.get("nearest_resistance"),
@@ -1803,7 +1807,19 @@ def calculate_technical_score(
             "rsi": float(current['rsi']) if pd.notna(current['rsi']) else None,
             "sma_20": float(current['sma_20']) if pd.notna(current['sma_20']) else None,
             "sma_50": float(sma_50_for_comparison) if pd.notna(sma_50_for_comparison) else None,  # From trend df!
+            "sma_200": None,  # TODO: Implement from daily data
             "adx": float(adx) if adx is not None else None,
+            # ✅ ADD: MACD values
+            "macd": float(current['macd']) if pd.notna(current.get('macd')) else None,
+            "macd_signal": float(current['macd_signal']) if pd.notna(current.get('macd_signal')) else None,
+            "macd_histogram": float(current['macd_histogram']) if pd.notna(current.get('macd_histogram')) else None,
+            # ✅ ADD: Bollinger Bands
+            "bb_upper": float(current['bb_upper']) if pd.notna(current.get('bb_upper')) else None,
+            "bb_middle": float(current['bb_middle']) if pd.notna(current.get('bb_middle')) else None,
+            "bb_lower": float(current['bb_lower']) if pd.notna(current.get('bb_lower')) else None,
+            # ✅ ADD: Stochastic
+            "stoch_k": float(current['stoch_k']) if pd.notna(current.get('stoch_k')) else None,
+            "stoch_d": float(current['stoch_d']) if pd.notna(current.get('stoch_d')) else None,
             "technical_indicator_id": None  # Will be set if DB save succeeds
         }
         

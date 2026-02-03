@@ -238,7 +238,7 @@ class Signal(Base):
     # Relationships
     ticker = relationship("Ticker", back_populates="signals", lazy="select")
     technical_indicator = relationship("TechnicalIndicator", back_populates="signals", lazy="select")
-    calculation = relationship("SignalCalculation", back_populates="signal", uselist=False, cascade="all, delete-orphan", lazy="select")
+    calculation = relationship("SignalCalculation", back_populates="signal", cascade="all, delete-orphan", lazy="select")  # ✅ uselist=True (default) for multiple audit records
 
 
 class SignalCalculation(Base):
@@ -247,9 +247,9 @@ class SignalCalculation(Base):
     __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
-    signal_id = Column(Integer, ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    signal_id = Column(Integer, ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, index=True)  # ✅ Removed UNIQUE
     ticker_symbol = Column(String(10), nullable=False, index=True)
-    calculated_at = Column(DateTime, server_default=func.now(), index=True)
+    calculated_at = Column(DateTime(timezone=False), nullable=False, index=True)  # ✅ Explicit DateTime with time component
     
     # ===== INPUT VALUES (frequently queried, indexed columns) =====
     
@@ -260,12 +260,16 @@ class SignalCalculation(Base):
     rsi = Column(Float, index=True)
     macd = Column(Float)
     macd_signal = Column(Float)
+    macd_histogram = Column(Float)
     sma_20 = Column(Float)
     sma_50 = Column(Float)
     sma_200 = Column(Float)
     adx = Column(Float)
     bb_upper = Column(Float)
+    bb_middle = Column(Float)
     bb_lower = Column(Float)
+    stoch_k = Column(Float)
+    stoch_d = Column(Float)
     
     # Risk Metrics
     volatility = Column(Float, index=True)
