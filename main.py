@@ -24,7 +24,7 @@ from utils import fetch_price_data, fetch_dual_timeframe, display_dataframe_summ
 # Database imports (optional)
 try:
     from database import SessionLocal
-    from models import Signal as SignalModel, Ticker as TickerModel, SignalCalculation
+    from src.models import Signal as SignalModel, Ticker as TickerModel, SignalCalculation
     HAS_DATABASE = True
 except ImportError:
     HAS_DATABASE = False

@@ -661,7 +661,7 @@ class SignalGenerator:
             # Try to import database components
             try:
                 from database import SessionLocal
-                from models import SignalCalculation
+                from src.models import SignalCalculation
                 db_available = True
             except ImportError:
                 db_available = False
