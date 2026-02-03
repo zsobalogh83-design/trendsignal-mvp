@@ -1,474 +1,307 @@
-﻿"""
-TrendSignal MVP - Hungarian News Sources Module
-RSS feed collection from Portfolio.hu, Telex.hu, HVG.hu, Index.hu
+"""
+TrendSignal MVP - Hungarian News Collector
+RSS feed aggregator with FinBERT sentiment analysis
 
-Version: 1.0
-Date: 2024-12-27
+FIXED: All datetimes are now timezone-aware (UTC)
 """
 
 import feedparser
 import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional
-from dataclasses import dataclass
+from typing import List, Dict, Optional, TYPE_CHECKING
+import re
+from src.config import TrendSignalConfig
+from src.sentiment_analyzer import NewsItem
 
-from sentiment_analyzer import NewsItem
-from multilingual_sentiment import MultilingualSentimentAnalyzer
-from config import TrendSignalConfig, get_config
-from ticker_keywords import calculate_relevance_score, get_all_relevant_keywords
+if TYPE_CHECKING:
+    from src.multilingual_sentiment import MultilingualSentimentAnalyzer
 
-
-# ==========================================
-# HUNGARIAN RSS FEED SOURCES
-# ==========================================
-
-HUNGARIAN_RSS_SOURCES = {
-    'portfolio_befektetes': {
-        'url': 'https://www.portfolio.hu/rss/befektetes.xml',
-        'name': 'Portfolio.hu Befektetés',
-        'credibility': 0.90,
-        'language': 'hu',
-        'category': 'investment'
-    },
-    'portfolio_bank': {
-        'url': 'https://www.portfolio.hu/rss/bank.xml',
-        'name': 'Portfolio.hu Bank',
-        'credibility': 0.90,
-        'language': 'hu',
-        'category': 'banking'
-    },
-    'portfolio_gazdasag': {
-        'url': 'https://www.portfolio.hu/rss/gazdasag.xml',
-        'name': 'Portfolio.hu Gazdaság',
-        'credibility': 0.85,
-        'language': 'hu',
-        'category': 'economy'
-    },
-    'portfolio_uzlet': {
-        'url': 'https://www.portfolio.hu/rss/uzlet.xml',
-        'name': 'Portfolio.hu Üzlet',
-        'credibility': 0.85,
-        'language': 'hu',
-        'category': 'business'
-    },
-    'telex_gazdasag': {
-        'url': 'https://telex.hu/rss',
-        'name': 'Telex.hu',
-        'credibility': 0.80,
-        'language': 'hu',
-        'category': 'general'
-    },
-    'hvg_gazdasag': {
-        'url': 'https://hvg.hu/rss',
-        'name': 'HVG.hu',
-        'credibility': 0.85,
-        'language': 'hu',
-        'category': 'general'
-    },
-    'index': {
-        'url': 'https://index.hu/24ora/rss/',
-        'name': 'Index.hu',
-        'credibility': 0.75,
-        'language': 'hu',
-        'category': 'general'
-    }
-}
-
-
-# ==========================================
-# HUNGARIAN NEWS COLLECTOR
-# ==========================================
 
 class HungarianNewsCollector:
-    """Collect news from Hungarian RSS sources"""
+    """Collects Hungarian financial news from RSS feeds and web sources"""
     
-    def __init__(self, config: Optional[TrendSignalConfig] = None):
-        self.config = config or get_config()
-        # Use multilingual analyzer (auto-switches based on language)
-        self.sentiment_analyzer = MultilingualSentimentAnalyzer(config)
-        self.sources = HUNGARIAN_RSS_SOURCES
+    # Enhanced keywords - company specific
+    COMPANY_KEYWORDS = {
+        'OTP': [
+            'otp', 'otp bank', 'otp nyrt', 'csányi', 'csányi sándor',
+            'bankár', 'bankszektor', 'hitel', 'betét', 'digitális bank'
+        ],
+        'MOL': [
+            'mol', 'mol nyrt', 'mol group', 'hernádi', 'hernádi zsolt',
+            'olaj', 'gáz', 'üzemanyag', 'benzin', 'kőolaj', 'finomító',
+            'downstream', 'upstream', 'petrolkémia'
+        ],
+        'RICHTER': [
+            'richter', 'gedeon richter', 'orbán gábor',
+            'gyógyszer', 'gyógyszeripar', 'pharma', 'biotech'
+        ]
+    }
+    
+    # RSS Feeds with realistic expectations
+    RSS_FEEDS = {
+        'portfolio.hu_befektetes': {
+            'url': 'https://www.portfolio.hu/rss/befektetes.xml',
+            'credibility': 0.90
+        },
+        'portfolio.hu_bank': {
+            'url': 'https://www.portfolio.hu/rss/bank.xml',
+            'credibility': 0.90
+        },
+        'portfolio.hu_gazdasag': {
+            'url': 'https://www.portfolio.hu/rss/gazdasag.xml',
+            'credibility': 0.85
+        },
+        'portfolio.hu_uzlet': {
+            'url': 'https://www.portfolio.hu/rss/uzlet.xml',
+            'credibility': 0.80
+        },
+        'telex.hu': {
+            'url': 'https://telex.hu/rss/gazdasag',
+            'credibility': 0.85
+        },
+        'hvg.hu': {
+            'url': 'https://hvg.hu/rss/gazdasag',
+            'credibility': 0.85
+        },
+        'index.hu': {
+            'url': 'https://index.hu/gazdasag/rss/',
+            'credibility': 0.80
+        }
+    }
+    
+    def __init__(self, config: TrendSignalConfig):
+        self.config = config
+        print("✅ Hungarian news collector initialized")
+        print(f"🔤 Enhanced keywords ready for Hungarian news")
     
     def collect_news(
         self,
         ticker_symbol: str,
         company_name: str,
-        lookback_hours: int = 24,
-        sources: Optional[List[str]] = None
+        lookback_hours: int = 24
     ) -> List[NewsItem]:
         """
-        Collect news from Hungarian RSS sources
+        Collect Hungarian news for BÉT tickers
         
         Args:
-            ticker_symbol: Stock ticker (e.g., 'OTP.BD')
-            company_name: Company name (e.g., 'OTP Bank')
-            lookback_hours: How far back to look
-            sources: List of source keys to use (None = all)
+            ticker_symbol: e.g., 'OTP.BD'
+            company_name: e.g., 'OTP Bank'
+            lookback_hours: Hours to look back
         
         Returns:
-            List of NewsItem objects with sentiment analysis
+            List of NewsItem objects with Hungarian text and sentiment analysis
         """
+        # Initialize sentiment analyzer
+        from src.multilingual_sentiment import MultilingualSentimentAnalyzer
+        sentiment_analyzer = MultilingualSentimentAnalyzer(self.config, ticker_symbol)
+        
+        # Extract company base name
+        company_base = ticker_symbol.replace('.BD', '').upper()
+        
+        # Get company-specific keywords
+        keywords = self.COMPANY_KEYWORDS.get(company_base, [company_base.lower()])
+        
+        print(f"🔍 Keywords for {company_base}: {keywords[:3]}...")
+        
         all_news = []
         
-        # Determine which sources to use
-        if sources is None:
-            active_sources = self.sources
-        else:
-            active_sources = {k: v for k, v in self.sources.items() if k in sources}
+        # FIXED: Timezone-aware cutoff time
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
         
-        # Collect from each source
-        for source_key, source_info in active_sources.items():
-            news_items = self._collect_from_rss(
-                source_info,
-                ticker_symbol,
-                company_name,
-                lookback_hours
-            )
-            all_news.extend(news_items)
+        # Collect from RSS feeds
+        for feed_name, feed_info in self.RSS_FEEDS.items():
+            try:
+                feed_news = self._parse_rss_feed(
+                    feed_url=feed_info['url'],
+                    feed_name=feed_name,
+                    keywords=keywords,
+                    cutoff_time=cutoff_time,
+                    credibility=feed_info['credibility'],
+                    sentiment_analyzer=sentiment_analyzer,
+                    ticker_symbol=ticker_symbol
+                )
+                all_news.extend(feed_news)
+            except Exception as e:
+                print(f"❌ {feed_name} error: {e}")
         
-        # Remove duplicates
-        all_news = self._deduplicate_news(all_news)
-        
-        # Sort by published date
-        all_news.sort(key=lambda x: x.published_at, reverse=True)
+        # Deduplicate
+        all_news = self._deduplicate(all_news)
         
         print(f"✅ Hungarian RSS: Collected {len(all_news)} total news items")
         
         return all_news
     
-    def _collect_from_rss(
+    def _parse_rss_feed(
         self,
-        source_info: Dict,
-        ticker_symbol: str,
-        company_name: str,
-        lookback_hours: int
+        feed_url: str,
+        feed_name: str,
+        keywords: List[str],
+        cutoff_time: datetime,
+        credibility: float,
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer',
+        ticker_symbol: str
     ) -> List[NewsItem]:
-        """Collect news from a single RSS feed"""
+        """
+        Parse RSS feed and filter by keywords
+        
+        FIXED: All datetimes are timezone-aware + sentiment analysis added
+        """
         try:
-            # Parse RSS feed
-            feed = feedparser.parse(source_info['url'])
+            # Parse feed
+            feed = feedparser.parse(feed_url)
             
             if not feed.entries:
-                print(f"⚠️ {source_info['name']}: No entries in feed")
                 return []
             
             news_items = []
-            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
             
             for entry in feed.entries:
-                # Parse publish date
-                try:
-                    if hasattr(entry, 'published_parsed'):
-                        published_dt = datetime(*entry.published_parsed[:6])
-                    elif hasattr(entry, 'updated_parsed'):
-                        published_dt = datetime(*entry.updated_parsed[:6])
-                    else:
-                        # Skip if no date
-                        continue
-                except:
+                # FIXED: Parse datetime and make it timezone-aware
+                published_at = self._parse_pub_date(entry.get('published', ''))
+                
+                # FIXED: Both datetimes are now timezone-aware
+                if published_at < cutoff_time:
                     continue
                 
-                # Skip if too old
-                if published_dt < cutoff_time:
-                    continue
-                
-                # Extract title and description
+                # Get title and description
                 title = entry.get('title', '')
-                description = entry.get('description', '') or entry.get('summary', '')
-                url = entry.get('link', '')
+                description = entry.get('summary', entry.get('description', ''))
                 
-                # Check relevance using ticker-aware scoring
-                relevance_score = calculate_relevance_score(
-                    f"{title} {description}",
-                    ticker_symbol
-                )
-                
-                # Stricter threshold for BÉT tickers (reduce false positives)
-                min_relevance = 0.80 if '.BD' in ticker_symbol else 0.60
-                
-                if relevance_score < min_relevance:
-                    # Debug: uncomment to see rejected items
-                    # print(f"  ⊘ Rejected (score {relevance_score:.2f}): {title[:50]}")
+                # Keyword matching
+                text_combined = f"{title.lower()} {description.lower()}"
+                if not any(keyword in text_combined for keyword in keywords):
                     continue
                 
-                # Additional filter: exclude obviously irrelevant topics
-                irrelevant_topics = [
-                    'időjárás', 'weather', 'climate forecast',
-                    'sport', 'football', 'foci', 'labdarúgás',
-                    'celebrity', 'celeb', 'sztár', 'híresség',
-                    'recipe', 'recept', 'főzés', 'gasztro',
-                    'horoscope', 'horoszkóp', 'asztrológia'
-                ]
+                # 🧠 SENTIMENT ANALYSIS - analyze Hungarian text
+                text_for_sentiment = f"{title}. {description}"
+                sentiment = sentiment_analyzer.analyze_text(text_for_sentiment, ticker_symbol)
                 
-                text_check = f"{title} {description}".lower()
-                if any(topic in text_check for topic in irrelevant_topics):
-                    continue
-                
-                # Analyze sentiment (multilingual auto-detect)
-                text = f"{title}. {description}"
-                sentiment = self.sentiment_analyzer.analyze_text(text, ticker_symbol)
-                
-                # Create NewsItem
+                # Create NewsItem with sentiment
                 news_item = NewsItem(
                     title=title,
-                    description=self._clean_html(description),
-                    url=url,
-                    published_at=published_dt,
-                    source=source_info['name'],
+                    description=description,
+                    url=entry.get('link', ''),
+                    published_at=published_at,
+                    source=feed_name,
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
                     sentiment_label=sentiment['label'],
-                    credibility=source_info['credibility']
+                    credibility=credibility
                 )
                 news_items.append(news_item)
-            
-            if news_items:
-                print(f"✅ {source_info['name']}: Collected {len(news_items)} relevant items")
             
             return news_items
             
         except Exception as e:
-            print(f"❌ {source_info['name']} error: {e}")
-            return []
+            raise Exception(f"RSS parse error: {e}")
     
-    def _is_relevant(
-        self,
-        title: str,
-        description: str,
-        ticker_symbol: str,
-        company_name: str
-    ) -> bool:
+    def _parse_pub_date(self, pub_date_str: str) -> datetime:
         """
-        Check if news is relevant to ticker
+        Parse various RSS date formats and return timezone-aware datetime
         
-        Enhanced for BÉT tickers with broader matching
-        Phase 2: NER + zero-shot classification
+        FIXED: Always returns timezone-aware datetime in UTC
         """
-        text = f"{title} {description}".lower()
+        if not pub_date_str:
+            return datetime.now(timezone.utc)
         
-        # Extract ticker without suffix
-        # e.g., "OTP.BD" → "otp"
-        ticker_base = ticker_symbol.split('.')[0].lower()
+        # Common RSS date formats
+        formats = [
+            '%a, %d %b %Y %H:%M:%S %z',  # With timezone
+            '%a, %d %b %Y %H:%M:%S',     # Without timezone
+            '%Y-%m-%dT%H:%M:%S%z',       # ISO with timezone
+            '%Y-%m-%dT%H:%M:%S',         # ISO without timezone
+            '%Y-%m-%d %H:%M:%S',         # Simple format
+        ]
         
-        # Direct ticker mention (highest relevance)
-        if ticker_base in text:
-            return True
-        
-        # Check for full company name
-        if company_name.lower() in text:
-            return True
-        
-        # Extract company name significant parts
-        company_parts = company_name.lower().split()
-        
-        # For BÉT tickers, be more lenient
-        if '.BD' in ticker_symbol.upper():
-            # Hungarian ticker - accept broader matches
-            
-            # Generic words to still ignore
-            generic_words = {'nyrt', 'zrt', 'kft', 'inc', 'ltd', 'corp', 'corporation', 'plc'}
-            significant_parts = [p for p in company_parts if p not in generic_words and len(p) > 2]
-            
-            # Accept if ANY significant part matches
-            for part in significant_parts:
-                if part in text:
-                    return True
-            
-            # Special handling for banking/finance sector
-            if ticker_base in ['otp', 'k&h', 'erste', 'mkb']:
-                # Accept general banking news with high relevance indicators
-                banking_indicators = ['bank', 'hitel', 'betét', 'kamat', 'jegybank', 'mnb']
-                finance_indicators = ['befektetés', 'tőzsde', 'részvény', 'portfolio', 'pénzügy']
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(pub_date_str, fmt)
                 
-                has_banking = any(ind in text for ind in banking_indicators)
-                has_finance = any(ind in text for ind in finance_indicators)
+                # CRITICAL FIX: If datetime is timezone-naive, add UTC timezone
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    # Convert to UTC if it has a different timezone
+                    dt = dt.astimezone(timezone.utc)
                 
-                if has_banking and has_finance:
-                    return True  # Relevant financial/banking news
-            
-            # Special handling for energy sector
-            if ticker_base in ['mol', 'mvm']:
-                energy_indicators = ['olaj', 'gáz', 'energia', 'üzemanyag', 'benzin']
-                if any(ind in text for ind in energy_indicators):
-                    return True
-            
-            # Special handling for pharma
-            if ticker_base in ['richter', 'egis']:
-                pharma_indicators = ['gyógyszer', 'pharma', 'klinikai', 'fda', 'vakcina']
-                if any(ind in text for ind in pharma_indicators):
-                    return True
+                return dt
+            except ValueError:
+                continue
         
-        else:
-            # US/International ticker - stricter matching
-            generic_words = {'nyrt', 'zrt', 'kft', 'inc', 'ltd', 'corp', 'corporation', 'plc'}
-            significant_parts = [p for p in company_parts if p not in generic_words and len(p) > 3]
-            
-            for part in significant_parts:
-                if part in text:
-                    return True
+        # Fallback: try feedparser's parser
+        try:
+            import time
+            parsed = feedparser._parse_date(pub_date_str)
+            if parsed:
+                dt = datetime(*parsed[:6])
+                # CRITICAL FIX: Make it timezone-aware
+                dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+        except:
+            pass
         
-        return False
+        # Last resort: current time (timezone-aware)
+        print(f"⚠️ Could not parse date: {pub_date_str}, using current time")
+        return datetime.now(timezone.utc)
     
-    def _clean_html(self, html_text: str) -> str:
-        """Remove HTML tags from text"""
-        import re
-        # Remove CDATA
-        text = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', html_text)
-        # Remove HTML tags
-        text = re.sub(r'<[^>]+>', '', text)
-        # Remove extra whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
-    
-    def _deduplicate_news(self, news_items: List[NewsItem]) -> List[NewsItem]:
-        """Remove duplicate news items by URL and title similarity"""
+    def _deduplicate(self, news_items: List[NewsItem]) -> List[NewsItem]:
+        """Remove duplicate news items"""
         seen_urls = set()
         seen_titles = set()
         unique_items = []
         
         for item in news_items:
-            # Skip if URL already seen
+            # Skip if URL seen
             if item.url in seen_urls:
                 continue
             
             # Skip if very similar title
-            title_lower = item.title.lower()
-            if title_lower in seen_titles:
+            title_normalized = item.title.lower().strip()
+            if title_normalized in seen_titles:
                 continue
             
             seen_urls.add(item.url)
-            seen_titles.add(title_lower)
+            seen_titles.add(title_normalized)
             unique_items.append(item)
         
-        removed_count = len(news_items) - len(unique_items)
-        if removed_count > 0:
-            print(f"🔄 Removed {removed_count} duplicate Hungarian news items")
-        
         return unique_items
 
 
 # ==========================================
-# ENHANCED NEWS COLLECTOR (ENGLISH + HUNGARIAN)
-# ==========================================
-
-class EnhancedNewsCollector:
-    """
-    Enhanced news collector supporting both English and Hungarian sources
-    
-    Combines:
-    - NewsAPI (English)
-    - Alpha Vantage (English)
-    - Portfolio.hu (Hungarian)
-    - Telex, HVG, Index (Hungarian)
-    """
-    
-    def __init__(self, config: Optional[TrendSignalConfig] = None):
-        self.config = config or get_config()
-        self.hungarian_collector = HungarianNewsCollector(config)
-        
-        # Import English collector
-        from news_collector import NewsCollector
-        self.english_collector = NewsCollector(config)
-    
-    def collect_all_news(
-        self,
-        ticker_symbol: str,
-        company_name: str,
-        lookback_hours: int = 24,
-        include_hungarian: bool = True,
-        include_english: bool = True
-    ) -> List[NewsItem]:
-        """
-        Collect news from all sources (English + Hungarian)
-        
-        Args:
-            ticker_symbol: Stock ticker
-            company_name: Company name
-            lookback_hours: Lookback period
-            include_hungarian: Include Hungarian sources
-            include_english: Include English sources
-        
-        Returns:
-            Combined list of NewsItem objects
-        """
-        all_news = []
-        
-        # Collect English news
-        if include_english:
-            english_news = self.english_collector.collect_news(
-                ticker_symbol, company_name, lookback_hours
-            )
-            all_news.extend(english_news)
-        
-        # Collect Hungarian news
-        if include_hungarian:
-            hungarian_news = self.hungarian_collector.collect_news(
-                ticker_symbol, company_name, lookback_hours
-            )
-            all_news.extend(hungarian_news)
-        
-        # Final deduplication (cross-language)
-        all_news = self._deduplicate_cross_language(all_news)
-        
-        # Sort by date
-        all_news.sort(key=lambda x: x.published_at, reverse=True)
-        
-        print(f"\n📊 Total collected: {len(all_news)} news items")
-        print(f"   English: {len([n for n in all_news if n.source not in ['Portfolio.hu Befektetés', 'Portfolio.hu Bank', 'Portfolio.hu Gazdaság', 'Portfolio.hu Üzlet', 'Telex.hu', 'HVG.hu', 'Index.hu']])}")
-        print(f"   Hungarian: {len([n for n in all_news if n.source in ['Portfolio.hu Befektetés', 'Portfolio.hu Bank', 'Portfolio.hu Gazdaság', 'Portfolio.hu Üzlet', 'Telex.hu', 'HVG.hu', 'Index.hu']])}")
-        
-        return all_news
-    
-    def _deduplicate_cross_language(self, news_items: List[NewsItem]) -> List[NewsItem]:
-        """
-        Deduplicate across languages
-        
-        Simple URL-based for now
-        Phase 2: Multilingual embedding similarity
-        """
-        seen_urls = set()
-        unique_items = []
-        
-        for item in news_items:
-            if item.url not in seen_urls:
-                seen_urls.add(item.url)
-                unique_items.append(item)
-        
-        return unique_items
-
-
-# ==========================================
-# TICKER-SPECIFIC RSS FEEDS (BÉT Companies)
-# ==========================================
-
-BET_COMPANY_KEYWORDS = {
-    'OTP.BD': ['otp', 'otp bank'],
-    'MOL.BD': ['mol', 'mol nyrt', 'mol group'],
-    'RICHTER.BD': ['richter', 'richter gedeon', 'gedeon richter'],
-    'MTELEKOM.BD': ['magyar telekom', 'telekom', 'mtelekom'],
-    '4IG.BD': ['4ig', 'jászai gellért', '4ig csoport'],
-}
-
-
-def get_bet_company_keywords(ticker_symbol: str) -> List[str]:
-    """Get additional search keywords for BÉT companies"""
-    return BET_COMPANY_KEYWORDS.get(ticker_symbol, [])
-
-
-# ==========================================
-# USAGE EXAMPLE
+# TESTING
 # ==========================================
 
 if __name__ == "__main__":
-    print("✅ Hungarian News Collector Module Loaded")
-    print("\n📰 Hungarian RSS Sources:")
-    for key, source in HUNGARIAN_RSS_SOURCES.items():
-        print(f"  • {source['name']:30s} (credibility: {source['credibility']:.0%})")
+    from src.config import get_config
     
-    print("\n🇭🇺 BÉT Company Keywords:")
-    for ticker, keywords in BET_COMPANY_KEYWORDS.items():
-        print(f"  • {ticker:12s}: {', '.join(keywords)}")
+    config = get_config()
+    collector = HungarianNewsCollector(config)
     
-    print("\n🎯 Usage:")
-    print("  collector = EnhancedNewsCollector()")
-    print("  news = collector.collect_all_news('OTP.BD', 'OTP Bank')")
-
+    print("\n" + "=" * 60)
+    print("🧪 Testing Hungarian News Collector")
+    print("=" * 60)
+    
+    # Test OTP
+    print("\n📰 Testing OTP.BD...")
+    news = collector.collect_news("OTP.BD", "OTP Bank", lookback_hours=48)
+    
+    print(f"\n✅ Found {len(news)} OTP news items")
+    if news:
+        print(f"\nFirst item:")
+        print(f"  Title: {news[0].title}")
+        print(f"  Source: {news[0].source}")
+        print(f"  Published: {news[0].published_at}")
+        print(f"  Timezone: {news[0].published_at.tzinfo}")
+    
+    # Test MOL
+    print("\n📰 Testing MOL.BD...")
+    news = collector.collect_news("MOL.BD", "MOL Group", lookback_hours=48)
+    
+    print(f"\n✅ Found {len(news)} MOL news items")
+    if news:
+        print(f"\nFirst item:")
+        print(f"  Title: {news[0].title}")
+        print(f"  Source: {news[0].source}")
+        print(f"  Published: {news[0].published_at}")
+        print(f"  Timezone: {news[0].published_at.tzinfo}")
