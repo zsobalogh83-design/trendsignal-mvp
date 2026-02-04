@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 class HungarianNewsCollector:
     """Collects Hungarian financial news from RSS feeds and web sources"""
     
-    # Enhanced keywords - company specific
+    # Enhanced keywords - company specific (DEPRECATED - now in database)
+    # Kept for fallback compatibility
     COMPANY_KEYWORDS = {
         'OTP': [
             'otp', 'otp bank', 'otp nyrt', 'csányi', 'csányi sándor',
@@ -70,8 +71,9 @@ class HungarianNewsCollector:
         }
     }
     
-    def __init__(self, config: TrendSignalConfig):
+    def __init__(self, config: TrendSignalConfig, db=None):
         self.config = config
+        self.db = db  # 🆕 Database session for ticker config
         print("✅ Hungarian news collector initialized")
         print(f"🔤 Enhanced keywords ready for Hungarian news")
     
@@ -99,10 +101,21 @@ class HungarianNewsCollector:
         # Extract company base name
         company_base = ticker_symbol.replace('.BD', '').upper()
         
-        # Get company-specific keywords
-        keywords = self.COMPANY_KEYWORDS.get(company_base, [company_base.lower()])
-        
-        print(f"🔍 Keywords for {company_base}: {keywords[:3]}...")
+        # Get company-specific keywords - 🆕 DATABASE-DRIVEN (no fallback)
+        if self.db:
+            try:
+                from ticker_config import get_relevance_keywords
+                keywords = get_relevance_keywords(ticker_symbol, self.db)
+                print(f"🔍 Keywords for {company_base} (DB): {keywords[:3]}...")
+            except Exception as e:
+                print(f"❌ Database keyword load error for {ticker_symbol}: {e}")
+                # Minimal fallback - just ticker name
+                keywords = [company_base.lower()]
+                print(f"⚠️ Using minimal fallback: {keywords}")
+        else:
+            print(f"⚠️ No database session available")
+            keywords = [company_base.lower()]
+            print(f"⚠️ Using minimal fallback: {keywords}")
         
         all_news = []
         

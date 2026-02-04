@@ -24,7 +24,7 @@ from utils import fetch_price_data, fetch_dual_timeframe, display_dataframe_summ
 # Database imports (optional)
 try:
     from database import SessionLocal
-    from src.models import Signal as SignalModel, Ticker as TickerModel, SignalCalculation
+    from src.models import Signal, Ticker, SignalCalculation
     HAS_DATABASE = True
 except ImportError:
     HAS_DATABASE = False
@@ -51,9 +51,9 @@ def save_signal_to_db(signal: TradingSignal, db) -> Optional[int]:
     
     try:
         # 1. Get or create ticker
-        ticker = db.query(TickerModel).filter(TickerModel.symbol == signal.ticker_symbol).first()
+        ticker = db.query(Ticker).filter(Ticker.symbol == signal.ticker_symbol).first()
         if not ticker:
-            ticker = TickerModel(
+            ticker = Ticker(
                 symbol=signal.ticker_symbol,
                 name=signal.ticker_name,
                 is_active=True
@@ -62,7 +62,7 @@ def save_signal_to_db(signal: TradingSignal, db) -> Optional[int]:
             db.flush()  # Get ticker ID
         
         # 2. Create signal record
-        signal_record = SignalModel(
+        signal_record = Signal(
             ticker_id=ticker.id,
             ticker_symbol=signal.ticker_symbol,
             technical_indicator_id=signal.technical_indicator_id,

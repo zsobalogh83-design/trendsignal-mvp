@@ -1,9 +1,12 @@
 """
-Database models based on TrendSignal MVP specification
-SQLAlchemy ORM models for SQLite
+Database models - SIMPLIFIED VERSION
+NO relationships() - only ForeignKey constraints
+This prevents SQLAlchemy registry conflicts
+
+Version: 2.0 - Simplified
+Date: 2026-02-04
 """
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, BigInteger
-from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 
@@ -17,35 +20,42 @@ class Ticker(Base):
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String(10), unique=True, nullable=False, index=True)
     name = Column(String(100))
-    market = Column(String(20))  # 'BET', 'NYSE', 'NASDAQ'
+    market = Column(String(20))
     industry = Column(String(50))
     market_cap = Column(BigInteger)
-    priority = Column(String(10), default='medium')  # 'high', 'medium', 'low'
+    priority = Column(String(10), default='medium')
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
-    # Relationships
-    signals = relationship("Signal", back_populates="ticker", lazy="dynamic")
-    price_data = relationship("PriceData", back_populates="ticker", lazy="dynamic")
+    # Language & Localization
+    primary_language = Column(String(5), default='en')
+    sector = Column(String(50))
+    currency = Column(String(3))
+    
+    # Keywords (JSON arrays)
+    relevance_keywords = Column(Text)
+    sentiment_keywords_positive = Column(Text)
+    sentiment_keywords_negative = Column(Text)
+    
+    # News Sources
+    news_sources_preferred = Column(Text)
+    news_sources_blocked = Column(Text)
 
 
 class NewsSource(Base):
-    """News data sources (APIs, RSS feeds)"""
+    """News data sources"""
     __tablename__ = "news_sources"
     __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
-    type = Column(String(20))  # 'api', 'rss', 'scraper'
+    type = Column(String(20))
     url = Column(Text)
     credibility_weight = Column(Float, default=0.80)
     is_enabled = Column(Boolean, default=True)
     polling_frequency_hours = Column(Integer, default=2)
     created_at = Column(DateTime, server_default=func.now())
-    
-    # Relationships
-    news_items = relationship("NewsItem", back_populates="source", lazy="dynamic")
 
 
 class NewsItem(Base):
@@ -67,28 +77,20 @@ class NewsItem(Base):
     
     language = Column(String(10))
     
-    # Relevance
     is_relevant = Column(Boolean)
     relevance_score = Column(Float)
     
-    # Sentiment
-    sentiment_score = Column(Float)  # -1.00 to +1.00
+    sentiment_score = Column(Float)
     sentiment_confidence = Column(Float)
-    sentiment_label = Column(String(20))  # positive/neutral/negative
+    sentiment_label = Column(String(20))
     
-    # Duplicate handling
     is_duplicate = Column(Boolean, default=False)
     duplicate_of = Column(Integer, ForeignKey("news_items.id"), nullable=True)
     cluster_id = Column(String(50))
-    
-    # Relationships
-    source = relationship("NewsSource", back_populates="news_items", lazy="select")
-    categories = relationship("NewsCategory", back_populates="news_item", cascade="all, delete-orphan", lazy="dynamic")
-    tickers = relationship("NewsTicker", back_populates="news_item", cascade="all, delete-orphan", lazy="dynamic")
 
 
 class NewsTicker(Base):
-    """Many-to-many relationship between news and tickers"""
+    """Many-to-many: news <-> tickers"""
     __tablename__ = "news_tickers"
     __table_args__ = {'extend_existing': True}
     
@@ -96,14 +98,10 @@ class NewsTicker(Base):
     news_id = Column(Integer, ForeignKey("news_items.id", ondelete="CASCADE"), nullable=False)
     ticker_id = Column(Integer, ForeignKey("tickers.id", ondelete="CASCADE"), nullable=False)
     relevance_score = Column(Float)
-    
-    # Relationships
-    news_item = relationship("NewsItem", back_populates="tickers", lazy="select")
-    ticker = relationship("Ticker", lazy="select")
 
 
 class NewsCategory(Base):
-    """Categories for news items (multi-label)"""
+    """News categories"""
     __tablename__ = "news_categories"
     __table_args__ = {'extend_existing': True}
     
@@ -111,13 +109,10 @@ class NewsCategory(Base):
     news_id = Column(Integer, ForeignKey("news_items.id", ondelete="CASCADE"), nullable=False)
     category = Column(String(50), nullable=False)
     confidence = Column(Float)
-    
-    # Relationships
-    news_item = relationship("NewsItem", back_populates="categories", lazy="select")
 
 
 class PriceData(Base):
-    """Historical price data (OHLCV)"""
+    """Historical price data"""
     __tablename__ = "price_data"
     __table_args__ = {'extend_existing': True}
     
@@ -125,7 +120,7 @@ class PriceData(Base):
     ticker_id = Column(Integer, ForeignKey("tickers.id"))
     ticker_symbol = Column(String(10), nullable=False, index=True)
     timestamp = Column(DateTime, nullable=False, index=True)
-    interval = Column(String(5), nullable=False)  # '1m', '5m', '1h', '1d'
+    interval = Column(String(5), nullable=False)
     
     open = Column(Float, nullable=False)
     high = Column(Float, nullable=False)
@@ -137,9 +132,6 @@ class PriceData(Base):
     price_change_pct = Column(Float)
     
     fetched_at = Column(DateTime, server_default=func.now())
-    
-    # Relationships
-    ticker = relationship("Ticker", back_populates="price_data", lazy="select")
 
 
 class TechnicalIndicator(Base):
@@ -180,18 +172,11 @@ class TechnicalIndicator(Base):
     obv = Column(BigInteger)
     
     close_price = Column(Float)
-    
-    # Technical score breakdown (NEW)
-    technical_score = Column(Float)  # Final calculated technical score
-    technical_confidence = Column(Float)  # Confidence level
-    
-    # Score components (JSON string with detailed breakdown)
-    score_components = Column(Text)  # JSON: {sma_contribution, rsi_contribution, etc.}
+    technical_score = Column(Float)
+    technical_confidence = Column(Float)
+    score_components = Column(Text)
     
     calculated_at = Column(DateTime, server_default=func.now())
-    
-    # Relationships
-    signals = relationship("Signal", back_populates="technical_indicator", lazy="dynamic")
 
 
 class Signal(Base):
@@ -202,58 +187,43 @@ class Signal(Base):
     id = Column(Integer, primary_key=True, index=True)
     ticker_id = Column(Integer, ForeignKey("tickers.id"))
     ticker_symbol = Column(String(10), nullable=False, index=True)
-    
-    # Link to technical indicators snapshot
     technical_indicator_id = Column(Integer, ForeignKey("technical_indicators.id"), nullable=True)
     
-    # Decision
-    decision = Column(String(20), nullable=False)  # BUY/SELL/HOLD
-    strength = Column(String(20))  # STRONG/MODERATE/WEAK
+    decision = Column(String(20), nullable=False)
+    strength = Column(String(20))
     
-    # Scores
     combined_score = Column(Float)
     sentiment_score = Column(Float)
     technical_score = Column(Float)
     risk_score = Column(Float)
     
-    # Confidence
     overall_confidence = Column(Float)
     sentiment_confidence = Column(Float)
     technical_confidence = Column(Float)
     
-    # Entry/Exit levels
     entry_price = Column(Float)
     stop_loss = Column(Float)
     take_profit = Column(Float)
     risk_reward_ratio = Column(Float)
     
-    # Reasoning (JSON string)
     reasoning_json = Column(Text)
     
-    # Lifecycle
     status = Column(String(20), default='active', index=True)
     created_at = Column(DateTime, server_default=func.now(), index=True)
     expires_at = Column(DateTime)
-    
-    # Relationships
-    ticker = relationship("Ticker", back_populates="signals", lazy="select")
-    technical_indicator = relationship("TechnicalIndicator", back_populates="signals", lazy="select")
-    calculation = relationship("SignalCalculation", back_populates="signal", cascade="all, delete-orphan", lazy="select")  # ✅ uselist=True (default) for multiple audit records
 
 
 class SignalCalculation(Base):
-    """Optimized audit trail with key values as columns + detailed JSON"""
+    """Audit trail for signal calculations"""
     __tablename__ = "signal_calculations"
     __table_args__ = {'extend_existing': True}
     
     id = Column(Integer, primary_key=True, index=True)
-    signal_id = Column(Integer, ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, index=True)  # ✅ Removed UNIQUE
+    signal_id = Column(Integer, ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, index=True)
     ticker_symbol = Column(String(10), nullable=False, index=True)
-    calculated_at = Column(DateTime(timezone=False), nullable=False, index=True)  # ✅ Explicit DateTime with time component
+    calculated_at = Column(DateTime(timezone=False), nullable=False, index=True)
     
-    # ===== INPUT VALUES (frequently queried, indexed columns) =====
-    
-    # Price & Technical Indicators
+    # INPUT VALUES
     current_price = Column(Float, index=True)
     atr = Column(Float)
     atr_pct = Column(Float, index=True)
@@ -271,16 +241,12 @@ class SignalCalculation(Base):
     stoch_k = Column(Float)
     stoch_d = Column(Float)
     
-    # Risk Metrics
     volatility = Column(Float, index=True)
     nearest_support = Column(Float)
     nearest_resistance = Column(Float)
-    
-    # News
     news_count = Column(Integer, index=True)
     
-    # ===== SCORE VALUES (core calculations, indexed) =====
-    
+    # SCORE VALUES
     sentiment_score = Column(Float, index=True)
     sentiment_confidence = Column(Float, index=True)
     technical_score = Column(Float, index=True)
@@ -289,19 +255,16 @@ class SignalCalculation(Base):
     risk_confidence = Column(Float)
     combined_score = Column(Float, index=True)
     
-    # ===== CONFIGURATION WEIGHTS (at time of calculation) =====
-    
+    # CONFIGURATION
     weight_sentiment = Column(Float, index=True)
     weight_technical = Column(Float, index=True)
     weight_risk = Column(Float, index=True)
     
-    # Thresholds
     threshold_buy = Column(Float)
     threshold_sell = Column(Float)
     threshold_hold_zone = Column(Float)
     
-    # ===== TECHNICAL PARAMETERS (config at time of calculation) =====
-    
+    # TECHNICAL PARAMETERS
     config_rsi_oversold = Column(Float)
     config_rsi_overbought = Column(Float)
     config_adx_strong = Column(Float)
@@ -315,14 +278,12 @@ class SignalCalculation(Base):
     config_dbscan_order = Column(Integer)
     config_dbscan_lookback = Column(Integer)
     
-    # ===== RISK PARAMETERS (config at time of calculation) =====
-    
+    # RISK PARAMETERS
     config_risk_volatility_weight = Column(Float)
     config_risk_proximity_weight = Column(Float)
     config_risk_trend_strength_weight = Column(Float)
     
-    # ===== TECHNICAL COMPONENT WEIGHTS (config at time of calculation) =====
-    
+    # TECHNICAL COMPONENT WEIGHTS
     config_tech_sma_weight = Column(Float)
     config_tech_rsi_weight = Column(Float)
     config_tech_macd_weight = Column(Float)
@@ -330,45 +291,25 @@ class SignalCalculation(Base):
     config_tech_stochastic_weight = Column(Float)
     config_tech_volume_weight = Column(Float)
     
-    # ===== OUTPUT VALUES (final recommendations) =====
-    
-    decision = Column(String(20), index=True)  # BUY/SELL/HOLD
-    strength = Column(String(20))  # STRONG/MODERATE/WEAK/NEUTRAL
+    # OUTPUT VALUES
+    decision = Column(String(20), index=True)
+    strength = Column(String(20))
     entry_price = Column(Float)
     stop_loss = Column(Float)
     take_profit = Column(Float)
     risk_reward_ratio = Column(Float)
     
-    # ===== CONTRIBUTIONS (weighted scores) =====
-    
+    # CONTRIBUTIONS
     sentiment_contribution = Column(Float)
     technical_contribution = Column(Float)
     risk_contribution = Column(Float)
     
-    # ===== DETAILED JSON DATA (for full audit trail) =====
-    
-    # News details (array of news items with full metadata)
-    news_inputs = Column(Text)  # JSON: [{title, source, sentiment_score, published_at, time_decay, weight}, ...]
-    
-    # Config snapshot (complete configuration)
-    config_snapshot = Column(Text)  # JSON: {weights, thresholds, technical_params, risk_params}
-    
-    # Technical details (key signals, indicator breakdown)
-    technical_details = Column(Text)  # JSON: {key_signals: [...], components: {...}}
-    
-    # Risk details (component breakdown)
-    risk_details = Column(Text)  # JSON: {components: {volatility: {...}, proximity: {...}, trend_strength: {...}}}
-    
-    # Reasoning (full decision logic)
-    reasoning = Column(Text)  # JSON: {sentiment: {...}, technical: {...}, risk: {...}}
-    
-    # Entry/Exit calculation details
-    entry_exit_details = Column(Text)  # JSON: {stop_loss: {method, calculation}, take_profit: {method, calculation}}
-    
-    # ===== METADATA =====
+    # DETAILED JSON DATA
+    news_inputs = Column(Text)
+    config_snapshot = Column(Text)
+    technical_details = Column(Text)
+    risk_details = Column(Text)
+    reasoning = Column(Text)
+    entry_exit_details = Column(Text)
     
     calculation_duration_ms = Column(Integer)
-    
-    # Relationships
-    signal = relationship("Signal", back_populates="calculation", lazy="select")
-

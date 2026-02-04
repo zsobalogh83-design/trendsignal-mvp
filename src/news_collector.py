@@ -74,7 +74,7 @@ class NewsCollector:
         # Initialize Hungarian collector
         if HAS_HUNGARIAN:
             try:
-                self.hungarian_collector = HungarianNewsCollector(config)
+                self.hungarian_collector = HungarianNewsCollector(config, db=self.db)
             except Exception as e:
                 self.hungarian_collector = None
                 print(f"⚠️ Hungarian collector init failed: {e}")

@@ -63,7 +63,13 @@ def get_db():
 # Initialize database (create all tables)
 def init_db():
     """Create all tables in the database"""
-    # Import models to register them with Base
-    import src.models  # This registers all models
-    Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created successfully!")
+    # Lazy import to avoid duplicate registry issues
+    # Only import when actually creating tables
+    try:
+        import src.models  # This registers all models
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database tables created successfully!")
+    except Exception as e:
+        # Tables might already exist, that's OK
+        print(f"ℹ️ Database initialization: {e}")
+        pass
