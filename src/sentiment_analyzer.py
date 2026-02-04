@@ -43,9 +43,10 @@ class SentimentAnalyzer:
     Controlled by config.USE_FINBERT flag
     """
     
-    def __init__(self, config: Optional[TrendSignalConfig] = None, ticker_symbol: Optional[str] = None):
+    def __init__(self, config: Optional[TrendSignalConfig] = None, ticker_symbol: Optional[str] = None, db: Optional['Session'] = None):
         self.config = config or get_config()
         self.ticker_symbol = ticker_symbol
+        self.db = db  # 🆕 Database session for loading ticker keywords
         
         # Use FinBERT if available and enabled
         if USE_FINBERT and _SentimentEngine is not None:
@@ -116,13 +117,16 @@ class SentimentAnalyzer:
         
         # Add ticker-specific keywords if provided
         if ticker_symbol:
-            try:
-                from ticker_keywords import get_sentiment_boost_keywords
-                ticker_sentiment = get_sentiment_boost_keywords(ticker_symbol)
-                positive_keywords.extend(ticker_sentiment.get('positive', []))
-                negative_keywords.extend(ticker_sentiment.get('negative', []))
-            except ImportError:
-                pass  # ticker_keywords not available, use base keywords
+            # 🆕 Database-driven keyword loading (no fallback)
+            if self.db:
+                try:
+                    from ticker_config import get_sentiment_keywords
+                    ticker_sentiment = get_sentiment_keywords(ticker_symbol, self.db)
+                    positive_keywords.extend(ticker_sentiment.get('positive', []))
+                    negative_keywords.extend(ticker_sentiment.get('negative', []))
+                except Exception as e:
+                    print(f"⚠️ Ticker keyword load failed for {ticker_symbol}: {e}")
+                    # Continue with base keywords only
         
         pos_count = sum(1 for kw in positive_keywords if kw in text_lower)
         neg_count = sum(1 for kw in negative_keywords if kw in text_lower)
