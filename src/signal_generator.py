@@ -226,9 +226,8 @@ class SignalGenerator:
         
         # ===== PRELIMINARY DECISION (for entry/exit calculation) =====
         # Need basic decision to know if BUY or SELL for stop-loss calculation
-        # HOLD zone: -15 to +15 (neutral/no clear trend)
-        # TODO: Make HOLD_ZONE_THRESHOLD configurable in Phase 2
-        HOLD_ZONE_THRESHOLD = 15
+        # HOLD zone threshold (configurable)
+        HOLD_ZONE_THRESHOLD = self.config.hold_zone_threshold
         
         if combined_score >= HOLD_ZONE_THRESHOLD:
             preliminary_decision = "BUY"
@@ -359,7 +358,7 @@ class SignalGenerator:
                 "thresholds": {
                     "buy": getattr(self.config, 'BUY_THRESHOLD', getattr(self.config, 'moderate_buy_score', 50)),
                     "sell": getattr(self.config, 'SELL_THRESHOLD', getattr(self.config, 'moderate_sell_score', -50)),
-                    "hold_zone": getattr(self.config, 'HOLD_ZONE_THRESHOLD', 15)
+                    "hold_zone": getattr(self.config, 'hold_zone_threshold', 15)
                 },
                 "technical_params": {
                     "rsi_oversold": getattr(self.config, 'rsi_oversold_threshold', 30),
@@ -475,8 +474,8 @@ class SignalGenerator:
         elif combined_score <= moderate_sell_score and confidence >= moderate_sell_conf:
             base_decision, base_strength = "SELL", "MODERATE"
         else:
-            # WEAK BUY/SELL or HOLD zone (-15 to +15)
-            HOLD_ZONE = 15  # Same as preliminary_decision threshold
+            # WEAK BUY/SELL or HOLD zone
+            HOLD_ZONE = self.config.hold_zone_threshold
             
             if combined_score >= HOLD_ZONE and combined_score < moderate_buy_score:
                 base_decision, base_strength = "BUY", "WEAK"
@@ -1888,12 +1887,20 @@ def calculate_risk_score(
     swing_sr: Optional[Dict] = None
 ) -> Dict:
     """
-    Calculate multi-component risk score
+    Calculate multi-component risk score with CONTINUOUS SCALING
     
-    Components:
+    Components (with continuous linear interpolation):
     1. Volatility (ATR) - 40% weight
-    2. S/R Proximity - 35% weight  
+       - Range: 1.5% (very low, +0.8) → 7.0% (very high, -0.8)
+       - Categories: Very Low → Low → Moderate → High → Very High
+    
+    2. S/R Proximity - 35% weight
+       - Range: <1% (very close, -0.8) → >10% (excellent, +0.8)
+       - Categories: Very Close → Close → Neutral → Good → Safe
+    
     3. Trend Strength (ADX) - 25% weight
+       - Range: <15 (very weak, -0.8) → >40 (very strong, +0.8)
+       - Categories: Very Weak → Weak → Moderate → Strong → Very Strong
     
     Args:
         technical_data: Technical indicators
@@ -1902,7 +1909,8 @@ def calculate_risk_score(
                   Format: {'support': [{'price': X, 'distance_pct': Y}], 'resistance': [...]}
                   If provided, prioritized over intraday S/R
     
-    Returns risk score in range -50 to +50 (not -100 to +100!)
+    Returns:
+        Dict with risk score (clamped -100 to +100), confidence, and components
     """
     try:
         atr_pct = technical_data.get("atr_pct", 2.0)
@@ -1943,51 +1951,98 @@ def calculate_risk_score(
             nearest_resistance = current_price * 1.03
         
         # ===== 1. VOLATILITY RISK (ATR-based) - 40% =====
-        if atr_pct < 2.0:
-            volatility_risk = +0.5  # Low volatility = low risk
+        # 🆕 Continuous scaling: 1.5% (very low) → 7.0% (very high)
+        if atr_pct < 1.5:
+            volatility_risk = +0.8  # Very low volatility = very low risk
+            vol_status = f"🟢 Very Low Vol"
+            vol_confidence = 0.95
+        elif atr_pct < 2.5:
+            # Linear interpolation: 1.5% → +0.8, 2.5% → +0.4
+            volatility_risk = 0.8 - ((atr_pct - 1.5) / 1.0) * 0.4
             vol_status = f"🟢 Low Vol"
             vol_confidence = 0.90
-        elif atr_pct < 4.0:
-            volatility_risk = 0.0   # Moderate
+        elif atr_pct < 3.5:
+            # Linear interpolation: 2.5% → +0.4, 3.5% → 0.0
+            volatility_risk = 0.4 - ((atr_pct - 2.5) / 1.0) * 0.4
             vol_status = f"⚪ Moderate Vol"
             vol_confidence = 0.75
+        elif atr_pct < 5.0:
+            # Linear interpolation: 3.5% → 0.0, 5.0% → -0.4
+            volatility_risk = 0.0 - ((atr_pct - 3.5) / 1.5) * 0.4
+            vol_status = f"🟡 High Vol"
+            vol_confidence = 0.65
         else:
-            volatility_risk = -0.5  # High volatility = high risk
-            vol_status = f"🔴 High Vol"
-            vol_confidence = 0.60
+            # Linear scaling beyond 5%: 5% → -0.4, 7% → -0.8
+            volatility_risk = max(-0.8, -0.4 - ((atr_pct - 5.0) / 2.0) * 0.4)
+            vol_status = f"🔴 Very High Vol"
+            vol_confidence = 0.50
         
         # ===== 2. S/R PROXIMITY RISK - 35% =====
         support_dist_pct = ((current_price - nearest_support) / current_price) * 100
         resistance_dist_pct = ((nearest_resistance - current_price) / current_price) * 100
         min_distance = min(abs(support_dist_pct), abs(resistance_dist_pct))
         
-        if support_dist_pct > 2.0 and resistance_dist_pct > 2.0:
-            proximity_risk = +0.5   # Safe zone (buffer on both sides)
-            proximity_status = f"🟢 Safe Zone"
-            proximity_confidence = 0.85
-        elif min_distance < 1.0:
-            proximity_risk = -0.3   # Too close to S or R
-            proximity_status = f"⚠️ Too Close"
+        # 🆕 Continuous scaling based on minimum distance to S/R
+        if min_distance < 1.0:
+            # Very close to S/R (< 1%)
+            proximity_risk = -0.8
+            proximity_status = f"🔴 Very Close"
+            proximity_confidence = 0.35
+        elif min_distance < 2.0:
+            # Linear interpolation: 1% → -0.8, 2% → -0.4
+            proximity_risk = -0.8 + ((min_distance - 1.0) / 1.0) * 0.4
+            proximity_status = f"🟡 Close"
             proximity_confidence = 0.45
-        else:
-            proximity_risk = 0.0    # Neutral
+        elif min_distance < 4.0:
+            # Linear interpolation: 2% → -0.4, 4% → 0.0
+            proximity_risk = -0.4 + ((min_distance - 2.0) / 2.0) * 0.4
             proximity_status = f"⚪ Neutral"
             proximity_confidence = 0.65
+        elif min_distance < 6.0:
+            # Linear interpolation: 4% → 0.0, 6% → +0.4
+            proximity_risk = 0.0 + ((min_distance - 4.0) / 2.0) * 0.4
+            proximity_status = f"🟢 Good Zone"
+            proximity_confidence = 0.80
+        else:
+            # Excellent zone (> 6% from S/R)
+            # Linear interpolation: 6% → +0.4, 10% → +0.8
+            proximity_risk = min(0.8, 0.4 + ((min_distance - 6.0) / 4.0) * 0.4)
+            proximity_status = f"🟢 Safe Zone"
+            proximity_confidence = 0.85
         
         # ===== 3. TREND STRENGTH (ADX) - 25% =====
         if adx is not None:
-            if adx > 25:
-                trend_risk = +0.4   # Strong trend = lower risk (trend continuation likely)
+            # 🆕 Continuous scaling based on ADX
+            if adx > 40:
+                # Very strong trend (ADX > 40)
+                trend_risk = +0.8
+                trend_status = f"🟢 Very Strong Trend (ADX: {adx:.1f})"
+                trend_confidence = 0.95
+            elif adx > 30:
+                # Linear interpolation: 30 → +0.5, 40 → +0.8
+                trend_risk = 0.5 + ((adx - 30) / 10) * 0.3
                 trend_status = f"🟢 Strong Trend (ADX: {adx:.1f})"
                 trend_confidence = 0.85
+            elif adx > 25:
+                # Linear interpolation: 25 → +0.3, 30 → +0.5
+                trend_risk = 0.3 + ((adx - 25) / 5) * 0.2
+                trend_status = f"🟢 Strong Trend (ADX: {adx:.1f})"
+                trend_confidence = 0.80
             elif adx > 20:
-                trend_risk = +0.2   # Moderate trend
+                # Linear interpolation: 20 → 0.0, 25 → +0.3
+                trend_risk = 0.0 + ((adx - 20) / 5) * 0.3
                 trend_status = f"⚪ Moderate Trend (ADX: {adx:.1f})"
                 trend_confidence = 0.70
+            elif adx > 15:
+                # Linear interpolation: 15 → -0.3, 20 → 0.0
+                trend_risk = -0.3 + ((adx - 15) / 5) * 0.3
+                trend_status = f"🟡 Weak Trend (ADX: {adx:.1f})"
+                trend_confidence = 0.60
             else:
-                trend_risk = -0.2   # Weak trend = higher risk (choppy market)
-                trend_status = f"🔴 Weak Trend (ADX: {adx:.1f})"
-                trend_confidence = 0.55
+                # Very weak trend (ADX < 15)
+                trend_risk = max(-0.8, -0.3 - ((15 - adx) / 10) * 0.5)
+                trend_status = f"🔴 Very Weak Trend (ADX: {adx:.1f})"
+                trend_confidence = 0.50
         else:
             # No ADX data - neutral
             trend_risk = 0.0
