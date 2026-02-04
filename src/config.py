@@ -70,6 +70,9 @@ RISK_WEIGHT = 0.10       # 10% - Risk management
 # DECISION THRESHOLDS
 # ==========================================
 
+# HOLD Zone
+HOLD_ZONE_THRESHOLD = 15  # ±15 = neutral zone where no BUY/SELL signal is generated
+
 # Strong signals
 STRONG_BUY_SCORE = 65
 STRONG_BUY_CONFIDENCE = 0.75
@@ -279,6 +282,7 @@ def save_config_to_file(config_instance):
             "TECHNICAL_WEIGHT": config_instance.technical_weight,
             "RISK_WEIGHT": config_instance.risk_weight,
             # Thresholds
+            "HOLD_ZONE_THRESHOLD": config_instance.hold_zone_threshold,
             "STRONG_BUY_SCORE": config_instance.strong_buy_score,
             "STRONG_BUY_CONFIDENCE": config_instance.strong_buy_confidence,
             "MODERATE_BUY_SCORE": config_instance.moderate_buy_score,
@@ -429,6 +433,8 @@ class TrendSignalConfig:
     risk_weight: float = RISK_WEIGHT
     
     # Decision thresholds
+    hold_zone_threshold: int = HOLD_ZONE_THRESHOLD
+    
     strong_buy_score: int = STRONG_BUY_SCORE
     strong_buy_confidence: float = STRONG_BUY_CONFIDENCE
     moderate_buy_score: int = MODERATE_BUY_SCORE
@@ -539,6 +545,8 @@ class TrendSignalConfig:
             self.sentiment_weight = saved_config.get("SENTIMENT_WEIGHT", SENTIMENT_WEIGHT)
             self.technical_weight = saved_config.get("TECHNICAL_WEIGHT", TECHNICAL_WEIGHT)
             self.risk_weight = saved_config.get("RISK_WEIGHT", RISK_WEIGHT)
+            # Decision thresholds
+            self.hold_zone_threshold = saved_config.get("HOLD_ZONE_THRESHOLD", HOLD_ZONE_THRESHOLD)
             self.strong_buy_score = saved_config.get("STRONG_BUY_SCORE", STRONG_BUY_SCORE)
             self.strong_buy_confidence = saved_config.get("STRONG_BUY_CONFIDENCE", STRONG_BUY_CONFIDENCE)
             self.moderate_buy_score = saved_config.get("MODERATE_BUY_SCORE", MODERATE_BUY_SCORE)
@@ -719,6 +727,8 @@ class TrendSignalConfig:
             self.sentiment_weight = saved_config.get("SENTIMENT_WEIGHT", SENTIMENT_WEIGHT)
             self.technical_weight = saved_config.get("TECHNICAL_WEIGHT", TECHNICAL_WEIGHT)
             self.risk_weight = saved_config.get("RISK_WEIGHT", RISK_WEIGHT)
+            # Decision thresholds
+            self.hold_zone_threshold = saved_config.get("HOLD_ZONE_THRESHOLD", HOLD_ZONE_THRESHOLD)
             self.strong_buy_score = saved_config.get("STRONG_BUY_SCORE", STRONG_BUY_SCORE)
             self.strong_buy_confidence = saved_config.get("STRONG_BUY_CONFIDENCE", STRONG_BUY_CONFIDENCE)
             self.moderate_buy_score = saved_config.get("MODERATE_BUY_SCORE", MODERATE_BUY_SCORE)
