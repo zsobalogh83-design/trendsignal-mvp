@@ -212,6 +212,36 @@ NEWS_MAX_AGE_HOURS = 24  # Maximum age for sentiment calculation
 
 
 # ==========================================
+# 🆕 SCHEDULER CONFIGURATION (Trading Hours)
+# ==========================================
+
+# Signal refresh interval (minutes)
+SIGNAL_REFRESH_INTERVAL = 15  # Run every 15 minutes during market hours
+
+# BÉT (Budapest Stock Exchange) - CET/CEST
+BET_MARKET_OPEN = "09:00"      # 9:00 AM CET/CEST
+BET_MARKET_CLOSE = "17:00"     # 5:00 PM CET/CEST
+BET_TIMEZONE = "Europe/Budapest"
+BET_TICKERS = ["MOL.BD", "OTP.BD"]
+
+# US Markets (NYSE/NASDAQ) - ET
+US_MARKET_OPEN = "09:30"       # 9:30 AM ET
+US_MARKET_CLOSE = "16:00"      # 4:00 PM ET (market close)
+US_TIMEZONE = "America/New_York"
+US_TICKERS = ["AAPL", "TSLA", "MSFT", "NVDA"]
+
+# Combined ticker list for batch processing
+ALL_TICKERS = [
+    {'symbol': 'MOL.BD', 'name': 'MOL Hungarian Oil and Gas', 'market': 'BET'},
+    {'symbol': 'OTP.BD', 'name': 'OTP Bank', 'market': 'BET'},
+    {'symbol': 'AAPL', 'name': 'Apple Inc.', 'market': 'US'},
+    {'symbol': 'TSLA', 'name': 'Tesla Inc.', 'market': 'US'},
+    {'symbol': 'MSFT', 'name': 'Microsoft Corporation', 'market': 'US'},
+    {'symbol': 'NVDA', 'name': 'NVIDIA Corporation', 'market': 'US'},
+]
+
+
+# ==========================================
 # PRICE DATA
 # ==========================================
 
@@ -485,6 +515,19 @@ class TrendSignalConfig:
     sr_dbscan_min_samples: int = SR_DBSCAN_MIN_SAMPLES
     sr_dbscan_order: int = SR_DBSCAN_ORDER
     sr_dbscan_lookback: int = SR_DBSCAN_LOOKBACK
+    
+    # 🆕 Scheduler settings
+    signal_refresh_interval: int = SIGNAL_REFRESH_INTERVAL
+    bet_market_open: str = BET_MARKET_OPEN
+    bet_market_close: str = BET_MARKET_CLOSE
+    bet_timezone: str = BET_TIMEZONE
+    bet_tickers: list = None
+    us_market_open: str = US_MARKET_OPEN
+    us_market_close: str = US_MARKET_CLOSE
+    us_timezone: str = US_TIMEZONE
+    us_tickers: list = None
+    all_tickers: list = None
+    
     # Legacy compatibility
     risk_reward_ratio: float = RISK_REWARD_RATIO
     
@@ -584,6 +627,16 @@ class TrendSignalConfig:
                 'slow': self.macd_slow,
                 'signal': self.macd_signal
             }
+        
+        # 🆕 Initialize scheduler ticker lists
+        if self.bet_tickers is None:
+            self.bet_tickers = BET_TICKERS.copy()
+        
+        if self.us_tickers is None:
+            self.us_tickers = US_TICKERS.copy()
+        
+        if self.all_tickers is None:
+            self.all_tickers = ALL_TICKERS.copy()
         
         # ===== AUTO-MIGRATION: Save new parameters to file =====
         # Check if saved_config is missing any of the new parameters
@@ -791,6 +844,12 @@ class TrendSignalConfig:
         print(f"  SMA: {self.sma_periods['short']}, {self.sma_periods['medium']}, {self.sma_periods['long']}")
         print(f"  MACD: ({self.macd_params['fast']}, {self.macd_params['slow']}, {self.macd_params['signal']})")
         print(f"  RSI: {self.rsi_period}")
+        print()
+        
+        print("⏰ Scheduler Settings:")
+        print(f"  Refresh Interval: {self.signal_refresh_interval} minutes")
+        print(f"  BÉT Hours: {self.bet_market_open}-{self.bet_market_close} {self.bet_timezone}")
+        print(f"  US Hours:  {self.us_market_open}-{self.us_market_close} {self.us_timezone}")
         print()
         
         print("=" * 60)
