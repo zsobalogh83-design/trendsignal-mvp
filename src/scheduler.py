@@ -7,6 +7,7 @@ Date: 2025-02-04
 """
 
 import sys
+import os  # 🆕 HIÁNYZOTT!
 from pathlib import Path
 from datetime import datetime, time
 from typing import List
