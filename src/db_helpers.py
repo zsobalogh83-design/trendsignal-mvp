@@ -192,7 +192,14 @@ def get_price_data_from_db(
     db: Session
 ) -> Optional['pd.DataFrame']:
     """
-    Retrieve price data from database
+    Retrieve price data from database with FRESHNESS CHECK
+    
+    Cache is considered STALE if:
+    - Last candle is older than expected for the interval
+    - 5m: 10 minutes stale
+    - 15m: 20 minutes stale  
+    - 1h: 90 minutes stale
+    - 1d: 1 day stale
     
     Args:
         ticker_symbol: Stock ticker symbol
@@ -201,7 +208,7 @@ def get_price_data_from_db(
         db: Database session
     
     Returns:
-        DataFrame with OHLCV data or None if not found
+        DataFrame with OHLCV data or None if not found/stale
     """
     try:
         import pandas as pd
@@ -224,6 +231,32 @@ def get_price_data_from_db(
         
         if not price_records:
             return None
+        
+        # ✅ FRESHNESS CHECK: Is the latest candle recent enough?
+        latest_timestamp = price_records[-1].timestamp
+        now = datetime.now(timezone.utc)
+        
+        # Make latest_timestamp timezone-aware if needed
+        if latest_timestamp.tzinfo is None:
+            latest_timestamp = latest_timestamp.replace(tzinfo=timezone.utc)
+        
+        age_minutes = (now - latest_timestamp).total_seconds() / 60
+        
+        # Define staleness thresholds by interval
+        staleness_threshold = {
+            '5m': 10,   # 10 minutes for 5m candles
+            '15m': 20,  # 20 minutes for 15m candles
+            '1h': 90,   # 90 minutes for 1h candles
+            '1d': 1440  # 1 day for daily candles
+        }
+        
+        max_age = staleness_threshold.get(interval, 30)
+        
+        if age_minutes > max_age:
+            print(f"🔄 Cache STALE for {ticker_symbol} ({interval}): latest={latest_timestamp}, age={age_minutes:.1f}min > {max_age}min")
+            return None  # Cache is stale, force refresh
+        
+        print(f"✅ Cache FRESH for {ticker_symbol} ({interval}): latest={latest_timestamp}, age={age_minutes:.1f}min")
         
         # Convert to DataFrame
         data = {
@@ -255,7 +288,7 @@ def save_price_data_to_db(
     db: Session
 ) -> bool:
     """
-    Save price data to database
+    Save price data to database with proper UTC timezone handling
     
     Args:
         df: DataFrame with OHLCV data (yfinance format)
@@ -285,6 +318,14 @@ def save_price_data_to_db(
         updated_count = 0
         
         for timestamp, row in df.iterrows():
+            # ✅ CRITICAL: Ensure timestamp is UTC
+            if timestamp.tzinfo is None:
+                # Naive timestamp, assume UTC
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            elif timestamp.tzinfo != timezone.utc:
+                # Convert to UTC
+                timestamp = timestamp.astimezone(timezone.utc)
+            
             # Check if record already exists
             existing = db.query(PriceData).filter(
                 PriceData.ticker_id == ticker.id,
@@ -307,7 +348,7 @@ def save_price_data_to_db(
                     ticker_id=ticker.id,
                     ticker_symbol=ticker_symbol,  # ✅ FIX: Add ticker_symbol
                     interval=interval,
-                    timestamp=timestamp,
+                    timestamp=timestamp,  # ✅ Already UTC
                     open=float(row['Open']),
                     high=float(row['High']),
                     low=float(row['Low']),
@@ -337,23 +378,42 @@ def save_technical_indicators_to_db(
     interval: str,
     timestamp: datetime,
     indicators: dict,
-    db: Session
+    db: Session,
+    technical_score: Optional[float] = None,
+    technical_confidence: Optional[float] = None,
+    score_components: Optional[str] = None
 ) -> Optional[int]:
     """
-    Save technical indicators to database
+    Save technical indicators to database with proper UTC timezone handling
     
     Args:
         ticker_symbol: Stock ticker symbol
         interval: Candle interval ('5m', '15m', '1h', '1d')
-        timestamp: Timestamp of the indicators
+        timestamp: Timestamp of the indicators (any timezone)
         indicators: Dictionary with indicator values
         db: Database session
+        technical_score: Optional technical score
+        technical_confidence: Optional confidence score
+        score_components: Optional JSON string or dict with score components
     
     Returns:
         Record ID if saved successfully, None otherwise
     """
     try:
         from src.models import TechnicalIndicator
+        import json
+        
+        # ✅ CRITICAL: Ensure timestamp is UTC
+        if timestamp.tzinfo is None:
+            # Naive timestamp, assume UTC
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        elif timestamp.tzinfo != timezone.utc:
+            # Convert to UTC
+            timestamp = timestamp.astimezone(timezone.utc)
+        
+        # ✅ FIX: Convert score_components dict to JSON string
+        if score_components is not None and isinstance(score_components, dict):
+            score_components = json.dumps(score_components)
         
         # Check if record already exists (TechnicalIndicator uses ticker_symbol directly)
         existing = db.query(TechnicalIndicator).filter(
@@ -382,7 +442,10 @@ def save_technical_indicators_to_db(
             existing.stoch_d = indicators.get('stoch_d')
             existing.obv = indicators.get('obv')
             existing.cci = indicators.get('cci')
-            existing.close_price = indicators.get('close')
+            existing.close_price = indicators.get('close_price')
+            existing.technical_score = technical_score
+            existing.technical_confidence = technical_confidence
+            existing.score_components = score_components
             
             db.commit()
             return existing.id
@@ -391,7 +454,7 @@ def save_technical_indicators_to_db(
             tech_record = TechnicalIndicator(
                 ticker_symbol=ticker_symbol,  # ✅ Use ticker_symbol directly
                 interval=interval,
-                timestamp=timestamp,
+                timestamp=timestamp,  # ✅ Already UTC
                 sma_20=indicators.get('sma_20'),
                 sma_50=indicators.get('sma_50'),
                 sma_200=indicators.get('sma_200'),
@@ -410,7 +473,10 @@ def save_technical_indicators_to_db(
                 stoch_d=indicators.get('stoch_d'),
                 obv=indicators.get('obv'),
                 cci=indicators.get('cci'),
-                close_price=indicators.get('close')
+                close_price=indicators.get('close_price'),
+                technical_score=technical_score,
+                technical_confidence=technical_confidence,
+                score_components=score_components  # ✅ Now a JSON string
             )
             
             db.add(tech_record)
