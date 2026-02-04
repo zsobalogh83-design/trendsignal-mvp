@@ -1,9 +1,10 @@
 """
-TrendSignal MVP - Complete Working API with Database Integration
+TrendSignal MVP - Complete Working API with Database Integration and Scheduler
 All endpoints functional with SQLite persistence
 No duplicate endpoints - signals handled by signals_api router
 
 FIXED: CORS + Host settings for proper frontend connection
+🆕 SCHEDULER: Automated signal generation every 15 minutes during market hours
 """
 
 from fastapi import FastAPI, HTTPException, Depends
@@ -11,13 +12,29 @@ from sqlalchemy.orm import Session
 from config_api import router as config_router
 from signals_api import router as signals_router
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from typing import Optional
 import sys
 import os
 import json
+import logging
+
+# APScheduler imports
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 sys.path.insert(0, os.path.dirname(__file__))
 from main import get_config
+
+# Import scheduler functions
+from scheduler import generate_signals_for_active_markets
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Database imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -35,8 +52,71 @@ except Exception as e:
 
 # Global
 news_collector = None
+scheduler = None  # 🆕 APScheduler instance
 
-app = FastAPI(title="TrendSignal API", version="0.1.0")
+
+# ==========================================
+# LIFECYCLE MANAGEMENT
+# ==========================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan event handler
+    Manages scheduler startup and shutdown
+    """
+    global scheduler, news_collector
+    
+    # STARTUP
+    logger.info("🚀 TrendSignal API starting up...")
+    logger.info("📊 Database connection established")
+    
+    config = get_config()
+    
+    # Initialize NewsCollector
+    if HAS_NEWS_COLLECTOR:
+        try:
+            news_collector = NewsCollector(config)
+            logger.info("✅ NewsCollector initialized (English + Hungarian)")
+        except Exception as e:
+            logger.warning(f"⚠️ NewsCollector init failed: {e}")
+    
+    # Initialize APScheduler
+    scheduler = AsyncIOScheduler()
+    
+    # Schedule signal generation every 15 minutes
+    # This runs during trading hours only (checked inside the function)
+    scheduler.add_job(
+        generate_signals_for_active_markets,
+        trigger=CronTrigger(minute=f"*/{config.signal_refresh_interval}"),  # Every 15 minutes
+        id='signal_refresh',
+        name='Automated Signal Generation',
+        replace_existing=True,
+        max_instances=1  # Prevent overlapping runs
+    )
+    
+    # Start scheduler
+    scheduler.start()
+    logger.info(f"⏰ Scheduler started - Signal refresh every {config.signal_refresh_interval} minutes")
+    logger.info(f"   BÉT Hours: {config.bet_market_open}-{config.bet_market_close} {config.bet_timezone}")
+    logger.info(f"   US Hours:  {config.us_market_open}-{config.us_market_close} {config.us_timezone}")
+    
+    yield  # Application runs here
+    
+    # SHUTDOWN
+    logger.info("🛑 TrendSignal API shutting down...")
+    
+    # Shutdown scheduler
+    if scheduler:
+        scheduler.shutdown(wait=True)
+        logger.info("⏰ Scheduler stopped")
+
+
+app = FastAPI(
+    title="TrendSignal API", 
+    version="0.1.0",
+    lifespan=lifespan  # 🆕 Use lifespan for startup/shutdown
+)
 
 # Include routers (signals_api handles /api/v1/signals/*)
 app.include_router(config_router)
@@ -59,27 +139,13 @@ app.add_middleware(
     allow_headers=["*"],              # Allow all headers
 )
 
-@app.on_event("startup")
-async def startup_event():
-    global news_collector
-    print("🚀 TrendSignal FastAPI started!")
-    print("📊 Database connection established")
-    
-    config = get_config()
-    
-    if HAS_NEWS_COLLECTOR:
-        try:
-            news_collector = NewsCollector(config)
-            print("✅ NewsCollector initialized (English + Hungarian)")
-        except Exception as e:
-            print(f"⚠️ NewsCollector init failed: {e}")
-
 @app.get("/")
 async def root():
     return {
         "status": "ok",
         "version": "0.1.0",
-        "database": "connected"
+        "database": "connected",
+        "scheduler_status": "active" if scheduler and scheduler.running else "inactive"
     }
 
 @app.get("/api/v1/tickers")
@@ -174,6 +240,56 @@ async def database_status(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint with scheduler status"""
+    config = get_config()
+    
+    return {
+        "status": "healthy",
+        "scheduler": {
+            "running": scheduler.running if scheduler else False,
+            "refresh_interval": f"{config.signal_refresh_interval} minutes",
+            "next_run": str(scheduler.get_jobs()[0].next_run_time) if scheduler and scheduler.get_jobs() else None
+        },
+        "markets": {
+            "bet": {
+                "hours": f"{config.bet_market_open}-{config.bet_market_close}",
+                "timezone": config.bet_timezone,
+                "tickers": config.bet_tickers
+            },
+            "us": {
+                "hours": f"{config.us_market_open}-{config.us_market_close}",
+                "timezone": config.us_timezone,
+                "tickers": config.us_tickers
+            }
+        }
+    }
+
+
+@app.get("/scheduler/status")
+async def scheduler_status():
+    """Get scheduler status and next run times"""
+    if not scheduler:
+        return {"error": "Scheduler not initialized"}
+    
+    jobs = scheduler.get_jobs()
+    
+    return {
+        "running": scheduler.running,
+        "jobs": [
+            {
+                "id": job.id,
+                "name": job.name,
+                "next_run": str(job.next_run_time),
+                "trigger": str(job.trigger)
+            }
+            for job in jobs
+        ]
+    }
+
+
 # ==========================================
 # MAIN ENTRY POINT - FIXED HOST SETTING
 # ==========================================
@@ -182,6 +298,7 @@ if __name__ == "__main__":
     print("🚀 Starting TrendSignal API server...")
     print("📊 Database: SQLite")
     print("🔗 Signals API: Integrated via signals_api router")
+    print("⏰ Scheduler: Auto signal refresh every 15 minutes")
     print("=" * 60)
     print("🌐 Server starting on: http://127.0.0.1:8000")
     print("📖 API Documentation: http://127.0.0.1:8000/docs")

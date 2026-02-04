@@ -159,6 +159,13 @@ class GenerateSignalsResponse(BaseModel):
     saved: int
     tickers_processed: List[str]
 
+class SchedulerStatusResponse(BaseModel):
+    """Response model for scheduler status"""
+    status: str
+    message: str
+    signals_generated: Optional[int] = None
+    tickers: Optional[List[str]] = None
+
 
 # ===== ENDPOINTS =====
 
@@ -336,6 +343,41 @@ async def refresh_signals(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to refresh signals: {str(e)}"
+        )
+
+
+@router.post("/trigger-scheduled", response_model=SchedulerStatusResponse)
+async def trigger_scheduled_refresh():
+    """
+    🆕 Manual trigger for scheduled signal refresh
+    
+    Generates signals only for markets that are currently open:
+    - BÉT tickers during Budapest market hours (9:00-17:00 CET)
+    - US tickers during NYSE/NASDAQ hours (9:30-16:00 ET)
+    
+    Returns:
+        Status and count of generated signals
+    """
+    try:
+        from scheduler import trigger_signal_refresh_now
+        
+        logger.info("🔘 Manual scheduled refresh triggered via API")
+        
+        # Call scheduler function (checks market hours automatically)
+        result = trigger_signal_refresh_now()
+        
+        return SchedulerStatusResponse(
+            status=result['status'],
+            message=result['message'],
+            signals_generated=result.get('signals_generated'),
+            tickers=result.get('tickers')
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error in scheduled refresh: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to trigger scheduled refresh: {str(e)}"
         )
 
 
