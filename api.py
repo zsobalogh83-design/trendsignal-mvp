@@ -5,12 +5,14 @@ No duplicate endpoints - signals handled by signals_api router
 
 FIXED: CORS + Host settings for proper frontend connection
 🆕 SCHEDULER: Automated signal generation every 15 minutes during market hours
+🆕 TICKERS: Full CRUD via tickers_api router
 """
 
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy.orm import Session
 from config_api import router as config_router
 from signals_api import router as signals_router
+from tickers_api import router as tickers_router  # ✅ NEW: Ticker management
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -118,9 +120,10 @@ app = FastAPI(
     lifespan=lifespan  # 🆕 Use lifespan for startup/shutdown
 )
 
-# Include routers (signals_api handles /api/v1/signals/*)
+# Include routers
 app.include_router(config_router)
 app.include_router(signals_router)
+app.include_router(tickers_router)  # ✅ NEW: Ticker CRUD endpoints
 
 # ==========================================
 # CORS CONFIGURATION - CRITICAL FOR FRONTEND
@@ -148,28 +151,7 @@ async def root():
         "scheduler_status": "active" if scheduler and scheduler.running else "inactive"
     }
 
-@app.get("/api/v1/tickers")
-async def get_tickers(db: Session = Depends(get_db)):
-    """Get all active tickers from database"""
-    try:
-        tickers = db.query(Ticker).filter(Ticker.is_active == True).all()
-        
-        return {
-            "tickers": [
-                {
-                    "id": ticker.id,
-                    "symbol": ticker.symbol,
-                    "name": ticker.name,
-                    "market": ticker.market,
-                    "priority": ticker.priority,
-                    "is_active": ticker.is_active
-                }
-                for ticker in tickers
-            ],
-            "total": len(tickers)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# ✅ OLD /api/v1/tickers endpoint REMOVED - now handled by tickers_router
 
 @app.get("/api/v1/news")
 async def get_news(
@@ -298,6 +280,7 @@ if __name__ == "__main__":
     print("🚀 Starting TrendSignal API server...")
     print("📊 Database: SQLite")
     print("🔗 Signals API: Integrated via signals_api router")
+    print("📊 Tickers API: Integrated via tickers_api router")  # ✅ NEW
     print("⏰ Scheduler: Auto signal refresh every 15 minutes")
     print("=" * 60)
     print("🌐 Server starting on: http://127.0.0.1:8000")

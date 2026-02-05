@@ -1,5 +1,6 @@
 import type {
   Ticker,
+  TickerUpdate,
   NewsItem,
   SentimentSnapshot,
   TechnicalIndicators,
@@ -61,8 +62,12 @@ class ApiClient {
     return response.json();
   }
 
-  // Tickers
-  async getTickers(): Promise<{ tickers: Ticker[]; total: number }> {
+  // ==========================================
+  // TICKERS - Updated for new backend
+  // ==========================================
+  
+  async getTickers(): Promise<Ticker[]> {
+    // ✅ NEW: Backend returns array directly, not {tickers: [...]}
     return this.request('/tickers');
   }
 
@@ -77,10 +82,17 @@ class ApiClient {
     });
   }
 
-  async updateTicker(id: number, ticker: Partial<Ticker>): Promise<Ticker> {
+  async updateTicker(id: number, ticker: TickerUpdate): Promise<Ticker> {
     return this.request(`/tickers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(ticker),
+    });
+  }
+
+  // ✅ NEW: Toggle active status
+  async toggleTickerActive(id: number): Promise<Ticker> {
+    return this.request(`/tickers/${id}/toggle`, {
+      method: 'PATCH',
     });
   }
 
@@ -90,7 +102,10 @@ class ApiClient {
     });
   }
 
-  // News
+  // ==========================================
+  // NEWS
+  // ==========================================
+  
   async getNews(params: {
     ticker_symbol?: string;
     sentiment?: string;
@@ -113,7 +128,10 @@ class ApiClient {
     return this.request('/news/collect', { method: 'POST' });
   }
 
-  // Sentiment
+  // ==========================================
+  // SENTIMENT
+  // ==========================================
+  
   async getSentiment(tickerId: number): Promise<SentimentSnapshot> {
     return this.request(`/sentiment/${tickerId}`);
   }
@@ -125,7 +143,10 @@ class ApiClient {
     return this.request(`/sentiment/${tickerId}/history?window=${window}`);
   }
 
-  // Technical Analysis
+  // ==========================================
+  // TECHNICAL ANALYSIS
+  // ==========================================
+  
   async getTechnicalAnalysis(tickerId: number): Promise<TechnicalIndicators> {
     return this.request(`/technical/${tickerId}`);
   }
@@ -138,7 +159,10 @@ class ApiClient {
     return this.request(`/technical/${tickerId}/support-resistance`);
   }
 
-  // Signals
+  // ==========================================
+  // SIGNALS
+  // ==========================================
+  
   async getSignals(params: {
     status?: 'active' | 'expired' | 'archived';
     limit?: number;
@@ -162,7 +186,10 @@ class ApiClient {
     return this.request(`/signals/generate/${tickerId}`, { method: 'POST' });
   }
 
-  // Configuration
+  // ==========================================
+  // CONFIGURATION
+  // ==========================================
+  
   async getSentimentConfig(): Promise<SentimentConfig> {
     return this.request('/config/sentiment');
   }
