@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { FiArrowLeft, FiSave, FiEdit2, FiTrash2, FiPlus } from 'react-icons/fi';
+import { TickerManagement } from '../components/TickerManagement';
 
 
 // Timeframe and Lookback options
@@ -1030,7 +1031,7 @@ export function Configuration() {
         </div>
 
         {/* Tab Content */}
-        {activeTab === 0 && <TickersTab tickers={tickers} onAddNew={() => setShowTickerModal(true)} getPriorityBadge={getPriorityBadge} />}
+        {activeTab === 0 && <TickerManagement />}
         {activeTab === 1 && <NewsSourcesTab />}
         {activeTab === 2 && <SentimentTab weights={sentimentWeights} setWeights={setSentimentWeights} />}
         {activeTab === 3 && <TechnicalTab weights={technicalWeights} setWeights={setTechnicalWeights} indicatorParams={indicatorParams} setIndicatorParams={setIndicatorParams} techComponentWeights={techComponentWeights} setTechComponentWeights={setTechComponentWeights} />}
@@ -1096,102 +1097,7 @@ export function Configuration() {
   );
 }
 
-// Tickers Tab Component
-function TickersTab({ tickers, onAddNew, getPriorityBadge }: any) {
-  return (
-    <div style={{
-      background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
-      border: '1px solid rgba(99, 102, 241, 0.3)',
-      borderRadius: '16px',
-      padding: '24px'
-    }}>
-      <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '8px' }}>
-        📊 Ticker Management
-      </div>
-      <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
-        Manage the stocks you want to track for trading signals
-      </div>
 
-      <button onClick={onAddNew} style={{
-        padding: '10px 20px',
-        borderRadius: '8px',
-        border: 'none',
-        background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-        color: 'white',
-        fontSize: '14px',
-        fontWeight: '600',
-        cursor: 'pointer',
-        marginBottom: '20px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px'
-      }}>
-        <FiPlus /> Add New Ticker
-      </button>
-
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
-          <thead style={{ background: 'rgba(51, 65, 85, 0.5)' }}>
-            <tr>
-              {['Ticker', 'Name', 'Market', 'Priority', 'Status', 'Actions'].map((header, idx) => (
-                <th key={idx} style={{
-                  textAlign: 'left',
-                  padding: '12px 16px',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  color: '#94a3b8',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  {header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {tickers.map((ticker: any, idx: number) => (
-              <tr key={idx} style={{ borderBottom: idx < tickers.length - 1 ? '1px solid rgba(51, 65, 85, 0.3)' : 'none' }}>
-                <td style={{ padding: '14px 16px' }}>
-                  <strong style={{ color: '#60a5fa' }}>{ticker.symbol}</strong>
-                </td>
-                <td style={{ padding: '14px 16px', fontSize: '14px' }}>{ticker.name}</td>
-                <td style={{ padding: '14px 16px', fontSize: '14px' }}>{ticker.market}</td>
-                <td style={{ padding: '14px 16px' }}>{getPriorityBadge(ticker.priority)}</td>
-                <td style={{ padding: '14px 16px', color: '#10b981' }}>● Active</td>
-                <td style={{ padding: '14px 16px' }}>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button style={{
-                      padding: '6px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(99, 102, 241, 0.3)',
-                      background: 'rgba(51, 65, 85, 0.5)',
-                      color: '#cbd5e1',
-                      cursor: 'pointer',
-                      fontSize: '14px'
-                    }}>
-                      <FiEdit2 size={14} />
-                    </button>
-                    <button style={{
-                      padding: '6px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(99, 102, 241, 0.3)',
-                      background: 'rgba(51, 65, 85, 0.5)',
-                      color: '#cbd5e1',
-                      cursor: 'pointer',
-                      fontSize: '14px'
-                    }}>
-                      <FiTrash2 size={14} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
 
 // News Sources Tab
 function NewsSourcesTab() {

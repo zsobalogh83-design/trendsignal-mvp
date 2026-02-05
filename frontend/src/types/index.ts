@@ -6,11 +6,57 @@ export interface Ticker {
   name: string;
   market: 'BET' | 'NYSE' | 'NASDAQ';
   industry?: string;
+  sector?: string;
+  currency?: string;
   market_cap?: number;
   priority: 'high' | 'medium' | 'low';
   is_active: boolean;
+  primary_language: string;
+  
+  // ✅ Keyword management (NEW - from backend)
+  relevance_keywords: string[];
+  sentiment_keywords_positive: string[];
+  sentiment_keywords_negative: string[];
+  news_sources_preferred: string[];
+  news_sources_blocked: string[];
+  
   created_at: string;
   updated_at: string;
+}
+
+// ✅ NEW: Ticker creation type
+export interface TickerCreate {
+  symbol: string;
+  name?: string;
+  market?: string;
+  industry?: string;
+  sector?: string;
+  currency?: string;
+  priority?: 'high' | 'medium' | 'low';
+  is_active?: boolean;
+  primary_language?: string;
+  relevance_keywords?: string[];
+  sentiment_keywords_positive?: string[];
+  sentiment_keywords_negative?: string[];
+  news_sources_preferred?: string[];
+  news_sources_blocked?: string[];
+}
+
+// ✅ NEW: Ticker update type (all fields optional)
+export interface TickerUpdate {
+  name?: string;
+  market?: string;
+  industry?: string;
+  sector?: string;
+  currency?: string;
+  priority?: 'high' | 'medium' | 'low';
+  is_active?: boolean;
+  primary_language?: string;
+  relevance_keywords?: string[];
+  sentiment_keywords_positive?: string[];
+  sentiment_keywords_negative?: string[];
+  news_sources_preferred?: string[];
+  news_sources_blocked?: string[];
 }
 
 export interface NewsSource {
@@ -173,3 +219,8 @@ export interface SignalFilters {
   market?: ('BET' | 'NYSE' | 'NASDAQ')[];
   status?: 'active' | 'expired' | 'archived';
 }
+
+// ✅ Re-export types for convenience
+export type SignalsResponse = { signals: Signal[]; total: number };
+export type NewsResponse = { news: NewsItem[]; total: number };
+export type TechnicalData = TechnicalIndicators;
