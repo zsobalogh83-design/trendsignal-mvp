@@ -21,6 +21,7 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")  # GNews API (real-time, no delay)
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")  # Finnhub API (60 req/min)
+MARKETAUX_API_KEY = os.getenv("MARKETAUX_API_KEY", "")  # ✅ NEW: Marketaux API (100 req/day)
 
 # For development/testing (replace with your keys)
 if not NEWSAPI_KEY:
@@ -30,7 +31,9 @@ if not ALPHAVANTAGE_KEY:
 if not GNEWS_API_KEY:
     GNEWS_API_KEY = "422e63bafec92ab1e705b47455a16ce5"
 if not FINNHUB_API_KEY:
-    FINNHUB_API_KEY = "d60j2mpr01qto1rdbjmgd60j2mpr01qto1rdbjn0"  # Finnhub free tier
+    FINNHUB_API_KEY = "d60j2mpr01qto1rdbjmgd60j2mpr01qto1rdbjn0"
+if not MARKETAUX_API_KEY:
+    MARKETAUX_API_KEY = "Xmr2SpSnRFN44kJObAIr2LHVMuzj9jl15lDYD4F8"  # ✅ NEW
 
 
 # ==========================================
@@ -423,6 +426,7 @@ class TrendSignalConfig:
     alphavantage_key: str = ALPHAVANTAGE_KEY
     gnews_api_key: str = GNEWS_API_KEY  # GNews API (real-time news, no 24h delay)
     finnhub_api_key: str = FINNHUB_API_KEY  # Finnhub API (60 req/min)
+    marketaux_api_key: str = MARKETAUX_API_KEY  # ✅ NEW: Marketaux API (100 req/day, AI sentiment)
     
     # Decay model
     decay_weights: Dict[str, float] = None

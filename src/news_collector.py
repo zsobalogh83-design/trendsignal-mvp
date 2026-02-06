@@ -40,6 +40,14 @@ except ImportError:
     HAS_FINNHUB = False
     print("⚠️ Finnhub module not available")
 
+# Import Marketaux collector
+try:
+    from src.marketaux_collector import MarketauxCollector
+    HAS_MARKETAUX = True
+except ImportError:
+    HAS_MARKETAUX = False
+    print("⚠️ Marketaux module not available")
+
 if TYPE_CHECKING:
     from src.multilingual_sentiment import MultilingualSentimentAnalyzer
 
@@ -70,6 +78,16 @@ class NewsCollector:
                 print(f"⚠️ Finnhub collector init failed: {e}")
         else:
             self.finnhub_collector = None
+        
+        # Initialize Marketaux collector
+        if HAS_MARKETAUX and self.config.marketaux_api_key:
+            try:
+                self.marketaux_collector = MarketauxCollector(self.config.marketaux_api_key)
+            except Exception as e:
+                self.marketaux_collector = None
+                print(f"⚠️ Marketaux collector init failed: {e}")
+        else:
+            self.marketaux_collector = None
         
         # Initialize Hungarian collector
         if HAS_HUNGARIAN:
@@ -108,34 +126,53 @@ class NewsCollector:
         sentiment_analyzer = MultilingualSentimentAnalyzer(self.config, ticker_symbol)
         
         # ===== MULTI-SOURCE STRATEGY =====
-        # Priority: Yahoo Finance (unlimited) > Finnhub (60/min) > Alpha Vantage (25/day backup)
+        # US tickers: Yahoo + Marketaux + Finnhub (comprehensive English coverage)
+        # Hungarian tickers: Only Hungarian RSS feeds (magyar specific sources)
         
-        # US Blue Chips: Prioritize Yahoo + Finnhub
         is_us_ticker = not ticker_symbol.endswith('.BD')
         
-        # 1. Yahoo Finance RSS (unlimited, real-time) - PRIMARY for US tickers
-        if self.yahoo_collector and is_us_ticker:
-            yahoo_items = self._collect_from_yahoo(
-                ticker_symbol, lookback_hours, sentiment_analyzer
-            )
-            all_news.extend(yahoo_items)
-            print(f"  📰 Yahoo Finance: {len(yahoo_items)} articles")
+        # ===== US TICKERS: Multi-source English news =====
+        if is_us_ticker:
+            print(f"🔍 DEBUG: US ticker detected: {ticker_symbol}")
+            
+            # 1. Yahoo Finance RSS (unlimited, real-time) - PRIMARY
+            if self.yahoo_collector:
+                print(f"🔍 DEBUG: Yahoo collector exists, calling...")
+                yahoo_items = self._collect_from_yahoo(
+                    ticker_symbol, lookback_hours, sentiment_analyzer
+                )
+                all_news.extend(yahoo_items)
+                print(f"  📰 Yahoo Finance: {len(yahoo_items)} articles")
+            else:
+                print(f"⚠️ DEBUG: Yahoo collector is None")
+            
+            # 2. Marketaux API (100 req/day, AI sentiment) - SECONDARY
+            print(f"🔍 DEBUG: Checking Marketaux collector...")
+            print(f"🔍 DEBUG: self.marketaux_collector = {self.marketaux_collector}")
+            if self.marketaux_collector:
+                print(f"🔍 DEBUG: Marketaux collector EXISTS, calling collect_news...")
+                marketaux_items = self._collect_from_marketaux(
+                    ticker_symbol, lookback_hours
+                )
+                all_news.extend(marketaux_items)
+                print(f"🔍 DEBUG: Marketaux returned {len(marketaux_items)} items")
+                if len(marketaux_items) > 0:
+                    print(f"  📰 Marketaux: {len(marketaux_items)} articles (AI sentiment)")
+            else:
+                print(f"⚠️ DEBUG: Marketaux collector is None - WHY?")
+                print(f"⚠️ DEBUG: HAS_MARKETAUX = {HAS_MARKETAUX if 'HAS_MARKETAUX' in dir() else 'UNDEFINED'}")
+                print(f"⚠️ DEBUG: config.marketaux_api_key = {bool(self.config.marketaux_api_key)}")
+            
+            # 3. Finnhub API (60 req/min) - TERTIARY
+            if self.finnhub_collector:
+                finnhub_items = self._collect_from_finnhub(
+                    ticker_symbol, lookback_hours, sentiment_analyzer
+                )
+                all_news.extend(finnhub_items)
+                print(f"  📰 Finnhub: {len(finnhub_items)} articles")
         
-        # 2. Finnhub API (60 req/min) - SECONDARY for US tickers
-        if self.finnhub_collector and is_us_ticker and len(all_news) < 10:
-            finnhub_items = self._collect_from_finnhub(
-                ticker_symbol, lookback_hours, sentiment_analyzer
-            )
-            all_news.extend(finnhub_items)
-            print(f"  📰 Finnhub: {len(finnhub_items)} articles")
-        
-        # 3. Alpha Vantage (25 req/day) - BACKUP ONLY if insufficient news
-        if is_us_ticker and self.config.alphavantage_key and len(all_news) < 5:
-            alphavantage_items = self._collect_from_alphavantage(
-                ticker_symbol, lookback_hours, sentiment_analyzer
-            )
-            all_news.extend(alphavantage_items)
-            print(f"  📰 Alpha Vantage (backup): {len(alphavantage_items)} articles")
+        # ===== HUNGARIAN TICKERS: Only Hungarian sources =====
+        # Skip English APIs - not relevant for BÉT stocks
         
         # Collect Hungarian news for BÉT tickers
         if self.hungarian_collector and ticker_symbol.endswith('.BD'):
@@ -278,6 +315,67 @@ class NewsCollector:
             print(f"  ❌ Finnhub collection error: {e}")
             return []
     
+    def _collect_from_marketaux(
+        self,
+        ticker_symbol: str,
+        lookback_hours: int
+    ) -> List[NewsItem]:
+        """
+        Collect from Marketaux API with BUILT-IN AI sentiment
+        
+        Advantage: No need for FinBERT analysis, sentiment already provided!
+        """
+        try:
+            lookback_days = max(1, lookback_hours // 24)
+            
+            news_items = self.marketaux_collector.collect_news(
+                ticker_symbol=ticker_symbol,
+                lookback_days=lookback_days,
+                max_articles=20
+            )
+            
+            # Convert to NewsItem format - sentiment ALREADY analyzed!
+            analyzed_items = []
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+            
+            for item in news_items:
+                # Filter by time
+                if item['published_at'] < cutoff_time:
+                    continue
+                
+                # ✅ Use Marketaux's AI sentiment (no FinBERT needed!)
+                sentiment_score = item.get('sentiment_score', 0.0)
+                
+                # Convert -1 to +1 score to label
+                if sentiment_score > 0.3:
+                    sentiment_label = 'positive'
+                    confidence = min(abs(sentiment_score), 1.0)
+                elif sentiment_score < -0.3:
+                    sentiment_label = 'negative'
+                    confidence = min(abs(sentiment_score), 1.0)
+                else:
+                    sentiment_label = 'neutral'
+                    confidence = 0.5
+                
+                news_item = NewsItem(
+                    title=item['title'],
+                    description=item.get('description', ''),
+                    url=item['url'],
+                    published_at=item['published_at'],
+                    source=f"Marketaux-{item['source']}",
+                    sentiment_score=sentiment_score,  # ✅ AI-powered
+                    sentiment_confidence=confidence,
+                    sentiment_label=sentiment_label,
+                    credibility=item.get('credibility', 0.88)
+                )
+                analyzed_items.append(news_item)
+            
+            return analyzed_items
+            
+        except Exception as e:
+            print(f"  ❌ Marketaux collection error: {e}")
+            return []
+    
     def _collect_from_alphavantage(
         self,
         ticker_symbol: str,
@@ -365,8 +463,9 @@ class NewsCollector:
 
 
 if __name__ == "__main__":
-    print("✅ Enhanced News Collector v2.0 - Stable Sources")
-    print("📰 Yahoo Finance (unlimited) + Finnhub (60 req/min)")
-    print("🇭🇺 Hungarian: Portfolio.hu + RSS feeds")
-    print("🕐 Timezone-aware datetime handling")
+    print("✅ Enhanced News Collector v2.2 - Optimized for US/Hungarian split")
+    print("🇺🇸 US Tickers: Yahoo (∞) + Marketaux (100/day) + Finnhub (60/min)")
+    print("🇭🇺 Hungarian: Portfolio.hu + RSS feeds only")
+    print("📊 Quota usage: ~8 US tickers × 64 refreshes = ~512 Marketaux + ~512 Finnhub per day")
+    print("⚠️ Marketaux quota will exhaust mid-day, falls back to Yahoo + Finnhub")
     print("💾 Database persistence support")

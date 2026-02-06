@@ -201,12 +201,12 @@ export function Dashboard() {
           </div>
         )}
 
-        {/* Signal Cards */}
+        {/* Signal Cards - COMPACT LAYOUT */}
         {!isLoading && filteredSignals.length > 0 && (
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))',
-            gap: '20px'
+            gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+            gap: '16px'
           }}>
             {filteredSignals.map((signal: any) => (
               <div
@@ -214,8 +214,8 @@ export function Dashboard() {
                 style={{
                   background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%)',
                   border: '1px solid rgba(99, 102, 241, 0.3)',
-                  borderRadius: '16px',
-                  padding: '24px',
+                  borderRadius: '12px',
+                  padding: '16px',
                   transition: 'all 0.3s',
                   cursor: 'pointer'
                 }}
@@ -228,19 +228,19 @@ export function Dashboard() {
                   e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                {/* Header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                {/* Header - COMPACT */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                   <div>
-                    <div style={{ fontSize: '20px', fontWeight: '700', color: '#f1f5f9', marginBottom: '6px' }}>
+                    <div style={{ fontSize: '18px', fontWeight: '700', color: '#f1f5f9', marginBottom: '4px' }}>
                       {signal.ticker_symbol}
                     </div>
                     <span style={{
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '6px',
-                      padding: '4px 12px',
+                      gap: '4px',
+                      padding: '3px 10px',
                       borderRadius: '6px',
-                      fontSize: '12px',
+                      fontSize: '11px',
                       fontWeight: '600',
                       background: signal.decision === 'BUY' ? 'rgba(16, 185, 129, 0.2)' : signal.decision === 'SELL' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(148, 163, 184, 0.2)',
                       color: signal.decision === 'BUY' ? '#10b981' : signal.decision === 'SELL' ? '#ef4444' : '#94a3b8',
@@ -253,20 +253,21 @@ export function Dashboard() {
                     background: 'rgba(251, 191, 36, 0.1)',
                     border: '1px solid rgba(251, 191, 36, 0.3)',
                     borderRadius: '6px',
-                    padding: '6px',
+                    padding: '4px',
                     cursor: 'pointer',
-                    color: '#fbbf24'
+                    color: '#fbbf24',
+                    fontSize: '14px'
                   }}>
-                    <FiStar />
+                    <FiStar size={14} />
                   </button>
                 </div>
 
-                {/* Score Section */}
-                <div style={{ marginBottom: '25px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <span style={{ fontSize: '13px', color: '#64748b' }}>Combined Score</span>
+                {/* Score Section - COMPACT */}
+                <div style={{ marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>Score</span>
                     <span style={{
-                      fontSize: '24px',
+                      fontSize: '20px',
                       fontWeight: '700',
                       color: signal.combined_score > 0 ? '#10b981' : signal.combined_score < 0 ? '#ef4444' : '#94a3b8'
                     }}>
@@ -276,11 +277,11 @@ export function Dashboard() {
                   
                   <div style={{ 
                     width: '100%', 
-                    height: '8px', 
+                    height: '6px', 
                     background: 'rgba(51, 65, 85, 0.5)', 
-                    borderRadius: '4px',
+                    borderRadius: '3px',
                     overflow: 'hidden',
-                    marginBottom: '8px'
+                    marginBottom: '6px'
                   }}>
                     <div style={{
                       height: '100%',
@@ -294,15 +295,15 @@ export function Dashboard() {
                     }}></div>
                   </div>
 
-                  <div style={{ fontSize: '12px', color: '#64748b', textAlign: 'right' }}>
+                  <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'right' }}>
                     Confidence: {(signal.overall_confidence * 100).toFixed(0)}%
                   </div>
                 </div>
 
-                {/* Breakdown */}
-                <div style={{ marginBottom: '25px' }}>
-                  <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    📊 Score Breakdown
+                {/* Breakdown - COMPACT */}
+                <div style={{ marginBottom: '14px' }}>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    📊 Breakdown
                   </div>
                   
                   {[
@@ -310,13 +311,13 @@ export function Dashboard() {
                     { label: 'Technical', value: signal.technical_score },
                     { label: 'Risk', value: signal.risk_score }
                   ].map((item, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <span style={{ fontSize: '13px', color: '#94a3b8' }}>{item.label}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{ fontWeight: '600', color: '#e0e7ff' }}>
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>{item.label}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: '600', color: '#e0e7ff', fontSize: '12px' }}>
                           {item.value > 0 ? '+' : ''}{item.value.toFixed(1)}
                         </span>
-                        <div style={{ width: '100px', height: '4px', background: 'rgba(51, 65, 85, 0.5)', borderRadius: '2px', overflow: 'hidden' }}>
+                        <div style={{ width: '60px', height: '3px', background: 'rgba(51, 65, 85, 0.5)', borderRadius: '2px', overflow: 'hidden' }}>
                           <div style={{
                             height: '100%',
                             width: `${scoreToPercentage(item.value)}%`,
@@ -329,72 +330,61 @@ export function Dashboard() {
                   ))}
                 </div>
 
-                {/* Levels */}
+                {/* Levels - COMPACT */}
                 <div style={{
                   background: 'rgba(15, 23, 42, 0.5)',
-                  borderRadius: '12px',
-                  padding: '16px',
-                  marginBottom: '20px'
+                  borderRadius: '8px',
+                  padding: '12px',
+                  marginBottom: '12px'
                 }}>
-                  <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px', fontWeight: '600' }}>
-                    💰 Entry & Exit Levels
+                  <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px', fontWeight: '600' }}>
+                    💰 Entry & Exit
                   </div>
                   
                   {signal.decision !== 'HOLD' && signal.entry_price > 0 ? (
                     [
-                      { label: 'Entry Price', value: signal.entry_price },
-                      { label: 'Take-Profit', value: signal.take_profit, change: signal.take_profit && signal.entry_price ? ((signal.take_profit - signal.entry_price) / signal.entry_price * 100) : null, positive: true },
-                      { label: 'Stop-Loss', value: signal.stop_loss, change: signal.stop_loss && signal.entry_price ? ((signal.stop_loss - signal.entry_price) / signal.entry_price * 100) : null, positive: false },
-                      { label: 'Risk/Reward', value: signal.risk_reward_ratio, isRatio: true }
+                      { label: 'Entry', value: signal.entry_price },
+                      { label: 'Target', value: signal.take_profit, change: signal.take_profit && signal.entry_price ? ((signal.take_profit - signal.entry_price) / signal.entry_price * 100) : null, positive: true },
+                      { label: 'Stop', value: signal.stop_loss, change: signal.stop_loss && signal.entry_price ? ((signal.stop_loss - signal.entry_price) / signal.entry_price * 100) : null, positive: false },
+                      { label: 'R:R', value: signal.risk_reward_ratio, isRatio: true }
                     ].map((level, idx) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '13px', color: '#94a3b8' }}>{level.label}</span>
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>{level.label}</span>
                         <span style={{ 
                           fontWeight: '600', 
+                          fontSize: '11px',
                           color: level.positive === true ? '#10b981' : level.positive === false ? '#ef4444' : '#e0e7ff' 
                         }}>
                           {level.isRatio 
                             ? (level.value ? `1:${level.value.toFixed(1)}` : '-')
-                            : (level.value && !isNaN(level.value) ? `${level.value.toFixed(2)} ${signal.ticker_symbol.includes('.') ? 'HUF' : 'USD'}` : '-')
+                            : (level.value && !isNaN(level.value) ? `${level.value.toFixed(2)}` : '-')
                           }
                           {level.change && !isNaN(level.change) && ` (${level.change > 0 ? '+' : ''}${level.change.toFixed(1)}%)`}
                         </span>
                       </div>
                     ))
                   ) : (
-                    <div style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
-                      No active trading position
+                    <div style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic', textAlign: 'center', padding: '8px' }}>
+                      No position
                     </div>
                   )}
                 </div>
 
-                {/* Quick Info */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#94a3b8' }}>
-                    <span>📰</span>
-                    <span>Recent news</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#94a3b8' }}>
-                    <span>📈</span>
-                    <span>Analysis ready</span>
-                  </div>
-                </div>
-
-                {/* Footer */}
+                {/* Footer - COMPACT */}
                 <div style={{
                   display: 'flex',
-                  gap: '10px',
-                  paddingTop: '16px',
+                  gap: '8px',
+                  paddingTop: '12px',
                   borderTop: '1px solid rgba(51, 65, 85, 0.5)'
                 }}>
                   <Link
                     to={`/signal/${signal.id}`}
                     style={{
                       flex: 1,
-                      padding: '10px 16px',
-                      borderRadius: '8px',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
                       border: 'none',
-                      fontSize: '13px',
+                      fontSize: '12px',
                       fontWeight: '600',
                       cursor: 'pointer',
                       background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
@@ -413,13 +403,13 @@ export function Dashboard() {
                       e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
-                    View Details
+                    Details
                   </Link>
                   <button style={{
                     flex: 1,
-                    padding: '10px 16px',
-                    borderRadius: '8px',
-                    fontSize: '13px',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
                     fontWeight: '600',
                     cursor: 'pointer',
                     background: 'rgba(51, 65, 85, 0.5)',
@@ -427,15 +417,15 @@ export function Dashboard() {
                     border: '1px solid rgba(99, 102, 241, 0.3)',
                     transition: 'all 0.3s'
                   }}>
-                    Set Alert
+                    Alert
                   </button>
                 </div>
 
-                {/* Timestamp */}
+                {/* Timestamp - COMPACT */}
                 <div style={{
-                  fontSize: '12px',
+                  fontSize: '11px',
                   color: '#64748b',
-                  marginTop: '12px',
+                  marginTop: '8px',
                   textAlign: 'center'
                 }}>
                   <span style={{
