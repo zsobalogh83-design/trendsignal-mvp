@@ -203,13 +203,29 @@ class SignalGenerator:
         risk_contribution = risk_score * risk_weight
         
         # ===== COMBINED SCORE =====
-        combined_score = sentiment_contribution + technical_contribution + risk_contribution
+        base_combined_score = sentiment_contribution + technical_contribution + risk_contribution
+        
+        # ===== ALIGNMENT BONUS =====
+        alignment_bonus = self._calculate_alignment_bonus(
+            sentiment_score, 
+            technical_score, 
+            risk_score
+        )
+        
+        # Final combined score with alignment bonus
+        combined_score = base_combined_score + alignment_bonus
         
         # Logging
         print(f"[{ticker_symbol}] Using weights: S={sentiment_weight:.2f}, T={technical_weight:.2f}, R={risk_weight:.2f}")
         print(f"[{ticker_symbol}] Scores: S={sentiment_score:.1f}, T={technical_score:.1f}, R={risk_score:.1f}")
         print(f"[{ticker_symbol}] Contributions: S={sentiment_contribution:.1f}, T={technical_contribution:.1f}, R={risk_contribution:.1f}")
-        print(f"[{ticker_symbol}] COMBINED SCORE: {combined_score:.2f}")
+        print(f"[{ticker_symbol}] BASE SCORE: {base_combined_score:.2f}")
+        if alignment_bonus != 0:
+            if alignment_bonus > 0:
+                print(f"[{ticker_symbol}] ALIGNMENT BONUS: +{alignment_bonus} (BUY components aligned)")
+            else:
+                print(f"[{ticker_symbol}] ALIGNMENT BONUS: {alignment_bonus} (SELL components aligned)")
+        print(f"[{ticker_symbol}] FINAL COMBINED SCORE: {combined_score:.2f}")
         
         # ===== OVERALL CONFIDENCE =====
         # Use actual risk confidence from risk_data
@@ -266,27 +282,33 @@ class SignalGenerator:
         
         # ===== BUILD REASONING =====
         reasoning = {
-            "sentiment": {
-                "score": sentiment_score,
-                "contribution": sentiment_contribution,
-                "confidence": sentiment_confidence,
-                "key_news": sentiment_data.get("key_news", [])[:3]
-            },
-            "technical": {
-                "score": technical_score,
-                "contribution": technical_contribution,
-                "confidence": technical_confidence,
-                "key_signals": technical_data.get("key_signals", [])
-            },
-            "risk": {
-                "score": risk_score,
-                "contribution": risk_contribution,
-                "volatility": risk_data.get("volatility", "N/A"),
-                "support_resistance": {
-                    "support": risk_data.get("nearest_support"),
-                    "resistance": risk_data.get("nearest_resistance")
+            "combined_score": combined_score,
+            "decision": decision,
+            "strength": strength,
+            "reasoning": {
+                "sentiment": {
+                    "score": sentiment_score,
+                    "contribution": sentiment_contribution,
+                    "confidence": sentiment_confidence,
+                    "key_news": sentiment_data.get("key_news", [])[:3]
+                },
+                "technical": {
+                    "score": technical_score,
+                    "contribution": technical_contribution,
+                    "confidence": technical_confidence,
+                    "key_signals": technical_data.get("key_signals", [])
+                },
+                "risk": {
+                    "score": risk_score,
+                    "contribution": risk_contribution,
+                    "volatility": risk_data.get("volatility", "N/A"),
+                    "support_resistance": {
+                        "support": risk_data.get("nearest_support"),
+                        "resistance": risk_data.get("nearest_resistance")
+                    }
                 }
-            }
+            },
+            "alignment_bonus": alignment_bonus if alignment_bonus != 0 else None
         }
         
         # ===== CREATE SIGNAL OBJECT =====
@@ -337,6 +359,12 @@ class SignalGenerator:
                     "confidence": round(risk_data.get("confidence", 0.5), 2),
                     # ✅ ADD: Risk component breakdown for UI
                     "components": risk_data.get("components", {})
+                },
+                # ✅ NEW: Alignment bonus information
+                "alignment": {
+                    "bonus": alignment_bonus,
+                    "base_score": round(base_combined_score, 2),
+                    "final_score": round(combined_score, 2)
                 }
             }
         )
@@ -390,6 +418,74 @@ class SignalGenerator:
         )
         
         return signal
+    
+    def _calculate_alignment_bonus(
+        self, 
+        sentiment_score: float, 
+        technical_score: float, 
+        risk_score: float
+    ) -> int:
+        """
+        Calculate alignment bonus when multiple components are strong.
+        Works symmetrically for both BUY (positive) and SELL (negative) directions.
+        
+        Alignment Bonus Logic:
+        - TR (Tech + Risk): |tech| >60 AND |risk| >40 → +5 points (strongest for swing trading)
+        - ST (Sent + Tech): |sent| >40 AND |tech| >40 → +5 points (strong confirmation)
+        - SR (Sent + Risk): |sent| >40 AND |risk| >40 → +3 points (weakest pair, no chart)
+        - All 3 pairs strong → +8 points (replaces individual bonuses, capped)
+        
+        Note: Bonus is ADDED for BUY (positive scores) and SUBTRACTED for SELL (negative scores)
+        to maintain consistency: strong SELL gets more negative score.
+        
+        Returns:
+            int: Alignment bonus (-8 to +8)
+                 Positive for BUY alignment, Negative for SELL alignment
+        """
+        # Use absolute values to check strength regardless of direction
+        abs_sent = abs(sentiment_score)
+        abs_tech = abs(technical_score)
+        abs_risk = abs(risk_score)
+        
+        # Check each pair (using absolute values for strength)
+        tr_strong = abs_tech > 60 and abs_risk > 40
+        st_strong = abs_sent > 40 and abs_tech > 40
+        sr_strong = abs_sent > 40 and abs_risk > 40
+        
+        # Count strong pairs
+        strong_pairs = sum([tr_strong, st_strong, sr_strong])
+        
+        # Calculate bonus magnitude
+        bonus_magnitude = 0
+        
+        # If all 3 pairs strong → maximum bonus (capped at 8)
+        if strong_pairs == 3:
+            bonus_magnitude = 8
+        
+        # If only 1 pair strong → specific bonus
+        elif strong_pairs == 1:
+            if tr_strong:
+                bonus_magnitude = 5  # Technical + Risk (strongest for swing trading)
+            elif st_strong:
+                bonus_magnitude = 5  # Sentiment + Technical (strong confirmation)
+            elif sr_strong:
+                bonus_magnitude = 3  # Sentiment + Risk (weakest pair, no technical)
+        
+        # Apply bonus in the correct direction:
+        # - Positive for BUY (all components positive)
+        # - Negative for SELL (all components negative)
+        # - Zero if mixed signals (components have different signs)
+        
+        # Check if all components have the same sign (alignment direction)
+        if sentiment_score > 0 and technical_score > 0 and risk_score > 0:
+            # All positive → BUY alignment
+            return bonus_magnitude
+        elif sentiment_score < 0 and technical_score < 0 and risk_score < 0:
+            # All negative → SELL alignment
+            return -bonus_magnitude
+        else:
+            # Mixed signals → no alignment bonus
+            return 0
     
     def _determine_decision(
         self, 
