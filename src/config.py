@@ -21,7 +21,11 @@ NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")  # GNews API (real-time, no delay)
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")  # Finnhub API (60 req/min)
-MARKETAUX_API_KEY = os.getenv("MARKETAUX_API_KEY", "")  # ✅ NEW: Marketaux API (100 req/day)
+MARKETAUX_API_KEY = os.getenv("MARKETAUX_API_KEY", "")  # Marketaux API (100 req/day)
+
+# ✅ NEW: Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")  # Telegram Bot API token
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # Your Telegram chat ID
 
 # For development/testing (replace with your keys)
 if not NEWSAPI_KEY:
@@ -33,7 +37,12 @@ if not GNEWS_API_KEY:
 if not FINNHUB_API_KEY:
     FINNHUB_API_KEY = "d60j2mpr01qto1rdbjmgd60j2mpr01qto1rdbjn0"
 if not MARKETAUX_API_KEY:
-    MARKETAUX_API_KEY = "Xmr2SpSnRFN44kJObAIr2LHVMuzj9jl15lDYD4F8"  # ✅ NEW
+    MARKETAUX_API_KEY = "Xmr2SpSnRFN44kJObAIr2LHVMuzj9jl15lDYD4F8"
+# ✅ Telegram (set your values here or use environment variables)
+if not TELEGRAM_BOT_TOKEN:
+    TELEGRAM_BOT_TOKEN = "8533645963:AAEZWIHDRQCDKkcE90cijlKJO5kllHiYOKk"
+if not TELEGRAM_CHAT_ID:
+    TELEGRAM_CHAT_ID = "8264087377"
 
 
 # ==========================================
@@ -89,6 +98,17 @@ MODERATE_BUY_CONFIDENCE = 0.65
 
 MODERATE_SELL_SCORE = -50
 MODERATE_SELL_CONFIDENCE = 0.65
+
+
+# ==========================================
+# TELEGRAM ALERT CONFIGURATION
+# ==========================================
+
+TELEGRAM_ALERTS_ENABLED = True  # Enable/disable Telegram alerts
+TELEGRAM_SCORE_THRESHOLD = 30  # Alert when |combined_score| > 30
+TELEGRAM_MAX_ALERTS_PER_HOUR = 10  # Rate limit: max alerts per hour
+TELEGRAM_INCLUDE_NEWS = True  # Include top 3 news headlines in alert
+TELEGRAM_INCLUDE_LINK = True  # Include link to TrendSignal UI
 
 
 # ==========================================
@@ -361,6 +381,12 @@ def save_config_to_file(config_instance):
             "SR_DBSCAN_MIN_SAMPLES": config_instance.sr_dbscan_min_samples,
             "SR_DBSCAN_ORDER": config_instance.sr_dbscan_order,
             "SR_DBSCAN_LOOKBACK": config_instance.sr_dbscan_lookback,
+            # ✅ NEW: Telegram alert settings
+            "TELEGRAM_ALERTS_ENABLED": config_instance.telegram_alerts_enabled,
+            "TELEGRAM_SCORE_THRESHOLD": config_instance.telegram_score_threshold,
+            "TELEGRAM_MAX_ALERTS_PER_HOUR": config_instance.telegram_max_alerts_per_hour,
+            "TELEGRAM_INCLUDE_NEWS": config_instance.telegram_include_news,
+            "TELEGRAM_INCLUDE_LINK": config_instance.telegram_include_link,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -426,7 +452,16 @@ class TrendSignalConfig:
     alphavantage_key: str = ALPHAVANTAGE_KEY
     gnews_api_key: str = GNEWS_API_KEY  # GNews API (real-time news, no 24h delay)
     finnhub_api_key: str = FINNHUB_API_KEY  # Finnhub API (60 req/min)
-    marketaux_api_key: str = MARKETAUX_API_KEY  # ✅ NEW: Marketaux API (100 req/day, AI sentiment)
+    marketaux_api_key: str = MARKETAUX_API_KEY  # Marketaux API (100 req/day, AI sentiment)
+    
+    # ✅ NEW: Telegram Bot Configuration
+    telegram_bot_token: str = TELEGRAM_BOT_TOKEN
+    telegram_chat_id: str = TELEGRAM_CHAT_ID
+    telegram_alerts_enabled: bool = TELEGRAM_ALERTS_ENABLED
+    telegram_score_threshold: float = TELEGRAM_SCORE_THRESHOLD
+    telegram_max_alerts_per_hour: int = TELEGRAM_MAX_ALERTS_PER_HOUR
+    telegram_include_news: bool = TELEGRAM_INCLUDE_NEWS
+    telegram_include_link: bool = TELEGRAM_INCLUDE_LINK
     
     # Decay model
     decay_weights: Dict[str, float] = None
@@ -806,6 +841,12 @@ class TrendSignalConfig:
             self.sr_dbscan_min_samples = saved_config.get("SR_DBSCAN_MIN_SAMPLES", SR_DBSCAN_MIN_SAMPLES)
             self.sr_dbscan_order = saved_config.get("SR_DBSCAN_ORDER", SR_DBSCAN_ORDER)
             self.sr_dbscan_lookback = saved_config.get("SR_DBSCAN_LOOKBACK", SR_DBSCAN_LOOKBACK)
+            # ✅ NEW: Telegram alert settings
+            self.telegram_alerts_enabled = saved_config.get("TELEGRAM_ALERTS_ENABLED", TELEGRAM_ALERTS_ENABLED)
+            self.telegram_score_threshold = saved_config.get("TELEGRAM_SCORE_THRESHOLD", TELEGRAM_SCORE_THRESHOLD)
+            self.telegram_max_alerts_per_hour = saved_config.get("TELEGRAM_MAX_ALERTS_PER_HOUR", TELEGRAM_MAX_ALERTS_PER_HOUR)
+            self.telegram_include_news = saved_config.get("TELEGRAM_INCLUDE_NEWS", TELEGRAM_INCLUDE_NEWS)
+            self.telegram_include_link = saved_config.get("TELEGRAM_INCLUDE_LINK", TELEGRAM_INCLUDE_LINK)
             print("🔄 Config reloaded from file")
     
     def validate(self) -> bool:

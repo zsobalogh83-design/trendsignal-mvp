@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrendSignal - Simulated Trades Mockup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'signal-buy': '#10b981',
+                        'signal-sell': '#ef4444',
+                        'signal-hold': '#6b7280',
+                        'signal-strong': '#059669',
+                        'signal-moderate': '#3b82f6',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .trade-row {
+            transition: all 0.2s ease;
+        }
+        .trade-row:hover {
+            background-color: #f9fafb;
+        }
+        .expanded-details {
+            background: linear-gradient(to right, #f3f4f6, #ffffff);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 p-8">
+    <div class="max-w-7xl mx-auto">
+        
+        <!-- Header with Stats -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h1 class="text-2xl font-bold text-gray-800 mb-4">📊 Simulated Trades</h1>
+            <div class="grid grid-cols-4 gap-4 text-center">
+                <div class="bg-blue-50 rounded-lg p-3">
+                    <div class="text-sm text-gray-600">Total Trades</div>
+                    <div class="text-2xl font-bold text-blue-600">38</div>
+                </div>
+                <div class="bg-green-50 rounded-lg p-3">
+                    <div class="text-sm text-gray-600">Win Rate</div>
+                    <div class="text-2xl font-bold text-green-600">62.5%</div>
+                    <div class="text-xs text-gray-500">24W - 14L</div>
+                </div>
+                <div class="bg-purple-50 rounded-lg p-3">
+                    <div class="text-sm text-gray-600">Total P&L</div>
+                    <div class="text-2xl font-bold text-purple-600">+12.4%</div>
+                </div>
+                <div class="bg-orange-50 rounded-lg p-3">
+                    <div class="text-sm text-gray-600">Avg Hold</div>
+                    <div class="text-2xl font-bold text-orange-600">2.3d</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="bg-white rounded-lg shadow-md p-4 mb-6">
+            <div class="flex gap-4 items-center">
+                <div class="flex-1">
+                    <label class="block text-xs text-gray-600 mb-1">Symbol</label>
+                    <select class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option>All Symbols</option>
+                        <option>MOL.BD</option>
+                        <option>OTP.BD</option>
+                        <option>AAPL</option>
+                        <option>TSLA</option>
+                        <option>MSFT</option>
+                        <option>NVDA</option>
+                        <option>GOOGL</option>
+                    </select>
+                </div>
+                <div class="flex-1">
+                    <label class="block text-xs text-gray-600 mb-1">Status</label>
+                    <select class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option>All Status</option>
+                        <option>⚡ Open Only</option>
+                        <option>Closed Only</option>
+                        <option>Profitable</option>
+                        <option>Loss-making</option>
+                    </select>
+                </div>
+                <div class="flex-1">
+                    <label class="block text-xs text-gray-600 mb-1">Date Range</label>
+                    <select class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option>Last 30 days</option>
+                        <option>Last 7 days</option>
+                        <option>Last 90 days</option>
+                        <option>All time</option>
+                        <option>Custom range...</option>
+                    </select>
+                </div>
+                <div class="pt-5">
+                    <button class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition">
+                        🔄 Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trades Table -->
+        <div class="bg-white rounded-lg shadow-md overflow-hidden">
+            
+            <!-- Table Header -->
+            <div class="bg-gray-100 border-b border-gray-200">
+                <div class="grid grid-cols-12 gap-4 px-4 py-3 text-xs font-semibold text-gray-700 uppercase">
+                    <div class="col-span-1">Symbol</div>
+                    <div class="col-span-3">Entry Date/Time</div>
+                    <div class="col-span-3">Exit Date/Time</div>
+                    <div class="col-span-1 text-right">P&L</div>
+                    <div class="col-span-1 text-center">Duration</div>
+                    <div class="col-span-2">Status</div>
+                    <div class="col-span-1 text-center">Actions</div>
+                </div>
+            </div>
+
+            <!-- Trade Row 1: OPEN Position - TSLA -->
+            <div class="trade-row border-b border-gray-200">
+                <div class="grid grid-cols-12 gap-4 px-4 py-3 items-center">
+                    <div class="col-span-1">
+                        <span class="text-2xl">🟡</span>
+                        <span class="font-bold text-gray-800">TSLA</span>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Feb 01, 11:00</div>
+                        <div class="text-xs text-green-600 font-semibold">BUY @ $195.50</div>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-600">NOW (Feb 06, 15:30)</div>
+                        <div class="text-xs text-gray-700">Current: <span class="font-semibold">$197.84</span></div>
+                    </div>
+                    <div class="col-span-1 text-right">
+                        <div class="text-sm font-bold text-green-600">+1.2%*</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <span class="text-sm text-gray-600">5d</span>
+                    </div>
+                    <div class="col-span-2">
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            ⚡ OPEN
+                        </span>
+                        <div class="text-xs text-gray-500 mt-1">Conf: 0.71</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <button class="text-blue-600 hover:text-blue-800 font-semibold" onclick="toggleDetails('tsla')">
+                            [⮟]
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Expanded Details for TSLA -->
+                <div id="tsla-details" class="hidden expanded-details px-4 py-4 border-t border-gray-200">
+                    <div class="grid grid-cols-2 gap-6">
+                        
+                        <!-- Left Column -->
+                        <div>
+                            <h3 class="font-semibold text-gray-800 mb-3">📍 Entry Signal Details</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Timestamp:</span>
+                                    <span class="font-medium">Feb 01, 2025 11:00:00</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Entry Price:</span>
+                                    <span class="font-medium">$195.50</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Signal Type:</span>
+                                    <span class="text-green-600 font-semibold">BUY</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Confidence:</span>
+                                    <span class="font-medium">0.71 (Moderate)</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Sentiment Score:</span>
+                                    <span class="text-orange-600 font-medium">0.65 → 0.58 ⚠️ (-10.8%)</span>
+                                </div>
+                            </div>
+
+                            <h3 class="font-semibold text-gray-800 mb-3 mt-6">📈 Technical Snapshot</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">RSI(14):</span>
+                                    <span class="font-medium">54.2 (Neutral)</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">MACD:</span>
+                                    <span class="text-green-600 font-medium">Bullish crossover</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Support:</span>
+                                    <span class="font-medium">$192.40</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Resistance:</span>
+                                    <span class="font-medium">$201.50</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column -->
+                        <div>
+                            <h3 class="font-semibold text-gray-800 mb-3">💰 Current Position (Unrealized)</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Current Price:</span>
+                                    <span class="text-green-600 font-bold">$197.84 (+1.2%)</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Duration:</span>
+                                    <span class="font-medium">5 days, 4 hours</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Stop-Loss:</span>
+                                    <span class="font-medium">$189.83 (-2.9%)</span>
+                                </div>
+                                <div class="flex justify-between pl-4">
+                                    <span class="text-gray-500 text-xs">Distance:</span>
+                                    <span class="text-xs">$7.67 (3.9%)</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Take-Profit:</span>
+                                    <span class="font-medium">$205.28 (+5.0%)</span>
+                                </div>
+                                <div class="flex justify-between pl-4">
+                                    <span class="text-gray-500 text-xs">Distance:</span>
+                                    <span class="text-xs">$7.44 (3.8%)</span>
+                                </div>
+                            </div>
+
+                            <h3 class="font-semibold text-gray-800 mb-3 mt-6">⚠️ Risk Alerts</h3>
+                            <div class="space-y-2">
+                                <div class="bg-orange-50 border-l-4 border-orange-400 p-3 text-sm">
+                                    <span class="text-orange-700">⚠️ Sentiment declining (-10.8% from entry)</span>
+                                </div>
+                                <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 text-sm">
+                                    <span class="text-yellow-700">⚠️ Position open 5+ days (consider reviewing)</span>
+                                </div>
+                            </div>
+
+                            <h3 class="font-semibold text-gray-800 mb-3 mt-6">📊 Signal Score Tracking</h3>
+                            <div class="bg-gradient-to-r from-blue-50 to-white border border-blue-200 rounded-lg p-4">
+                                <div class="flex justify-between items-center mb-3">
+                                    <div>
+                                        <span class="text-xs text-gray-600">Entry Score</span>
+                                        <div class="text-lg font-bold text-blue-600">0.71</div>
+                                        <span class="text-xs text-gray-500">Moderate confidence</span>
+                                    </div>
+                                    <div class="text-2xl text-gray-400">→</div>
+                                    <div>
+                                        <span class="text-xs text-gray-600">Current Score</span>
+                                        <div class="text-lg font-bold text-orange-600">0.58</div>
+                                        <span class="text-xs text-red-600 font-medium">↓ -18.3%</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="border-t border-blue-200 pt-3 space-y-2 text-sm">
+                                    <div class="text-xs font-semibold text-gray-700 mb-2">Component Breakdown:</div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Sentiment (70%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.65</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-orange-600">0.58</span>
+                                            <span class="text-xs text-red-600 font-medium ml-2">↓ -10.8%</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Technical (20%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.82</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-orange-600">0.58</span>
+                                            <span class="text-xs text-red-600 font-medium ml-2">↓ -29.3%</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Risk (10%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.75</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-orange-600">0.60</span>
+                                            <span class="text-xs text-red-600 font-medium ml-2">↓ -20.0%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trade Row 2: OPEN Position - OTP (with warnings) -->
+            <div class="trade-row border-b border-gray-200">
+                <div class="grid grid-cols-12 gap-4 px-4 py-3 items-center">
+                    <div class="col-span-1">
+                        <span class="text-2xl">🟡</span>
+                        <span class="font-bold text-gray-800">OTP</span>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Feb 04, 09:15</div>
+                        <div class="text-xs text-green-600 font-semibold">BUY @ 18,240 Ft</div>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-600">NOW (Feb 06, 15:30)</div>
+                        <div class="text-xs text-gray-700">Current: <span class="font-semibold">18,150 Ft</span></div>
+                    </div>
+                    <div class="col-span-1 text-right">
+                        <div class="text-sm font-bold text-red-600">-0.5%*</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <span class="text-sm text-gray-600">2d</span>
+                    </div>
+                    <div class="col-span-2">
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            ⚡ OPEN
+                        </span>
+                        <div class="text-xs text-orange-600 mt-1 flex items-center gap-1">
+                            <span>⚠️</span>
+                            <span>Conf: 0.58</span>
+                        </div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <button class="text-blue-600 hover:text-blue-800 font-semibold" onclick="toggleDetails('otp')">
+                            [⮟]
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trade Row 3: CLOSED - MOL (Profit, TP Hit) -->
+            <div class="trade-row border-b border-gray-200">
+                <div class="grid grid-cols-12 gap-4 px-4 py-3 items-center">
+                    <div class="col-span-1">
+                        <span class="text-2xl">🟢</span>
+                        <span class="font-bold text-gray-800">MOL</span>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Jan 15, 09:30</div>
+                        <div class="text-xs text-green-600 font-semibold">BUY @ 3,450 Ft</div>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Jan 18, 14:15</div>
+                        <div class="text-xs text-red-600 font-semibold">SELL @ 3,595 Ft</div>
+                    </div>
+                    <div class="col-span-1 text-right">
+                        <div class="text-sm font-bold text-green-600">+4.2%</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <span class="text-sm text-gray-600">3d</span>
+                    </div>
+                    <div class="col-span-2">
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            ✓ TP Hit
+                        </span>
+                        <div class="text-xs text-gray-500 mt-1">Conf: 0.78</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <button class="text-blue-600 hover:text-blue-800 font-semibold" onclick="toggleDetails('mol')">
+                            [⮟]
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Expanded Details for MOL (CLOSED) -->
+                <div id="mol-details" class="hidden expanded-details px-4 py-4 border-t border-gray-200">
+                    <div class="grid grid-cols-2 gap-6">
+                        
+                        <!-- Left Column -->
+                        <div>
+                            <h3 class="font-semibold text-gray-800 mb-3">📍 Entry Signal Details</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Timestamp:</span>
+                                    <span class="font-medium">Jan 15, 2025 09:30:00</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Entry Price:</span>
+                                    <span class="font-medium">3,450 Ft</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Signal Type:</span>
+                                    <span class="text-green-600 font-semibold">BUY</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Entry Confidence:</span>
+                                    <span class="font-medium">0.78 (High)</span>
+                                </div>
+                            </div>
+
+                            <h3 class="font-semibold text-gray-800 mb-3 mt-6">🏁 Exit Details</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Exit Time:</span>
+                                    <span class="font-medium">Jan 18, 2025 14:15:00</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Exit Price:</span>
+                                    <span class="font-medium">3,595 Ft</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Exit Reason:</span>
+                                    <span class="text-green-600 font-semibold">Take-Profit Hit</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Duration:</span>
+                                    <span class="font-medium">3 days, 4 hours, 45 min</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Realized P&L:</span>
+                                    <span class="text-green-600 font-bold">+4.2% (+145 Ft)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column -->
+                        <div>
+                            <h3 class="font-semibold text-gray-800 mb-3">📊 Signal Score Tracking</h3>
+                            <div class="bg-gradient-to-r from-green-50 to-white border border-green-200 rounded-lg p-4">
+                                <div class="flex justify-between items-center mb-3">
+                                    <div>
+                                        <span class="text-xs text-gray-600">Entry Score</span>
+                                        <div class="text-lg font-bold text-blue-600">0.78</div>
+                                        <span class="text-xs text-gray-500">High confidence</span>
+                                    </div>
+                                    <div class="text-2xl text-gray-400">→</div>
+                                    <div>
+                                        <span class="text-xs text-gray-600">Exit Score</span>
+                                        <div class="text-lg font-bold text-green-600">0.82</div>
+                                        <span class="text-xs text-green-600 font-medium">↑ +5.1%</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="border-t border-green-200 pt-3 space-y-2 text-sm">
+                                    <div class="text-xs font-semibold text-gray-700 mb-2">Component Breakdown:</div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Sentiment (70%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.72</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-green-600">0.78</span>
+                                            <span class="text-xs text-green-600 font-medium ml-2">↑ +8.3%</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Technical (20%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.85</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-green-600">0.89</span>
+                                            <span class="text-xs text-green-600 font-medium ml-2">↑ +4.7%</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Risk (10%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.80</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-green-600">0.85</span>
+                                            <span class="text-xs text-green-600 font-medium ml-2">↑ +6.3%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-3 pt-3 border-t border-green-200">
+                                    <div class="text-xs text-gray-600 mb-1">Trade Quality Assessment:</div>
+                                    <div class="bg-green-100 text-green-700 px-3 py-2 rounded text-sm font-medium">
+                                        ✓ Excellent execution - Signal improved during hold period
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trade Row 4: CLOSED - AAPL (Loss, SL Hit) -->
+            <div class="trade-row border-b border-gray-200">
+                <div class="grid grid-cols-12 gap-4 px-4 py-3 items-center">
+                    <div class="col-span-1">
+                        <span class="text-2xl">🔴</span>
+                        <span class="font-bold text-gray-800">AAPL</span>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Jan 20, 15:45</div>
+                        <div class="text-xs text-green-600 font-semibold">BUY @ $185.20</div>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Jan 21, 10:30</div>
+                        <div class="text-xs text-red-600 font-semibold">SELL @ $180.01</div>
+                    </div>
+                    <div class="col-span-1 text-right">
+                        <div class="text-sm font-bold text-red-600">-2.8%</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <span class="text-sm text-gray-600">1d</span>
+                    </div>
+                    <div class="col-span-2">
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            ✗ SL Hit
+                        </span>
+                        <div class="text-xs text-gray-500 mt-1">Conf: 0.65</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <button class="text-blue-600 hover:text-blue-800 font-semibold" onclick="toggleDetails('aapl')">
+                            [⮟]
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Expanded Details for AAPL (CLOSED LOSS) -->
+                <div id="aapl-details" class="hidden expanded-details px-4 py-4 border-t border-gray-200">
+                    <div class="grid grid-cols-2 gap-6">
+                        
+                        <!-- Left Column -->
+                        <div>
+                            <h3 class="font-semibold text-gray-800 mb-3">📍 Entry Signal Details</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Timestamp:</span>
+                                    <span class="font-medium">Jan 20, 2025 15:45:00</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Entry Price:</span>
+                                    <span class="font-medium">$185.20</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Signal Type:</span>
+                                    <span class="text-green-600 font-semibold">BUY</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Entry Confidence:</span>
+                                    <span class="font-medium">0.65 (Moderate)</span>
+                                </div>
+                            </div>
+
+                            <h3 class="font-semibold text-gray-800 mb-3 mt-6">🏁 Exit Details</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Exit Time:</span>
+                                    <span class="font-medium">Jan 21, 2025 10:30:00</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Exit Price:</span>
+                                    <span class="font-medium">$180.01</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Exit Reason:</span>
+                                    <span class="text-red-600 font-semibold">Stop-Loss Hit</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Duration:</span>
+                                    <span class="font-medium">18 hours, 45 min</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Realized P&L:</span>
+                                    <span class="text-red-600 font-bold">-2.8% (-$5.19)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column -->
+                        <div>
+                            <h3 class="font-semibold text-gray-800 mb-3">📊 Signal Score Tracking</h3>
+                            <div class="bg-gradient-to-r from-red-50 to-white border border-red-200 rounded-lg p-4">
+                                <div class="flex justify-between items-center mb-3">
+                                    <div>
+                                        <span class="text-xs text-gray-600">Entry Score</span>
+                                        <div class="text-lg font-bold text-blue-600">0.65</div>
+                                        <span class="text-xs text-gray-500">Moderate confidence</span>
+                                    </div>
+                                    <div class="text-2xl text-gray-400">→</div>
+                                    <div>
+                                        <span class="text-xs text-gray-600">Exit Score</span>
+                                        <div class="text-lg font-bold text-red-600">0.38</div>
+                                        <span class="text-xs text-red-600 font-medium">↓ -41.5%</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="border-t border-red-200 pt-3 space-y-2 text-sm">
+                                    <div class="text-xs font-semibold text-gray-700 mb-2">Component Breakdown:</div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Sentiment (70%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.58</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-red-600">0.25</span>
+                                            <span class="text-xs text-red-600 font-medium ml-2">↓ -56.9%</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Technical (20%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.72</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-red-600">0.52</span>
+                                            <span class="text-xs text-red-600 font-medium ml-2">↓ -27.8%</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-gray-600">Risk (10%):</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-medium">0.80</span>
+                                            <span class="text-gray-400">→</span>
+                                            <span class="font-medium text-red-600">0.45</span>
+                                            <span class="text-xs text-red-600 font-medium ml-2">↓ -43.8%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-3 pt-3 border-t border-red-200">
+                                    <div class="text-xs text-gray-600 mb-1">Trade Quality Assessment:</div>
+                                    <div class="bg-red-100 text-red-700 px-3 py-2 rounded text-sm font-medium">
+                                        ✗ Rapid sentiment collapse - SL protection worked correctly
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trade Row 5: CLOSED - MSFT (Profit, Opposing Signal) -->
+            <div class="trade-row border-b border-gray-200">
+                <div class="grid grid-cols-12 gap-4 px-4 py-3 items-center">
+                    <div class="col-span-1">
+                        <span class="text-2xl">🟢</span>
+                        <span class="font-bold text-gray-800">MSFT</span>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Jan 10, 10:00</div>
+                        <div class="text-xs text-green-600 font-semibold">BUY @ $425.30</div>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Jan 15, 13:20</div>
+                        <div class="text-xs text-red-600 font-semibold">SELL @ $438.48</div>
+                    </div>
+                    <div class="col-span-1 text-right">
+                        <div class="text-sm font-bold text-green-600">+3.1%</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <span class="text-sm text-gray-600">5d</span>
+                    </div>
+                    <div class="col-span-2">
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            ✓ Signal
+                        </span>
+                        <div class="text-xs text-gray-500 mt-1">Opposing</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <button class="text-blue-600 hover:text-blue-800 font-semibold" onclick="toggleDetails('msft')">
+                            [⮟]
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Trade Row 6: CLOSED - NVDA (Loss, Sentiment Degradation) -->
+            <div class="trade-row border-b border-gray-200">
+                <div class="grid grid-cols-12 gap-4 px-4 py-3 items-center">
+                    <div class="col-span-1">
+                        <span class="text-2xl">🔴</span>
+                        <span class="font-bold text-gray-800">NVDA</span>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Jan 25, 14:20</div>
+                        <div class="text-xs text-green-600 font-semibold">BUY @ $142.80</div>
+                    </div>
+                    <div class="col-span-3">
+                        <div class="text-sm font-medium text-gray-800">Jan 27, 11:45</div>
+                        <div class="text-xs text-red-600 font-semibold">SELL @ $140.15</div>
+                    </div>
+                    <div class="col-span-1 text-right">
+                        <div class="text-sm font-bold text-red-600">-1.9%</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <span class="text-sm text-gray-600">2d</span>
+                    </div>
+                    <div class="col-span-2">
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                            ⚠️ Sentiment
+                        </span>
+                        <div class="text-xs text-gray-500 mt-1">Degraded</div>
+                    </div>
+                    <div class="col-span-1 text-center">
+                        <button class="text-blue-600 hover:text-blue-800 font-semibold" onclick="toggleDetails('nvda')">
+                            [⮟]
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Pagination -->
+        <div class="bg-white rounded-lg shadow-md p-4 mt-4 flex justify-between items-center">
+            <div class="text-sm text-gray-600">
+                Showing 1-6 of 38 trades
+            </div>
+            <div class="flex gap-2">
+                <button class="px-3 py-1 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50" disabled>
+                    ← Previous
+                </button>
+                <button class="px-3 py-1 bg-blue-600 text-white rounded-lg text-sm">1</button>
+                <button class="px-3 py-1 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">2</button>
+                <button class="px-3 py-1 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">3</button>
+                <button class="px-3 py-1 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
+                    Next →
+                </button>
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="bg-white rounded-lg shadow-md p-4 mt-6">
+            <h3 class="font-semibold text-gray-800 mb-3">Legend</h3>
+            <div class="grid grid-cols-4 gap-4 text-sm">
+                <div>
+                    <span class="font-semibold">Status Icons:</span>
+                    <div class="mt-2 space-y-1">
+                        <div>🟡 = Open position (unrealized P&L)</div>
+                        <div>🟢 = Closed profitable</div>
+                        <div>🔴 = Closed loss</div>
+                    </div>
+                </div>
+                <div>
+                    <span class="font-semibold">Exit Reasons:</span>
+                    <div class="mt-2 space-y-1">
+                        <div>✓ TP Hit = Take-profit reached</div>
+                        <div>✗ SL Hit = Stop-loss triggered</div>
+                        <div>✓ Signal = Opposing signal closed</div>
+                        <div>⚠️ Sentiment = Sentiment degradation</div>
+                    </div>
+                </div>
+                <div>
+                    <span class="font-semibold">Signal Score:</span>
+                    <div class="mt-2 space-y-1">
+                        <div>Entry Score = Signal at trade open</div>
+                        <div>Exit/Current Score = Signal at close/now</div>
+                        <div>↑ Green = Score improved</div>
+                        <div>↓ Red = Score declined</div>
+                    </div>
+                </div>
+                <div>
+                    <span class="font-semibold">Notes:</span>
+                    <div class="mt-2 space-y-1">
+                        <div>* = Unrealized P&L (open positions)</div>
+                        <div>Conf = Signal confidence score</div>
+                        <div>⚠️ = Risk alerts active</div>
+                        <div>[⮟] = Expand for details</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function toggleDetails(symbol) {
+            const details = document.getElementById(symbol + '-details');
+            if (details) {
+                details.classList.toggle('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
