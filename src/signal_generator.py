@@ -2,8 +2,8 @@
 TrendSignal MVP - Signal Generator Module  
 Generates BUY/SELL/HOLD trading signals with dynamic configuration
 
-Version: 1.3 - Telegram Alerts Integration
-Date: 2025-02-08
+Version: 1.2 - Robust DataFrame Handling
+Date: 2024-12-28
 """
 
 import pandas as pd
@@ -14,14 +14,6 @@ from dataclasses import dataclass, asdict
 import logging
 
 logger = logging.getLogger(__name__)
-
-# ✅ NEW: Telegram alert integration
-try:
-    from telegram_alerter import integrate_with_signal_generator
-    TELEGRAM_ENABLED = True
-except ImportError:
-    TELEGRAM_ENABLED = False
-    logger.warning("⚠️ Telegram alerter not available - alerts disabled")
 
 
 # ==========================================
@@ -239,22 +231,14 @@ class SignalGenerator:
         # Use actual risk confidence from risk_data
         risk_confidence = risk_data.get("confidence", 0.5)
         
-        base_confidence = (
+        overall_confidence = (
             sentiment_confidence * sentiment_weight +
             technical_confidence * technical_weight +
             risk_confidence * risk_weight
         )
         
-        # ===== CONFIDENCE BOOST FROM ALIGNMENT =====
-        confidence_boost = self._calculate_confidence_boost(alignment_bonus)
-        overall_confidence = min(base_confidence + confidence_boost, 0.95)
-        
         print(f"[{ticker_symbol}] Confidences: S={sentiment_confidence:.2f}, T={technical_confidence:.2f}, R={risk_confidence:.2f}")
-        print(f"[{ticker_symbol}] BASE CONFIDENCE: {base_confidence:.2%}")
-        if confidence_boost > 0:
-            direction = "BUY" if alignment_bonus > 0 else "SELL"
-            print(f"[{ticker_symbol}] CONFIDENCE BOOST: +{confidence_boost:.1%} ({direction} alignment)")
-        print(f"[{ticker_symbol}] FINAL CONFIDENCE: {overall_confidence:.2%}")
+        print(f"[{ticker_symbol}] OVERALL CONFIDENCE: {overall_confidence:.2%}")
         
         # ===== PRELIMINARY DECISION (for entry/exit calculation) =====
         # Need basic decision to know if BUY or SELL for stop-loss calculation
@@ -324,8 +308,7 @@ class SignalGenerator:
                     }
                 }
             },
-            "alignment_bonus": alignment_bonus if alignment_bonus != 0 else None,
-            "confidence_boost": confidence_boost if confidence_boost > 0 else None
+            "alignment_bonus": alignment_bonus if alignment_bonus != 0 else None
         }
         
         # ===== CREATE SIGNAL OBJECT =====
@@ -379,12 +362,9 @@ class SignalGenerator:
                 },
                 # ✅ NEW: Alignment bonus information
                 "alignment": {
-                    "score_bonus": alignment_bonus,
+                    "bonus": alignment_bonus,
                     "base_score": round(base_combined_score, 2),
-                    "final_score": round(combined_score, 2),
-                    "confidence_boost": round(confidence_boost, 4),
-                    "base_confidence": round(base_confidence, 4),
-                    "final_confidence": round(overall_confidence, 4)
+                    "final_score": round(combined_score, 2)
                 }
             }
         )
@@ -436,20 +416,6 @@ class SignalGenerator:
                 "tech_volume_weight": getattr(self.config, 'tech_volume_weight', 0.05)
             }
         )
-        
-        # ===== ✅ NEW: TELEGRAM ALERT =====
-        # Send Telegram notification if strong signal (|combined_score| > threshold)
-        if TELEGRAM_ENABLED:
-            try:
-                # Get news items for alert (if available in sentiment_data)
-                news_items = sentiment_data.get('news_items', []) if sentiment_data else []
-                
-                # Send alert (rate limiting and threshold checking is done inside)
-                integrate_with_signal_generator(signal, news_items)
-                
-            except Exception as e:
-                # Don't fail signal generation if Telegram alert fails
-                logger.warning(f"⚠️ Telegram alert failed for {signal.ticker_symbol}: {e}")
         
         return signal
     
@@ -520,39 +486,6 @@ class SignalGenerator:
         else:
             # Mixed signals → no alignment bonus
             return 0
-    
-    def _calculate_confidence_boost(self, alignment_bonus: int) -> float:
-        """
-        Calculate MODERATE confidence boost based on alignment.
-        
-        When components align (all same direction), confidence increases
-        because independent sources agree → stronger evidence.
-        
-        Boost is intentionally smaller (50%) than score bonus to avoid
-        excessive double-amplification of strength determination.
-        
-        Args:
-            alignment_bonus: Score bonus from alignment (-8 to +8)
-            
-        Returns:
-            float: Confidence boost (0.000 to 0.040)
-                   Always positive regardless of BUY/SELL direction
-        """
-        if alignment_bonus == 0:
-            return 0.0
-        
-        # Use absolute value - confidence boost is always positive
-        # Doesn't matter if BUY or SELL, we're more confident either way
-        alignment_magnitude = abs(alignment_bonus)
-        
-        if alignment_magnitude == 8:  # All 3 pairs strong
-            return 0.04   # +4.0% confidence boost
-        elif alignment_magnitude == 5:  # 1 strong pair (TR or ST)
-            return 0.025  # +2.5% confidence boost
-        elif alignment_magnitude == 3:  # 1 weak pair (SR)
-            return 0.015  # +1.5% confidence boost
-        else:
-            return 0.0
     
     def _determine_decision(
         self, 

@@ -112,15 +112,36 @@ def _period_to_days(period: str) -> int:
     return period_map.get(period, 5)
 
 
+# ==========================================
+# SESSION-SCOPED CACHE FOR BATCH RUNS
+# ==========================================
+
+# Global cache for fetch_dual_timeframe - cleared between runs
+_PRICE_CACHE = {}
+
+
+def clear_price_cache():
+    """Clear the session-scoped price cache (call between batch runs)"""
+    global _PRICE_CACHE
+    _PRICE_CACHE.clear()
+    print("🗑️ Price cache cleared")
+
+
 def fetch_dual_timeframe(
     ticker_symbol: str,
     db: Optional[Session] = None
 ) -> Dict[str, Optional[pd.DataFrame]]:
     """
-    Fetch MULTI-timeframe data with OPTIMIZED 2× BUFFER STRATEGY
+    Fetch MULTI-timeframe data with OPTIMIZED 2× BUFFER STRATEGY + SESSION CACHE
     
     DESIGN PRINCIPLE:
     Each interval fetches 2× the maximum indicator period calculated from that timeframe.
+    
+    CACHE STRATEGY:
+    - Session-scoped in-memory cache to avoid redundant API calls within same batch run
+    - Cache key: (ticker_symbol, interval, period)
+    - Cache persists across multiple ticker processing in same run
+    - Call clear_price_cache() between runs to refresh data
     
     TIMEFRAME-SPECIFIC CALCULATIONS:
     - 5m timeframe indicators: SMA_20, RSI_14, MACD_26 → Max: 26 × 2 = 52 candles → 2d period
@@ -139,14 +160,29 @@ def fetch_dual_timeframe(
     print(f"\n🔍 DEBUG: ===== fetch_dual_timeframe START for {ticker_symbol} =====")
     print(f"   📊 Fetching optimized 2× buffer multi-timeframe data...")
     
+    # Helper function with caching
+    def get_cached_price_data(ticker: str, interval: str, period: str):
+        cache_key = (ticker, interval, period)
+        
+        if cache_key in _PRICE_CACHE:
+            print(f"   ⚡ CACHE HIT: {ticker} {interval} {period} ({len(_PRICE_CACHE[cache_key])} candles)")
+            return _PRICE_CACHE[cache_key]
+        
+        print(f"   📊 CACHE MISS: Fetching {ticker} {interval} {period}")
+        df = fetch_price_data(ticker, interval=interval, period=period, db=db)
+        _PRICE_CACHE[cache_key] = df
+        if df is not None:
+            print(f"   ✅ Cached: {ticker} {interval} {period} ({len(df)} candles)")
+        return df
+    
     # Intraday momentum (5m, 2 days = 2× MACD_26 buffer)
     print(f"\n🔍 DEBUG: Fetching 5m data (2d for 2× MACD buffer)...")
-    df_5m = fetch_price_data(ticker_symbol, interval='5m', period='2d', db=db)
+    df_5m = get_cached_price_data(ticker_symbol, interval='5m', period='2d')
     print(f"🔍 DEBUG: df_5m result: {type(df_5m)}, length: {len(df_5m) if df_5m is not None else 'None'}")
     
     # Trend context (1h, 3 months = 2× SMA_200 buffer)
     print(f"\n🔍 DEBUG: Fetching 1h trend data (3mo for 2× SMA_200 buffer)...")
-    df_1h_trend = fetch_price_data(ticker_symbol, interval='1h', period='3mo', db=db)
+    df_1h_trend = get_cached_price_data(ticker_symbol, interval='1h', period='3mo')
     print(f"🔍 DEBUG: df_1h_trend result: length: {len(df_1h_trend) if df_1h_trend is not None else 'None'}")
     
     # Volatility context (reuse 1h trend data for efficiency)
@@ -156,12 +192,12 @@ def fetch_dual_timeframe(
     
     # S/R levels (15m, 7 days = 2× intraday S/R buffer)
     print(f"\n🔍 DEBUG: Fetching 15m S/R data (7d)...")
-    df_15m = fetch_price_data(ticker_symbol, interval='15m', period='7d', db=db)
+    df_15m = get_cached_price_data(ticker_symbol, interval='15m', period='7d')
     print(f"🔍 DEBUG: df_15m result: length: {len(df_15m) if df_15m is not None else 'None'}")
     
     # Daily data for swing S/R calculation (1d, 1 year = 2× swing S/R buffer)
     print(f"\n🔍 DEBUG: Fetching 1d daily data (1y for 2× swing S/R buffer)...")
-    df_daily = fetch_price_data(ticker_symbol, interval='1d', period='1y', db=db)
+    df_daily = get_cached_price_data(ticker_symbol, interval='1d', period='1y')
     print(f"🔍 DEBUG: df_daily result: length: {len(df_daily) if df_daily is not None else 'None'}")
     
     # NEW: Calculate swing S/R levels from daily data
@@ -229,6 +265,7 @@ def fetch_dual_timeframe(
     if df_daily is not None: candle_summary.append(f"1d: {len(df_daily)}")
     
     print(f"   ✅ Multi-timeframe: {' | '.join(candle_summary)}")
+    print(f"   📊 Cache stats: {len(_PRICE_CACHE)} entries cached")
     
     result = {
         'intraday': df_5m,

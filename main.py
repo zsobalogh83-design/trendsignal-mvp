@@ -19,7 +19,7 @@ sys.path.insert(0, str(src_path))
 from config import TrendSignalConfig, get_config
 from news_collector import NewsCollector
 from signal_generator import SignalGenerator, generate_signals_for_tickers, TradingSignal
-from utils import fetch_price_data, fetch_dual_timeframe, display_dataframe_summary
+from utils import fetch_price_data, fetch_dual_timeframe, display_dataframe_summary, clear_price_cache
 
 # Database imports (optional)
 try:
@@ -260,6 +260,9 @@ def run_batch_analysis(
             print("💾 Database persistence: ENABLED")
         print("=" * 70)
         print()
+        
+        # Clear price cache to ensure fresh data for this run
+        clear_price_cache()
         
         # Collect all data first
         collector = NewsCollector(config, db=db)
