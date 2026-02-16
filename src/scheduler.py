@@ -106,7 +106,7 @@ def get_active_tickers() -> List[dict]:
                 })
             
             # US market
-            elif us_open and ticker.market == 'US':
+            elif us_open and ticker.market in ['US', 'NASDAQ', 'NYSE']:
                 active_tickers.append({
                     'symbol': ticker.symbol,
                     'name': ticker.name,
