@@ -71,12 +71,14 @@ def is_us_market_open() -> bool:
 def get_active_tickers() -> List[dict]:
     """
     Get list of tickers for markets that are currently open
+    READS FROM DATABASE (not config.all_tickers)
     
     Returns:
         List of ticker dictionaries for active markets
     """
-    config = get_config()
-    active_tickers = []
+    # Import database components
+    from database import SessionLocal
+    from models import Ticker
     
     bet_open = is_bet_open()
     us_open = is_us_market_open()
@@ -85,19 +87,45 @@ def get_active_tickers() -> List[dict]:
         print("⏸️  No markets currently open")
         return []
     
-    # Add BÉT tickers if market is open
-    if bet_open:
-        print("🟢 BÉT market is OPEN")
-        bet_tickers = [t for t in config.all_tickers if t['market'] == 'BET']
-        active_tickers.extend(bet_tickers)
-    
-    # Add US tickers if market is open
-    if us_open:
-        print("🟢 US market is OPEN")
-        us_tickers = [t for t in config.all_tickers if t['market'] == 'US']
-        active_tickers.extend(us_tickers)
-    
-    return active_tickers
+    # Query database for active tickers
+    db = SessionLocal()
+    try:
+        active_tickers = []
+        
+        # Get all active tickers from database
+        tickers = db.query(Ticker).filter(Ticker.is_active == True).all()
+        
+        # Filter by market hours
+        for ticker in tickers:
+            # BÉT/Hungarian market
+            if bet_open and ticker.market in ['HU', 'BÉT', 'BET']:
+                active_tickers.append({
+                    'symbol': ticker.symbol,
+                    'name': ticker.name,
+                    'market': 'BET'  # Normalize to BET for consistency
+                })
+            
+            # US market
+            elif us_open and ticker.market == 'US':
+                active_tickers.append({
+                    'symbol': ticker.symbol,
+                    'name': ticker.name,
+                    'market': 'US'
+                })
+        
+        # Log results
+        if bet_open:
+            bet_count = len([t for t in active_tickers if t['market'] == 'BET'])
+            print(f"🟢 BÉT market is OPEN - {bet_count} active tickers")
+        
+        if us_open:
+            us_count = len([t for t in active_tickers if t['market'] == 'US'])
+            print(f"🟢 US market is OPEN - {us_count} active tickers")
+        
+        return active_tickers
+        
+    finally:
+        db.close()
 
 
 # ==========================================
