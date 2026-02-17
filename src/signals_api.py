@@ -6,7 +6,7 @@ Add to your FastAPI app (api.py):
     from signals_api import router as signals_router
     app.include_router(signals_router)
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -382,6 +382,162 @@ async def trigger_scheduled_refresh():
 
 
 # ===== GET ENDPOINTS =====
+
+@router.get("/history")
+async def get_signal_history(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    ticker_symbols: Optional[List[str]] = Query(None),
+    decisions: Optional[List[str]] = Query(None),
+    strengths: Optional[List[str]] = Query(None),
+    min_score: Optional[float] = None,
+    max_score: Optional[float] = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db)
+):
+    """
+    Get historical signals with flexible filtering
+    
+    Query params:
+    - from_date: Start date (YYYY-MM-DD format)
+    - to_date: End date (YYYY-MM-DD format)
+    - ticker_symbols: List of ticker symbols to filter (can be multiple)
+    - decisions: List of decisions to filter (BUY, SELL, HOLD)
+    - strengths: List of strengths to filter (STRONG, MODERATE, WEAK)
+    - min_score: Minimum combined score
+    - max_score: Maximum combined score
+    - limit: Maximum number of results (default: 100)
+    - offset: Pagination offset (default: 0)
+    
+    Returns signals with status='expired' or 'archived'
+    """
+    try:
+        # Start with base query - only expired or archived signals
+        query = db.query(Signal).filter(
+            Signal.status.in_(['expired', 'archived'])
+        )
+        
+        # Date range filtering
+        if from_date:
+            try:
+                from_datetime = datetime.strptime(from_date, "%Y-%m-%d")
+                query = query.filter(Signal.created_at >= from_datetime)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid from_date format. Expected YYYY-MM-DD, got: {from_date}"
+                )
+        
+        if to_date:
+            try:
+                # Add 1 day to include the entire to_date
+                to_datetime = datetime.strptime(to_date, "%Y-%m-%d") + timedelta(days=1)
+                query = query.filter(Signal.created_at < to_datetime)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid to_date format. Expected YYYY-MM-DD, got: {to_date}"
+                )
+        
+        # Ticker symbols filtering
+        if ticker_symbols:
+            # Convert to uppercase and filter
+            ticker_symbols_upper = [s.upper() for s in ticker_symbols]
+            query = query.filter(Signal.ticker_symbol.in_(ticker_symbols_upper))
+        
+        # Decision filtering
+        if decisions:
+            valid_decisions = ['BUY', 'SELL', 'HOLD']
+            decisions_upper = [d.upper() for d in decisions]
+            invalid_decisions = [d for d in decisions_upper if d not in valid_decisions]
+            if invalid_decisions:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid decisions: {invalid_decisions}. Valid: {valid_decisions}"
+                )
+            query = query.filter(Signal.decision.in_(decisions_upper))
+        
+        # Strength filtering
+        if strengths:
+            valid_strengths = ['STRONG', 'MODERATE', 'WEAK']
+            strengths_upper = [s.upper() for s in strengths]
+            invalid_strengths = [s for s in strengths_upper if s not in valid_strengths]
+            if invalid_strengths:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid strengths: {invalid_strengths}. Valid: {valid_strengths}"
+                )
+            query = query.filter(Signal.strength.in_(strengths_upper))
+        
+        # Score range filtering
+        if min_score is not None:
+            query = query.filter(Signal.combined_score >= min_score)
+        if max_score is not None:
+            query = query.filter(Signal.combined_score <= max_score)
+        
+        # Get total count before pagination
+        total_count = query.count()
+        
+        # Order by created_at descending (newest first) and apply pagination
+        signals = query.order_by(Signal.created_at.desc()).limit(limit).offset(offset).all()
+        
+        # Format response (same format as get_signals)
+        signals_list = []
+        for signal in signals:
+            reasoning = json.loads(signal.reasoning_json) if signal.reasoning_json else {}
+            
+            signals_list.append({
+                "id": signal.id,
+                "ticker_symbol": signal.ticker_symbol,
+                "technical_indicator_id": signal.technical_indicator_id,
+                "decision": signal.decision,
+                "strength": signal.strength,
+                "combined_score": float(signal.combined_score),
+                "overall_confidence": float(signal.overall_confidence),
+                "sentiment_score": float(signal.sentiment_score),
+                "technical_score": float(signal.technical_score),
+                "risk_score": float(signal.risk_score),
+                "sentiment_confidence": float(signal.sentiment_confidence) if signal.sentiment_confidence else 0.0,
+                "technical_confidence": float(signal.technical_confidence) if signal.technical_confidence else 0.0,
+                "entry_price": float(signal.entry_price) if signal.entry_price else 0.0,
+                "stop_loss": float(signal.stop_loss) if signal.stop_loss else 0.0,
+                "take_profit": float(signal.take_profit) if signal.take_profit else 0.0,
+                "risk_reward_ratio": float(signal.risk_reward_ratio) if signal.risk_reward_ratio else 1.0,
+                "reasoning": reasoning,
+                "created_at": signal.created_at.isoformat() + "Z",
+                "expires_at": signal.expires_at.isoformat() + "Z" if signal.expires_at else None,
+                "status": signal.status
+            })
+        
+        # Return response with applied filters info
+        return {
+            "signals": signals_list,
+            "total": total_count,
+            "filters_applied": {
+                "from_date": from_date,
+                "to_date": to_date,
+                "ticker_symbols": ticker_symbols,
+                "decisions": decisions,
+                "strengths": strengths,
+                "min_score": min_score,
+                "max_score": max_score,
+                "limit": limit,
+                "offset": offset
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error getting signal history: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get signal history: {str(e)}"
+        )
+
 
 @router.get("")
 async def get_signals(

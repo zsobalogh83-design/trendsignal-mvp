@@ -224,3 +224,121 @@ export interface SignalFilters {
 export type SignalsResponse = { signals: Signal[]; total: number };
 export type NewsResponse = { news: NewsItem[]; total: number };
 export type TechnicalData = TechnicalIndicators;
+
+// ====================================================================
+// TRACKBACK SYSTEM TYPES
+// ====================================================================
+
+// Signal History filters
+export interface SignalHistoryFilters {
+  ticker_symbols?: string[];
+  from_date?: string; // ISO 8601 format: YYYY-MM-DD
+  to_date?: string;   // ISO 8601 format: YYYY-MM-DD
+  decisions?: ('BUY' | 'SELL' | 'HOLD')[];
+  strengths?: ('STRONG' | 'MODERATE' | 'WEAK')[];
+  min_score?: number;
+  max_score?: number;
+  limit?: number;
+  offset?: number;
+}
+
+// Simulated Trade types
+export interface SimulatedTrade {
+  id: number;
+  signal_id: number;
+  ticker_symbol: string;
+  
+  // Entry data
+  entry_signal_decision: 'BUY' | 'SELL';
+  entry_signal_strength: 'STRONG' | 'MODERATE' | 'WEAK';
+  entry_price: number;
+  entry_timestamp: string;
+  
+  // Position sizing
+  position_size_shares: number;
+  position_value: number;
+  
+  // Exit data
+  exit_price: number;
+  exit_timestamp: string;
+  exit_reason: 'take_profit' | 'stop_loss' | 'trailing_stop' | 'time_based' | 'signal_reversal';
+  
+  // P&L calculation
+  gross_pnl: number;
+  gross_pnl_percent: number;
+  
+  // K&H brokerage fees
+  entry_fee: number;
+  exit_fee: number;
+  total_fees: number;
+  
+  // Net result
+  net_pnl: number;
+  net_pnl_percent: number;
+  
+  // Metadata
+  holding_period_hours: number;
+  risk_reward_ratio: number;
+  created_at: string;
+}
+
+// Trade Exit record (for tracking multiple exit attempts)
+export interface TradeExit {
+  id: number;
+  simulated_trade_id: number;
+  exit_type: 'take_profit' | 'stop_loss' | 'trailing_stop';
+  exit_price: number;
+  exit_timestamp: string;
+  was_triggered: boolean;
+  created_at: string;
+}
+
+// Performance Analytics types
+export interface PerformanceMetrics {
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  
+  total_gross_pnl: number;
+  total_net_pnl: number;
+  total_fees: number;
+  
+  avg_win: number;
+  avg_loss: number;
+  largest_win: number;
+  largest_loss: number;
+  
+  avg_holding_period_hours: number;
+  
+  profit_factor: number; // sum(wins) / abs(sum(losses))
+  sharpe_ratio?: number;
+}
+
+export interface PerformanceByTicker {
+  ticker_symbol: string;
+  metrics: PerformanceMetrics;
+}
+
+export interface PerformanceByStrategy {
+  decision: 'BUY' | 'SELL';
+  strength: 'STRONG' | 'MODERATE' | 'WEAK';
+  metrics: PerformanceMetrics;
+}
+
+// API response types for trackback
+export interface SignalHistoryResponse {
+  signals: Signal[];
+  total: number;
+  filters_applied: SignalHistoryFilters;
+}
+
+export interface SimulatedTradesResponse {
+  trades: SimulatedTrade[];
+  total: number;
+  summary: {
+    total_pnl: number;
+    win_rate: number;
+    avg_holding_hours: number;
+  };
+}

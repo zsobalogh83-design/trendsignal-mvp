@@ -4,6 +4,7 @@ import { Dashboard } from './pages/Dashboard';
 import { SignalDetail } from './pages/SignalDetail';
 import { NewsFeed } from './pages/NewsFeed';
 import { Configuration } from './pages/Configuration';
+import { SignalHistory } from './pages/SignalHistory';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -25,6 +26,7 @@ function App() {
           <Route path="/signal/:tickerId" element={<SignalDetail />} />
           <Route path="/news" element={<NewsFeed />} />
           <Route path="/settings" element={<Configuration />} />
+          <Route path="/history" element={<SignalHistory />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
