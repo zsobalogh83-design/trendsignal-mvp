@@ -126,6 +126,9 @@ export function Dashboard() {
             <Link to="/" style={{ color: '#60a5fa', textDecoration: 'none', fontSize: '14px', fontWeight: '600' }}>
               Dashboard
             </Link>
+            <Link to="/history" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
+              📊 History
+            </Link>
             <Link to="/news" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
               📰 News
             </Link>
