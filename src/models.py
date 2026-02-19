@@ -3,8 +3,8 @@ Database models - SIMPLIFIED VERSION
 NO relationships() - only ForeignKey constraints
 This prevents SQLAlchemy registry conflicts
 
-Version: 2.0 - Simplified
-Date: 2026-02-04
+Version: 2.1 - Added SimulatedTrade model
+Date: 2026-02-17
 """
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, BigInteger
 from sqlalchemy.sql import func
@@ -313,3 +313,102 @@ class SignalCalculation(Base):
     entry_exit_details = Column(Text)
     
     calculation_duration_ms = Column(Integer)
+
+
+# ===== TRACKBACK SYSTEM =====
+
+class SimulatedTrade(Base):
+    """Simulated trades based on generated signals"""
+    __tablename__ = "simulated_trades"
+    __table_args__ = {'extend_existing': True}
+    
+    # ===== PRIMARY KEY =====
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # ===== POSITION IDENTIFIERS =====
+    symbol = Column(String(10), nullable=False, index=True)
+    direction = Column(String(10), nullable=False, index=True)  # 'LONG' or 'SHORT'
+    status = Column(String(10), nullable=False, index=True)  # 'OPEN' or 'CLOSED'
+    
+    # ===== ENTRY INFORMATION =====
+    entry_signal_id = Column(Integer, ForeignKey("signals.id", ondelete="CASCADE"), nullable=False, index=True)
+    entry_signal_generated_at = Column(DateTime, nullable=False, index=True)
+    entry_execution_time = Column(DateTime, nullable=False, index=True)
+    entry_price = Column(Float, nullable=False)
+    entry_score = Column(Float, nullable=False)
+    entry_confidence = Column(Float, nullable=False)
+    
+    # ===== STOP-LOSS & TAKE-PROFIT (Fixed at entry) =====
+    stop_loss_price = Column(Float, nullable=False)
+    take_profit_price = Column(Float, nullable=False)
+    
+    # ===== POSITION SIZE =====
+    position_size_shares = Column(Integer, nullable=False)
+    position_value_huf = Column(Float, nullable=False)
+    usd_huf_rate = Column(Float, nullable=True)  # NULL if HUF ticker
+    
+    # ===== EXIT INFORMATION (NULL if status='OPEN') =====
+    exit_trigger_time = Column(DateTime, nullable=True, index=True)
+    exit_execution_time = Column(DateTime, nullable=True, index=True)
+    exit_price = Column(Float, nullable=True)
+    exit_reason = Column(String(30), nullable=True, index=True)  # 'SL_HIT', 'TP_HIT', 'OPPOSING_SIGNAL', 'EOD_AUTO_LIQUIDATION'
+    exit_signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), nullable=True)
+    exit_score = Column(Float, nullable=True)
+    exit_confidence = Column(Float, nullable=True)
+    
+    # ===== P&L CALCULATION =====
+    pnl_percent = Column(Float, nullable=True, index=True)
+    pnl_amount_huf = Column(Float, nullable=True, index=True)
+    
+    # ===== DURATION =====
+    duration_minutes = Column(Integer, nullable=True)
+    
+    # ===== AUDIT FIELDS =====
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    
+    # ===== COMPUTED PROPERTIES =====
+    
+    @property
+    def is_open(self):
+        """Check if position is still open"""
+        return self.status == "OPEN"
+    
+    @property
+    def is_closed(self):
+        """Check if position is closed"""
+        return self.status == "CLOSED"
+    
+    @property
+    def is_profitable(self):
+        """Check if trade is/was profitable"""
+        if self.pnl_percent is None:
+            return None
+        return self.pnl_percent > 0
+    
+    @property
+    def duration_formatted(self):
+        """Format duration as human-readable string"""
+        if self.duration_minutes is None:
+            return None
+        
+        days = self.duration_minutes // (24 * 60)
+        hours = (self.duration_minutes % (24 * 60)) // 60
+        minutes = self.duration_minutes % 60
+        
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        
+        return " ".join(parts) if parts else "0m"
+    
+    def __repr__(self):
+        return (
+            f"<SimulatedTrade(id={self.id}, symbol={self.symbol}, "
+            f"direction={self.direction}, status={self.status}, "
+            f"entry={self.entry_price}, pnl={self.pnl_percent}%)>"
+        )

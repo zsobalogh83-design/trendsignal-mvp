@@ -6,13 +6,15 @@ No duplicate endpoints - signals handled by signals_api router
 FIXED: CORS + Host settings for proper frontend connection
 🆕 SCHEDULER: Automated signal generation every 15 minutes during market hours
 🆕 TICKERS: Full CRUD via tickers_api router
+🆕 TRACKBACK: Simulated trades backtest system
 """
 
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy.orm import Session
 from config_api import router as config_router
 from signals_api import router as signals_router
-from tickers_api import router as tickers_router  # ✅ NEW: Ticker management
+from tickers_api import router as tickers_router  # ✅ Ticker management
+from simulated_trades_api import router as simulated_trades_router  # ✅ NEW: Simulated Trades (Trackback)
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -116,14 +118,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="TrendSignal API", 
-    version="0.1.0",
+    version="0.2.0",  # ✅ Bumped version for Trackback feature
     lifespan=lifespan  # 🆕 Use lifespan for startup/shutdown
 )
 
 # Include routers
 app.include_router(config_router)
 app.include_router(signals_router)
-app.include_router(tickers_router)  # ✅ NEW: Ticker CRUD endpoints
+app.include_router(tickers_router)  # ✅ Ticker CRUD endpoints
+app.include_router(simulated_trades_router)  # ✅ NEW: Trackback System
 
 # ==========================================
 # CORS CONFIGURATION - CRITICAL FOR FRONTEND
@@ -146,9 +149,14 @@ app.add_middleware(
 async def root():
     return {
         "status": "ok",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "database": "connected",
-        "scheduler_status": "active" if scheduler and scheduler.running else "inactive"
+        "scheduler_status": "active" if scheduler and scheduler.running else "inactive",
+        "features": {
+            "signals": "enabled",
+            "tickers": "enabled",
+            "trackback": "enabled"  # ✅ NEW
+        }
     }
 
 # ✅ OLD /api/v1/tickers endpoint REMOVED - now handled by tickers_router
@@ -202,12 +210,20 @@ async def get_news(
 async def database_status(db: Session = Depends(get_db)):
     """Get database status and statistics"""
     try:
+        # Import SimulatedTrade for stats
+        from src.models import SimulatedTrade
+        
         ticker_count = db.query(Ticker).count()
         signal_count = db.query(Signal).count()
         news_count = db.query(NewsItem).count()
         source_count = db.query(NewsSource).count()
         
         active_signals = db.query(Signal).filter(Signal.status == 'active').count()
+        
+        # ✅ NEW: Simulated trades stats
+        total_trades = db.query(SimulatedTrade).count()
+        open_trades = db.query(SimulatedTrade).filter(SimulatedTrade.status == 'OPEN').count()
+        closed_trades = db.query(SimulatedTrade).filter(SimulatedTrade.status == 'CLOSED').count()
         
         return {
             "status": "connected",
@@ -216,7 +232,12 @@ async def database_status(db: Session = Depends(get_db)):
                 "signals": signal_count,
                 "active_signals": active_signals,
                 "news_items": news_count,
-                "news_sources": source_count
+                "news_sources": source_count,
+                "simulated_trades": {  # ✅ NEW
+                    "total": total_trades,
+                    "open": open_trades,
+                    "closed": closed_trades
+                }
             }
         }
     except Exception as e:
@@ -280,12 +301,20 @@ if __name__ == "__main__":
     print("🚀 Starting TrendSignal API server...")
     print("📊 Database: SQLite")
     print("🔗 Signals API: Integrated via signals_api router")
-    print("📊 Tickers API: Integrated via tickers_api router")  # ✅ NEW
+    print("📊 Tickers API: Integrated via tickers_api router")
+    print("📈 Trackback API: Integrated via simulated_trades_api router")  # ✅ NEW
     print("⏰ Scheduler: Auto signal refresh every 15 minutes")
     print("=" * 60)
     print("🌐 Server starting on: http://127.0.0.1:8000")
     print("📖 API Documentation: http://127.0.0.1:8000/docs")
     print("✅ Frontend should connect to: http://localhost:8000")
+    print("=" * 60)
+    print("")
+    print("🆕 NEW ENDPOINTS:")
+    print("   POST /api/v1/simulated-trades/backtest")
+    print("   GET  /api/v1/simulated-trades/")
+    print("   GET  /api/v1/simulated-trades/{id}")
+    print("   GET  /api/v1/simulated-trades/stats/summary")
     print("=" * 60)
     
     uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
