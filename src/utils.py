@@ -63,7 +63,12 @@ def fetch_price_data(
         if df.empty:
             print(f"⚠️ No data retrieved for {ticker_symbol}")
             return None
-        
+
+        # Convert index to timezone-naive UTC
+        # yfinance returns ET for US stocks, CET for BÉT - must convert to UTC first
+        if hasattr(df.index, 'tz') and df.index.tz is not None:
+            df.index = df.index.tz_convert('UTC').tz_localize(None)
+
         # Ensure required columns
         required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
         print(f"🔍 DEBUG: DataFrame columns: {list(df.columns)}")

@@ -338,9 +338,13 @@ class SimulatedTrade(Base):
     entry_score = Column(Float, nullable=False)
     entry_confidence = Column(Float, nullable=False)
     
-    # ===== STOP-LOSS & TAKE-PROFIT (Fixed at entry) =====
-    stop_loss_price = Column(Float, nullable=False)
-    take_profit_price = Column(Float, nullable=False)
+    # ===== STOP-LOSS & TAKE-PROFIT (Signal-based adaptive) =====
+    stop_loss_price = Column(Float, nullable=False)   # Current SL (updated by same-direction signals)
+    take_profit_price = Column(Float, nullable=False)  # Current TP (updated by same-direction signals)
+    initial_stop_loss_price = Column(Float, nullable=True)   # Original SL at entry (for reference)
+    initial_take_profit_price = Column(Float, nullable=True)  # Original TP at entry (for reference)
+    sl_tp_update_count = Column(Integer, default=0, nullable=True)  # How many times SL/TP was updated
+    sl_tp_last_updated_at = Column(DateTime, nullable=True)  # Last SL/TP update time (UTC)
     
     # ===== POSITION SIZE =====
     position_size_shares = Column(Integer, nullable=False)

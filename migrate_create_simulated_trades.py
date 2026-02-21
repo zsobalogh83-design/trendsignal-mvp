@@ -43,12 +43,12 @@ def migrate():
             CREATE TABLE IF NOT EXISTS simulated_trades (
                 -- Primary Key
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                
+
                 -- Position identifiers
                 symbol TEXT NOT NULL,
                 direction TEXT NOT NULL CHECK(direction IN ('LONG', 'SHORT')),
                 status TEXT NOT NULL CHECK(status IN ('OPEN', 'CLOSED')),
-                
+
                 -- Entry information
                 entry_signal_id INTEGER NOT NULL,
                 entry_signal_generated_at TIMESTAMP NOT NULL,
@@ -56,42 +56,46 @@ def migrate():
                 entry_price REAL NOT NULL,
                 entry_score REAL NOT NULL,
                 entry_confidence REAL NOT NULL,
-                
-                -- Stop-Loss and Take-Profit (fixed at entry)
+
+                -- Stop-Loss and Take-Profit (signal-based adaptive)
                 stop_loss_price REAL NOT NULL,
                 take_profit_price REAL NOT NULL,
-                
+                initial_stop_loss_price REAL,
+                initial_take_profit_price REAL,
+                sl_tp_update_count INTEGER DEFAULT 0,
+                sl_tp_last_updated_at TIMESTAMP,
+
                 -- Position size
                 position_size_shares INTEGER NOT NULL,
                 position_value_huf REAL NOT NULL,
                 usd_huf_rate REAL,
-                
+
                 -- Exit information (NULL if status='OPEN')
                 exit_trigger_time TIMESTAMP,
                 exit_execution_time TIMESTAMP,
                 exit_price REAL,
                 exit_reason TEXT CHECK(exit_reason IN (
-                    'SL_HIT', 
-                    'TP_HIT', 
-                    'OPPOSING_SIGNAL', 
+                    'SL_HIT',
+                    'TP_HIT',
+                    'OPPOSING_SIGNAL',
                     'EOD_AUTO_LIQUIDATION',
                     NULL
                 )),
                 exit_signal_id INTEGER,
                 exit_score REAL,
                 exit_confidence REAL,
-                
+
                 -- P&L calculation
                 pnl_percent REAL,
                 pnl_amount_huf REAL,
-                
+
                 -- Duration
                 duration_minutes INTEGER,
-                
+
                 -- Audit fields
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
+
                 -- Foreign Keys
                 FOREIGN KEY (entry_signal_id) REFERENCES signals(id) ON DELETE CASCADE,
                 FOREIGN KEY (exit_signal_id) REFERENCES signals(id) ON DELETE SET NULL
