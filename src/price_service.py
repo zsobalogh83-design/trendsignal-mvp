@@ -16,6 +16,7 @@ import yfinance as yf
 from datetime import datetime, timedelta, time
 from typing import Optional, Dict
 import logging
+import pytz
 
 from src.exceptions import InsufficientDataError
 
@@ -55,7 +56,65 @@ class PriceService:
     def _is_weekend(self, utc_time: datetime) -> bool:
         """Check if weekend (Saturday=5, Sunday=6)"""
         return utc_time.weekday() >= 5
-    
+
+    def _next_market_open_utc(self, utc_time: datetime, symbol: str) -> datetime:
+        """
+        Return the next market open time in UTC after utc_time,
+        if utc_time is outside trading hours or on a weekend.
+
+        Market open times (UTC):
+            BÉT (.BD): 08:00 UTC (09:00 CET, winter) – use 08:00 as conservative open
+            US:        14:30 UTC (09:30 ET)
+
+        Args:
+            utc_time: UTC datetime that is outside trading hours
+            symbol: Ticker symbol
+
+        Returns:
+            UTC datetime of the next market open
+        """
+        if symbol.endswith('.BD'):
+            open_hour, open_minute = 8, 0      # 08:00 UTC = 09:00 CET
+        else:
+            open_hour, open_minute = 14, 30    # 14:30 UTC = 09:30 ET
+
+        candidate = utc_time.replace(hour=open_hour, minute=open_minute, second=0, microsecond=0)
+
+        # If we're already past today's open, move to next day
+        if candidate <= utc_time:
+            candidate += timedelta(days=1)
+
+        # Skip weekends (Saturday=5, Sunday=6)
+        while candidate.weekday() >= 5:
+            candidate += timedelta(days=1)
+
+        return candidate
+
+    def _utc_to_market_time(self, utc_time: datetime, symbol: str) -> datetime:
+        """
+        Convert UTC datetime to market local time.
+
+        Args:
+            utc_time: Timezone-naive UTC datetime
+            symbol: Ticker symbol (determines market timezone)
+
+        Returns:
+            Timezone-naive datetime in market local time
+        """
+        if symbol.endswith('.BD'):
+            # BÉT: CET/CEST (Europe/Budapest)
+            market_tz = pytz.timezone('Europe/Budapest')
+        else:
+            # US markets: ET (America/New_York)
+            market_tz = pytz.timezone('America/New_York')
+
+        # Localize as UTC then convert
+        utc_aware = pytz.utc.localize(utc_time)
+        market_aware = utc_aware.astimezone(market_tz)
+
+        # Return timezone-naive market time
+        return market_aware.replace(tzinfo=None)
+
     def get_5min_candle_at_time(
         self, 
         symbol: str, 
@@ -81,10 +140,20 @@ class PriceService:
         Raises:
             InsufficientDataError: If no data available
         """
-        # Calculate execution time (UTC)
+        # Calculate execution time (UTC): signal + 15 min delay
         execution_time_utc = signal_time_utc + timedelta(minutes=15)
-        
-        logger.debug(f"   {symbol}: Signal {signal_time_utc} + 15min = {execution_time_utc} UTC")
+
+        # If execution time falls outside trading hours or on a weekend,
+        # move to next market open (signal arrived after-hours or manually)
+        if self._is_weekend(execution_time_utc) or not self._is_trading_hours(execution_time_utc, symbol):
+            next_open = self._next_market_open_utc(execution_time_utc, symbol)
+            logger.info(
+                f"   {symbol}: Execution {execution_time_utc} outside trading hours → "
+                f"forwarding to next open {next_open} UTC"
+            )
+            execution_time_utc = next_open
+
+        logger.debug(f"   {symbol}: Signal {signal_time_utc} → execution {execution_time_utc} UTC")
         
         # STEP 1: Try DB first (FAST)
         try:
@@ -161,9 +230,13 @@ class PriceService:
             
             if df.empty:
                 raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
-            
-            # Convert to timezone-naive UTC
-            df.index = df.index.tz_localize(None)
+
+            # Convert timezone-aware index to timezone-naive UTC
+            # yfinance returns timestamps in the exchange's local timezone (ET for US, CET for BÉT)
+            # tz_convert('UTC') correctly handles DST, then strip tzinfo for naive comparison
+            if df.index.tzinfo is not None or hasattr(df.index, 'tz') and df.index.tz is not None:
+                df.index = df.index.tz_convert('UTC').tz_localize(None)
+            # else: already naive, leave as-is
             
             # Find closest
             time_differences = abs(df.index - execution_time_utc)

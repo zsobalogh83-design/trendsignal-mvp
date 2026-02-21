@@ -1,5 +1,5 @@
 """
-TrendSignal - Backtest Service (v2 - All Signals)
+TrendSignal - Backtest Service (v3 - Signal-based adaptive SL/TP)
 Processes ALL non-neutral signals, creates trade for each
 
 LOGIC:
@@ -7,9 +7,18 @@ LOGIC:
 - First run: All trades are new
 - Subsequent runs: Skip already processed signals
 - Development: DROP TABLE before each run
+- SL/TP updated in-flight by same-direction signals (signal-based trailing)
 
-Version: 2.0 - Process all signals
-Date: 2026-02-17
+SL/TP UPDATE RULES:
+- LONG: new SL > current SL → update (move stop up, lock in gains)
+         new TP > current TP → update (raise target if market is stronger)
+- SHORT: new SL < current SL → update (move stop down, lock in gains)
+         new TP < current TP → update (lower target if market is weaker)
+- Only non-neutral same-direction signals trigger updates (|score| >= 25)
+- The entry signal itself is excluded from updates
+
+Version: 3.0 - Signal-based adaptive SL/TP
+Date: 2026-02-21
 """
 
 from datetime import datetime, timedelta
@@ -21,7 +30,7 @@ import time
 
 from src.models import Signal, SimulatedTrade
 from src.trade_manager import TradeManager
-from src.exceptions import InsufficientDataError, InvalidSignalError
+from src.exceptions import InsufficientDataError, InvalidSignalError, PositionAlreadyExistsError
 
 logger = logging.getLogger(__name__)
 
@@ -165,11 +174,16 @@ class BacktestService:
         except InsufficientDataError as e:
             logger.debug(f"   Skip {signal.ticker_symbol}: No price data")
             return 'skipped_no_data'
-        
+
         except InvalidSignalError as e:
             logger.debug(f"   Skip {signal.ticker_symbol}: {e}")
             return 'skipped_invalid'
-        
+
+        except PositionAlreadyExistsError as e:
+            # Another open trade exists for this symbol - skip this signal
+            logger.debug(f"   Skip {signal.ticker_symbol}: {e}")
+            return 'skipped_invalid'
+
         except Exception as e:
             logger.error(f"   Error {signal.ticker_symbol}: {e}")
             raise
@@ -187,35 +201,63 @@ class BacktestService:
         # Start checking from entry + 15 min
         check_time_utc = trade.entry_signal_generated_at + timedelta(minutes=30)
         now_utc = datetime.utcnow()
-        
+
+        price_service = self.trade_manager.price_service
+
         # Check every 15 minutes
         while check_time_utc <= now_utc:
+            # Skip weekends entirely - markets are closed, no candles, no exits possible
+            if price_service._is_weekend(check_time_utc):
+                check_time_utc += timedelta(minutes=15)
+                continue
+
+            # Skip outside trading hours - no candles available
+            # Also skip the last 15 minutes before market close to avoid
+            # get_5min_candle_at_time's +15min offset pushing into after-hours
+            if not price_service._is_trading_hours(check_time_utc, trade.symbol):
+                check_time_utc += timedelta(minutes=15)
+                continue
+
+            # Guard: ensure check_time + 15min (execution offset) is still within trading hours
+            check_plus_15 = check_time_utc + timedelta(minutes=15)
+            if not price_service._is_trading_hours(check_plus_15, trade.symbol):
+                # This candle would be fetched outside trading hours - skip to next day open
+                check_time_utc = price_service._next_market_open_utc(check_time_utc, trade.symbol)
+                continue
+
             trigger = self._check_exit_triggers_at_time(trade, check_time_utc)
-            
+
             if trigger:
                 logger.debug(
                     f"      Exit: {trade.symbol} {trigger['exit_reason']} "
                     f"@ {check_time_utc} UTC"
                 )
-                
+
                 self.trade_manager.close_position(
                     trade,
                     exit_reason=trigger['exit_reason'],
                     exit_signal=trigger.get('exit_signal'),
                     trigger_time_utc=check_time_utc
                 )
-                
+
                 return True
-            
+
             check_time_utc += timedelta(minutes=15)
         
         # Still open
         return False
     
     def _check_exit_triggers_at_time(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Dict]:
-        """Check all exit triggers at specific UTC time"""
-        
-        # Priority 1: SL/TP
+        """Check all exit triggers at specific UTC time.
+
+        Priority order:
+        1. SL_HIT / TP_HIT  (uses current SL/TP which may already be updated)
+        2. Same-direction signal → update SL/TP in-place (no exit, continue loop)
+        3. OPPOSING_SIGNAL → exit
+        4. EOD_AUTO_LIQUIDATION (SHORT only)
+        """
+
+        # Priority 1: SL/TP check against current (possibly already updated) levels
         price_trigger = self.trade_manager.price_service.check_price_triggers(
             trade.symbol,
             trade.stop_loss_price,
@@ -224,60 +266,196 @@ class BacktestService:
             check_time_utc,
             tolerance_minutes=15
         )
-        
+
         if price_trigger and price_trigger['triggered']:
             return {
                 'exit_reason': price_trigger['trigger_type'],
                 'exit_signal': None
             }
-        
-        # Priority 2: Opposing signal
+
+        # Priority 2: Same-direction signal → adaptive SL/TP update (no exit)
+        same_dir = self._find_same_direction_signal(trade, check_time_utc)
+        if same_dir:
+            updated = self._update_sl_tp_from_signal(trade, same_dir, check_time_utc)
+            if updated:
+                # After update immediately re-check SL/TP with new levels
+                # (edge case: updated SL already breached by current price)
+                price_trigger2 = self.trade_manager.price_service.check_price_triggers(
+                    trade.symbol,
+                    trade.stop_loss_price,
+                    trade.take_profit_price,
+                    trade.direction,
+                    check_time_utc,
+                    tolerance_minutes=15
+                )
+                if price_trigger2 and price_trigger2['triggered']:
+                    return {
+                        'exit_reason': price_trigger2['trigger_type'],
+                        'exit_signal': None
+                    }
+
+        # Priority 3: Opposing signal → exit
         opposing = self._find_opposing_signal(trade, check_time_utc)
         if opposing:
             return {
                 'exit_reason': 'OPPOSING_SIGNAL',
                 'exit_signal': opposing
             }
-        
-        # Priority 3: EOD (SHORT only)
+
+        # Priority 4: EOD (SHORT only, weekdays only)
         if trade.direction == 'SHORT':
-            market_time = self.trade_manager.price_service._utc_to_market_time(
-                check_time_utc, 
-                trade.symbol
-            )
-            if self.trade_manager._is_eod_time(market_time):
-                return {
-                    'exit_reason': 'EOD_AUTO_LIQUIDATION',
-                    'exit_signal': None
-                }
-        
+            price_service = self.trade_manager.price_service
+            if not price_service._is_weekend(check_time_utc):
+                market_time = price_service._utc_to_market_time(
+                    check_time_utc,
+                    trade.symbol
+                )
+                if self.trade_manager._is_eod_time(market_time):
+                    return {
+                        'exit_reason': 'EOD_AUTO_LIQUIDATION',
+                        'exit_signal': None
+                    }
+
         return None
+
+    def _update_sl_tp_from_signal(
+        self,
+        trade: SimulatedTrade,
+        signal: Signal,
+        check_time_utc: datetime
+    ) -> bool:
+        """
+        Update trade SL/TP from a same-direction signal if the new levels are
+        more favourable (i.e. lock in more profit or raise the target).
+
+        LONG: better SL = higher SL (closer to price from below)
+              better TP = higher TP (more ambitious upside target)
+        SHORT: better SL = lower SL (closer to price from above)
+               better TP = lower TP (more ambitious downside target)
+
+        Returns:
+            True if at least one level was updated, False otherwise
+        """
+        if signal.stop_loss is None and signal.take_profit is None:
+            return False
+
+        updated = False
+
+        if trade.direction == 'LONG':
+            if signal.stop_loss is not None and signal.stop_loss > trade.stop_loss_price:
+                logger.debug(
+                    f"      SL updated {trade.symbol} LONG: "
+                    f"{trade.stop_loss_price:.4f} → {signal.stop_loss:.4f} "
+                    f"(signal {signal.id} @ {check_time_utc})"
+                )
+                trade.stop_loss_price = signal.stop_loss
+                updated = True
+
+            if signal.take_profit is not None and signal.take_profit > trade.take_profit_price:
+                logger.debug(
+                    f"      TP updated {trade.symbol} LONG: "
+                    f"{trade.take_profit_price:.4f} → {signal.take_profit:.4f} "
+                    f"(signal {signal.id} @ {check_time_utc})"
+                )
+                trade.take_profit_price = signal.take_profit
+                updated = True
+
+        else:  # SHORT
+            if signal.stop_loss is not None and signal.stop_loss < trade.stop_loss_price:
+                logger.debug(
+                    f"      SL updated {trade.symbol} SHORT: "
+                    f"{trade.stop_loss_price:.4f} → {signal.stop_loss:.4f} "
+                    f"(signal {signal.id} @ {check_time_utc})"
+                )
+                trade.stop_loss_price = signal.stop_loss
+                updated = True
+
+            if signal.take_profit is not None and signal.take_profit < trade.take_profit_price:
+                logger.debug(
+                    f"      TP updated {trade.symbol} SHORT: "
+                    f"{trade.take_profit_price:.4f} → {signal.take_profit:.4f} "
+                    f"(signal {signal.id} @ {check_time_utc})"
+                )
+                trade.take_profit_price = signal.take_profit
+                updated = True
+
+        if updated:
+            trade.sl_tp_update_count = (trade.sl_tp_update_count or 0) + 1
+            trade.sl_tp_last_updated_at = check_time_utc
+
+        return updated
     
     def _find_opposing_signal(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Signal]:
-        """Find opposing signal near check time"""
-        time_start = check_time_utc - timedelta(minutes=15)
-        time_end = check_time_utc + timedelta(minutes=15)
-        
+        """Find opposing signal on the same trading day up to check_time.
+
+        An opposing signal anywhere during the current trading day is sufficient
+        to trigger a position reversal - it does not need to be within ±15 min.
+        We return the strongest (highest abs score) opposing signal of the day,
+        so the most decisive reversal wins.
+        """
+        # Search from the start of the current UTC day up to check_time
+        day_start = check_time_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+
         signals = self.db.query(Signal).filter(
             and_(
                 Signal.ticker_symbol == trade.symbol,
-                Signal.created_at >= time_start,
-                Signal.created_at <= time_end,
+                Signal.created_at >= day_start,
+                Signal.created_at <= check_time_utc,
                 Signal.id != trade.entry_signal_id
             )
         ).all()
-        
+
+        best = None
         for signal in signals:
             if abs(signal.combined_score) < 25:
                 continue
-            
             if trade.direction == 'LONG' and signal.combined_score <= -25:
-                return signal
+                if best is None or abs(signal.combined_score) > abs(best.combined_score):
+                    best = signal
             elif trade.direction == 'SHORT' and signal.combined_score >= 25:
-                return signal
-        
-        return None
+                if best is None or abs(signal.combined_score) > abs(best.combined_score):
+                    best = signal
+
+        return best
     
+    def _find_same_direction_signal(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Signal]:
+        """Find the strongest same-direction signal on the current trading day up to check_time.
+
+        Used for signal-based adaptive SL/TP update:
+        - LONG trade → look for signals with combined_score >= 25
+        - SHORT trade → look for signals with combined_score <= -25
+
+        The entry signal is excluded. We pick the strongest (highest abs score)
+        same-direction signal so the most decisive confirmation drives the update.
+
+        Only signals that have valid SL or TP values are considered useful.
+        """
+        day_start = check_time_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        signals = self.db.query(Signal).filter(
+            and_(
+                Signal.ticker_symbol == trade.symbol,
+                Signal.created_at >= day_start,
+                Signal.created_at <= check_time_utc,
+                Signal.id != trade.entry_signal_id
+            )
+        ).all()
+
+        best = None
+        for signal in signals:
+            # Must have at least one of SL or TP to be useful for updating
+            if signal.stop_loss is None and signal.take_profit is None:
+                continue
+
+            if trade.direction == 'LONG' and signal.combined_score >= 25:
+                if best is None or abs(signal.combined_score) > abs(best.combined_score):
+                    best = signal
+            elif trade.direction == 'SHORT' and signal.combined_score <= -25:
+                if best is None or abs(signal.combined_score) > abs(best.combined_score):
+                    best = signal
+
+        return best
+
     def _get_signals(
         self,
         date_from: Optional[datetime],

@@ -315,7 +315,7 @@ class SignalGenerator:
         signal = TradingSignal(
             ticker_symbol=ticker_symbol,
             ticker_name=ticker_name,
-            timestamp=datetime.now(),
+            timestamp=datetime.utcnow(),
             decision=decision,
             strength=strength,
             combined_score=round(combined_score, 2),
@@ -2206,7 +2206,7 @@ def create_mock_signal(ticker_symbol: str = "TEST") -> TradingSignal:
     return TradingSignal(
         ticker_symbol=ticker_symbol,
         ticker_name="Test Stock",
-        timestamp=datetime.now(),
+        timestamp=datetime.utcnow(),
         decision="BUY",
         strength="STRONG",
         combined_score=72.5,

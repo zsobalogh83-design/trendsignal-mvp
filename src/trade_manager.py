@@ -37,6 +37,11 @@ class TradeManager:
     EXECUTION_DELAY_MINUTES = 15
     EOD_LIQUIDATION_HOUR = 16
     EOD_LIQUIDATION_MINUTE = 45
+
+    # Pyramiding parameters (set MAX_PARALLEL_POSITIONS = 1 to disable pyramiding)
+    MAX_PARALLEL_POSITIONS = 1          # Max open trades per symbol per direction (1 = no pyramiding)
+    PYRAMIDING_MIN_HOURS = 6            # Min hours between entry signals
+    PYRAMIDING_MIN_SENTIMENT = 40.0     # Min |sentiment_score| for sentiment-driven pyramid
     
     def __init__(self, db: Session):
         """Initialize trade manager"""
@@ -71,13 +76,92 @@ class TradeManager:
             )
         
         # 2. CHECK EXISTING POSITION
-        existing = self.db.query(SimulatedTrade).filter(
+        new_direction = "LONG" if signal.combined_score >= 25 else "SHORT"
+        signal_execution_utc = signal.created_at + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
+
+        # Count currently OPEN trades on this symbol in the same direction
+        open_same_dir = self.db.query(SimulatedTrade).filter(
             SimulatedTrade.symbol == symbol,
-            SimulatedTrade.status == "OPEN"
+            SimulatedTrade.status == "OPEN",
+            SimulatedTrade.direction == new_direction
+        ).all()
+
+        # Count currently OPEN trades in the OPPOSING direction
+        open_opposing = self.db.query(SimulatedTrade).filter(
+            SimulatedTrade.symbol == symbol,
+            SimulatedTrade.status == "OPEN",
+            SimulatedTrade.direction != new_direction
         ).first()
-        
-        if existing:
-            raise PositionAlreadyExistsError(symbol, existing.id)
+
+        if open_opposing:
+            # Opposing open trade exists → only allow if this is a flip signal
+            # (handled below via OPPOSING_SIGNAL exit in backtest_service)
+            raise PositionAlreadyExistsError(symbol, open_opposing.id)
+
+        if open_same_dir:
+            # Same-direction open trade(s) exist → check pyramiding conditions
+            # Max 2 parallel positions per symbol per direction
+            if len(open_same_dir) >= self.MAX_PARALLEL_POSITIONS:
+                raise PositionAlreadyExistsError(symbol, open_same_dir[0].id)
+
+            # Find the MOST RECENT open trade - pyramiding requires 6h gap from the
+            # latest entry, not the oldest. This prevents a 3rd position slipping in
+            # just because it's far from the 1st.
+            newest_open = max(open_same_dir, key=lambda t: t.entry_signal_generated_at)
+            oldest_open = min(open_same_dir, key=lambda t: t.entry_signal_generated_at)
+
+            # Pyramiding condition 1: at least 6 hours since the NEWEST open position
+            hours_since_newest = (
+                signal.created_at - newest_open.entry_signal_generated_at
+            ).total_seconds() / 3600
+            if hours_since_newest < self.PYRAMIDING_MIN_HOURS:
+                raise PositionAlreadyExistsError(symbol, newest_open.id)
+
+            # Pyramiding condition 2a: new signal score > oldest open entry score
+            score_stronger = abs(signal.combined_score) > abs(oldest_open.entry_score)
+
+            # Pyramiding condition 2b: strong sentiment dominance (|sentiment_score| >= 40)
+            sentiment_dominant = (
+                signal.sentiment_score is not None
+                and abs(signal.sentiment_score) >= self.PYRAMIDING_MIN_SENTIMENT
+            )
+
+            if not (score_stronger or sentiment_dominant):
+                raise PositionAlreadyExistsError(symbol, newest_open.id)
+
+            logger.info(
+                f"   📈 Pyramiding allowed: {symbol} {new_direction} "
+                f"(elapsed_since_newest={hours_since_newest:.1f}h, "
+                f"score_stronger={score_stronger}, sentiment_dominant={sentiment_dominant})"
+            )
+
+        # Also check for a CLOSED trade that overlaps this signal's execution time.
+        # In backtesting, a previous trade on the same symbol may have already been
+        # opened and closed within the same run. If the previous trade's entry is
+        # at or after this signal's execution time, a new position cannot be opened
+        # (the capital was already deployed at that time).
+        #
+        # Exception: if the overlapping trade closed via OPPOSING_SIGNAL and this
+        # signal is in the opposite direction (i.e. it IS that opposing signal),
+        # allow opening — this is a position flip/reversal.
+        #
+        # Pyramiding exception: if there are already open same-direction trades,
+        # we skip the overlap check (the capital is being added intentionally).
+        if not open_same_dir:
+            existing_overlap = self.db.query(SimulatedTrade).filter(
+                SimulatedTrade.symbol == symbol,
+                SimulatedTrade.status == "CLOSED",
+                SimulatedTrade.entry_signal_generated_at <= signal.created_at,
+                SimulatedTrade.exit_trigger_time >= signal_execution_utc
+            ).first()
+
+            if existing_overlap:
+                is_flip = (
+                    existing_overlap.exit_reason == "OPPOSING_SIGNAL"
+                    and existing_overlap.direction != new_direction
+                )
+                if not is_flip:
+                    raise PositionAlreadyExistsError(symbol, existing_overlap.id)
         
         # 3. CALCULATE EXECUTION TIME (UTC + 15 min, handles weekends)
         # Signal.created_at is in UTC
@@ -144,6 +228,9 @@ class TradeManager:
             entry_confidence=signal.overall_confidence or 0.0,
             stop_loss_price=stop_loss_price,
             take_profit_price=take_profit_price,
+            initial_stop_loss_price=stop_loss_price,    # Snapshot at entry for reference
+            initial_take_profit_price=take_profit_price, # Snapshot at entry for reference
+            sl_tp_update_count=0,
             position_size_shares=position_size,
             position_value_huf=position_value,
             usd_huf_rate=usd_huf_rate

@@ -10,6 +10,14 @@ Version: 1.0
 Date: 2026-02-17
 """
 
+import sys
+import io
+
+# Force UTF-8 stdout/stderr on Windows (needed for emoji in database.py prints)
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
@@ -100,8 +108,11 @@ class PriceDataBackfill:
                 logger.warning(f"⚠️  No data returned for {symbol}")
                 return 0
             
-            # Convert index to timezone-naive
-            df.index = df.index.tz_localize(None)
+            # Convert index to timezone-naive UTC
+            # yfinance returns ET for US stocks, CET for BÉT - must convert to UTC first
+            if hasattr(df.index, 'tz') and df.index.tz is not None:
+                df.index = df.index.tz_convert('UTC').tz_localize(None)
+            # else: already naive (shouldn't happen), leave as-is
             
             logger.info(f"   Downloaded {len(df)} candles")
             
