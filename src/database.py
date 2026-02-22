@@ -18,7 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # Go up from src/ to project 
 DATABASE_PATH = BASE_DIR / "trendsignal.db"
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
-print(f"📁 Database path: {DATABASE_PATH}")
+print(f"[DB] Database path: {DATABASE_PATH}")
 
 # Create engine with LOCK PREVENTION settings
 engine = create_engine(

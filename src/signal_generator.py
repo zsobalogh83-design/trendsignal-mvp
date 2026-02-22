@@ -793,42 +793,86 @@ class SignalGenerator:
                 take_profit = atr_tp
                 print(f"  ℹ️ No valid support, TP [atr]: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
 
-        # ===== R:R CALCULATION & MINIMUM ENFORCEMENT =====
+        # ===== SL/TP BOUNDARY ENFORCEMENT =====
         risk = abs(entry_price - stop_loss)
         reward = abs(take_profit - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
 
-        # Step 1: Try to tighten SL to reach minimum R:R (1.5) without moving TP
-        if rr_ratio < config.min_risk_reward and risk > 0:
-            required_risk = reward / config.min_risk_reward
+        # Step 1: SL max cap — never wider than SL_MAX_PCT (default 5%) from entry
+        sl_max_distance = entry_price * config.sl_max_pct
+        if risk > sl_max_distance:
             if "BUY" in decision:
-                tightened_sl = entry_price - required_risk
-                # Only tighten if not more than 20% tighter than original SL
-                if tightened_sl > stop_loss * 1.20 or tightened_sl < entry_price:
-                    stop_loss = tightened_sl
-                    sl_method = "tightened"
-                    risk = abs(entry_price - stop_loss)
-                    rr_ratio = reward / risk if risk > 0 else 0
-                    print(f"  🔧 SL tightened to meet R:R≥{config.min_risk_reward}: {stop_loss:.2f} → R:R={rr_ratio:.2f}")
+                stop_loss = entry_price - sl_max_distance
             else:
-                tightened_sl = entry_price + required_risk
-                if tightened_sl < stop_loss * 0.80 or tightened_sl > entry_price:
-                    stop_loss = tightened_sl
-                    sl_method = "tightened"
-                    risk = abs(entry_price - stop_loss)
-                    rr_ratio = reward / risk if risk > 0 else 0
-                    print(f"  🔧 SL tightened to meet R:R≥{config.min_risk_reward}: {stop_loss:.2f} → R:R={rr_ratio:.2f}")
+                stop_loss = entry_price + sl_max_distance
+            sl_method = "capped"
+            risk = abs(entry_price - stop_loss)
+            rr_ratio = reward / risk if risk > 0 else 0
+            print(f"  📌 SL capped at {config.sl_max_pct*100:.1f}% max: {stop_loss:.2f} → R:R={rr_ratio:.2f}")
 
-        # Step 2: Hard minimum — if still below 0.8, override TP with ATR-based (vol-adjusted)
-        if rr_ratio < config.min_risk_reward_hard:
+        # Step 2: Try to reach minimum R:R (1.5) by pushing TP further — NEVER by tightening SL
+        # This is the preferred way: move TP, not SL
+        if rr_ratio < config.min_risk_reward and risk > 0:
+            target_tp_distance = risk * config.min_risk_reward
             if "BUY" in decision:
-                take_profit = entry_price + (atr * atr_tp_mult)
+                target_tp = entry_price + target_tp_distance
+                if target_tp > take_profit:  # Only push TP further, never closer
+                    take_profit = target_tp
+                    tp_method = "rr_target"
+                    reward = abs(take_profit - entry_price)
+                    rr_ratio = reward / risk if risk > 0 else 0
+                    print(f"  🎯 TP pushed to meet R:R≥{config.min_risk_reward}: {take_profit:.2f} → R:R={rr_ratio:.2f}")
             else:
-                take_profit = entry_price - (atr * atr_tp_mult)
-            tp_method = "atr_override"
+                target_tp = entry_price - target_tp_distance
+                if target_tp < take_profit:  # Only push TP further, never closer
+                    take_profit = target_tp
+                    tp_method = "rr_target"
+                    reward = abs(take_profit - entry_price)
+                    rr_ratio = reward / risk if risk > 0 else 0
+                    print(f"  🎯 TP pushed to meet R:R≥{config.min_risk_reward}: {take_profit:.2f} → R:R={rr_ratio:.2f}")
+
+        # Step 3: TP minimum floor — TP must cover at least the SL range + round-trip trade fee
+        # Guarantees break-even expected value even if R:R target couldn't be reached
+        # i.e. TP% >= SL% + 2*fee%  (fee applied on entry value both sides)
+        min_tp_distance = risk + (entry_price * config.trade_fee_pct * 2)
+        if reward < min_tp_distance:
+            if "BUY" in decision:
+                take_profit = entry_price + min_tp_distance
+            else:
+                take_profit = entry_price - min_tp_distance
+            tp_method = "fee_floor"
             reward = abs(take_profit - entry_price)
             rr_ratio = reward / risk if risk > 0 else 0
-            print(f"  ⚠️ Hard R:R minimum triggered, ATR TP override: {take_profit:.2f} → R:R={rr_ratio:.2f}")
+            print(f"  📌 TP raised to cover SL+fees (min {min_tp_distance/entry_price*100:.2f}%): {take_profit:.2f} → R:R={rr_ratio:.2f}")
+
+        # ===== FINAL SANITY CHECK =====
+        # BUY: SL must be below entry, TP must be above entry
+        # SELL: SL must be above entry, TP must be below entry
+        if "BUY" in decision:
+            if stop_loss >= entry_price:
+                stop_loss = entry_price - (atr * atr_sl_mult)
+                sl_method = "atr"
+                risk = abs(entry_price - stop_loss)
+                print(f"  🚨 SANITY: SL was above/at entry, reset to ATR: {stop_loss:.2f}")
+            if take_profit <= entry_price:
+                take_profit = entry_price + (atr * atr_tp_mult)
+                tp_method = "atr_override"
+                print(f"  🚨 SANITY: TP was below/at entry, reset to ATR: {take_profit:.2f}")
+        else:  # SELL
+            if stop_loss <= entry_price:
+                stop_loss = entry_price + (atr * atr_sl_mult)
+                sl_method = "atr"
+                risk = abs(entry_price - stop_loss)
+                print(f"  🚨 SANITY: SL was below/at entry, reset to ATR: {stop_loss:.2f}")
+            if take_profit >= entry_price:
+                take_profit = entry_price - (atr * atr_tp_mult)
+                tp_method = "atr_override"
+                print(f"  🚨 SANITY: TP was above/at entry, reset to ATR: {take_profit:.2f}")
+
+        # Recalculate final R:R after sanity fixes
+        risk = abs(entry_price - stop_loss)
+        reward = abs(take_profit - entry_price)
+        rr_ratio = reward / risk if risk > 0 else 0
 
         print(f"  📊 Final: SL={stop_loss:.2f} [{sl_method}], TP={take_profit:.2f} [{tp_method}], R:R=1:{rr_ratio:.2f}")
 
