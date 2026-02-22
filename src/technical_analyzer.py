@@ -186,51 +186,47 @@ def detect_support_resistance(
     # order parameter passed from function arguments
     supports = []
     resistances = []
-    
-    # Find local minima (support) with order=7
+
+    def _scalar(val):
+        """Extract scalar float from potentially MultiIndex Series value."""
+        if isinstance(val, pd.Series):
+            return float(val.iloc[0])
+        return float(val)
+
+    # Find local minima (support) with order bars each side
+    # A true swing low must be STRICTLY lower than ALL surrounding bars
     for i in range(order, len(recent_df) - order):
-        window_values = recent_df['Low'].iloc[i-order:i+order+1]
+        left_window  = recent_df['Low'].iloc[i-order:i]
+        right_window = recent_df['Low'].iloc[i+1:i+order+1]
         current_value = recent_df['Low'].iloc[i]
-        
-        # Extract scalar values (handle MultiIndex)
+
         try:
-            min_value = float(window_values.min())
-            current_float = float(current_value)
-        except (TypeError, ValueError):
-            if isinstance(window_values.min(), pd.Series):
-                min_value = float(window_values.min().iloc[0])
-            else:
-                min_value = float(window_values.min())
-            
-            if isinstance(current_value, pd.Series):
-                current_float = float(current_value.iloc[0])
-            else:
-                current_float = float(current_value)
-        
-        if current_float == min_value:
+            current_float = _scalar(current_value)
+            left_min      = _scalar(left_window.min())
+            right_min     = _scalar(right_window.min())
+        except Exception:
+            continue
+
+        # Strictly less than all neighbours on both sides
+        if current_float < left_min and current_float < right_min:
             supports.append(current_float)
-    
-    # Find local maxima (resistance) with order=7
+
+    # Find local maxima (resistance) with order bars each side
+    # A true swing high must be STRICTLY higher than ALL surrounding bars
     for i in range(order, len(recent_df) - order):
-        window_values = recent_df['High'].iloc[i-order:i+order+1]
+        left_window  = recent_df['High'].iloc[i-order:i]
+        right_window = recent_df['High'].iloc[i+1:i+order+1]
         current_value = recent_df['High'].iloc[i]
-        
-        # Extract scalar values (handle MultiIndex)
+
         try:
-            max_value = float(window_values.max())
-            current_float = float(current_value)
-        except (TypeError, ValueError):
-            if isinstance(window_values.max(), pd.Series):
-                max_value = float(window_values.max().iloc[0])
-            else:
-                max_value = float(window_values.max())
-            
-            if isinstance(current_value, pd.Series):
-                current_float = float(current_value.iloc[0])
-            else:
-                current_float = float(current_value)
-        
-        if current_float == max_value:
+            current_float = _scalar(current_value)
+            left_max      = _scalar(left_window.max())
+            right_max     = _scalar(right_window.max())
+        except Exception:
+            continue
+
+        # Strictly greater than all neighbours on both sides
+        if current_float > left_max and current_float > right_max:
             resistances.append(current_float)
     
     # CLUSTER nearby levels with proximity_pct tolerance and min_samples validation
@@ -238,23 +234,29 @@ def detect_support_resistance(
     resistances = cluster_levels(resistances, proximity_pct, min_samples)
     
     # BUILD RESULTS with distance information
+    # Minimum distance filter: S/R levels closer than 0.5% to current price are
+    # too tight for meaningful SL/TP placement and are discarded.
+    MIN_DISTANCE_PCT = 0.5
+
     support_levels = []
     for s in supports:
         if s < current_price:
             distance_pct = (current_price - s) / current_price * 100
-            support_levels.append({
-                'price': round(s, 2),
-                'distance_pct': round(distance_pct, 2)
-            })
-    
+            if distance_pct >= MIN_DISTANCE_PCT:
+                support_levels.append({
+                    'price': round(s, 2),
+                    'distance_pct': round(distance_pct, 2)
+                })
+
     resistance_levels = []
     for r in resistances:
         if r > current_price:
             distance_pct = (r - current_price) / current_price * 100
-            resistance_levels.append({
-                'price': round(r, 2),
-                'distance_pct': round(distance_pct, 2)
-            })
+            if distance_pct >= MIN_DISTANCE_PCT:
+                resistance_levels.append({
+                    'price': round(r, 2),
+                    'distance_pct': round(distance_pct, 2)
+                })
     
     # Sort by proximity (nearest first)
     support_levels.sort(key=lambda x: x['distance_pct'])
@@ -268,39 +270,45 @@ def detect_support_resistance(
 
 def cluster_levels(levels: list, proximity_pct: float = 0.02, min_samples: int = 3) -> list:
     """
-    Cluster nearby price levels with minimum cluster size validation
-    
+    Cluster nearby price levels with minimum cluster size validation.
+
+    Uses the cluster's ANCHOR (first element) as the reference for proximity,
+    so a long chain of gradually shifting prices cannot drift into one giant cluster.
+
     Args:
         levels: List of price levels
-        proximity_pct: Proximity threshold (2% = 0.02)
+        proximity_pct: Proximity threshold as fraction (e.g. 0.04 = 4%)
         min_samples: Minimum number of pivots required for a valid cluster (default 3)
-    
+
     Returns:
-        List of clustered representative levels (only clusters with >= min_samples)
+        List of clustered representative levels (median of each valid cluster),
+        sorted ascending.
     """
     if not levels:
         return []
-    
+
     levels = sorted(levels)
     clusters = []
     current_cluster = [levels[0]]
-    
+    anchor = levels[0]  # Fixed reference point for the current cluster
+
     for level in levels[1:]:
-        # Check if within proximity of current cluster mean
-        cluster_mean = np.mean(current_cluster)
-        if abs(level - cluster_mean) / cluster_mean <= proximity_pct:
+        # Proximity is measured against the ANCHOR (first element), not the drifting mean
+        if abs(level - anchor) / anchor <= proximity_pct:
             current_cluster.append(level)
         else:
             # Save current cluster ONLY if it has enough samples
             if len(current_cluster) >= min_samples:
-                clusters.append(np.mean(current_cluster))
+                clusters.append(float(np.median(current_cluster)))
+            # Start new cluster
             current_cluster = [level]
-    
-    # Don't forget last cluster (validate min_samples)
-    if current_cluster and len(current_cluster) >= min_samples:
-        clusters.append(np.mean(current_cluster))
-    
-    return clusters
+            anchor = level
+
+    # Don't forget last cluster
+    if len(current_cluster) >= min_samples:
+        clusters.append(float(np.median(current_cluster)))
+
+    return sorted(clusters)
 
 
 # ==========================================
@@ -342,7 +350,12 @@ class TechnicalAnalyzer:
         
         # Load DBSCAN parameters from config (with fallbacks to defaults)
         sr_lookback = getattr(self.config, 'sr_dbscan_lookback', sr_config.get('lookback_days', 180))
-        sr_proximity = getattr(self.config, 'sr_dbscan_eps', sr_config.get('proximity_pct', 0.04))
+        # sr_dbscan_eps is stored as a percentage (e.g. 4.0 = 4%), convert to fraction
+        sr_proximity_raw = getattr(self.config, 'sr_dbscan_eps', None)
+        if sr_proximity_raw is not None:
+            sr_proximity = sr_proximity_raw / 100.0  # 4.0 → 0.04
+        else:
+            sr_proximity = sr_config.get('proximity_pct', 0.04)
         sr_order = getattr(self.config, 'sr_dbscan_order', 7)
         sr_min_samples = getattr(self.config, 'sr_dbscan_min_samples', 3)
         

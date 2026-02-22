@@ -440,7 +440,7 @@ export function SignalDetail() {
           icon="📰"
           title="Sentiment Analysis"
           badge={`${signal.sentiment_score.toFixed(1)} · ${(signal.sentiment_confidence * 100).toFixed(0)}% conf`}
-          summary={signal.reasoning.sentiment.summary}
+          summary={signal.reasoning?.sentiment?.summary}
           isOpen={openSections.includes('sentiment')}
           onToggle={() => toggleSection('sentiment')}
         >
@@ -498,7 +498,7 @@ export function SignalDetail() {
           icon="📈"
           title="Technical Analysis"
           badge={`${signal.technical_score.toFixed(1)} · ${(signal.technical_confidence * 100).toFixed(0)}% conf`}
-          summary={signal.reasoning.technical.summary}
+          summary={signal.reasoning?.technical?.summary}
           isOpen={openSections.includes('technical')}
           onToggle={() => toggleSection('technical')}
         >
@@ -793,7 +793,7 @@ export function SignalDetail() {
             icon="🛡️"
             title="Risk Assessment"
             badge={`${signal.risk_score.toFixed(1)} · ${(signal.reasoning.components?.risk?.confidence ? signal.reasoning.components.risk.confidence * 100 : 50).toFixed(0)}% conf`}
-            summary={signal.reasoning.risk.summary}
+            summary={signal.reasoning?.risk?.summary}
             isOpen={openSections.includes('risk')}
             onToggle={() => toggleSection('risk')}
           >

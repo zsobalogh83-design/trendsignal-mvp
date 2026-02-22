@@ -228,8 +228,12 @@ TAKE_PROFIT_VOL_LOW_THRESHOLD = 2.0   # ATR% below this → low vol regime
 TAKE_PROFIT_VOL_HIGH_THRESHOLD = 4.0  # ATR% above this → high vol regime
 
 # Minimum R:R enforcement for swing trading
-MIN_RISK_REWARD = 1.5              # Minimum acceptable R:R — tighten SL if needed
+MIN_RISK_REWARD = 1.5              # Minimum acceptable R:R — informational only, no longer tightens SL
 MIN_RISK_REWARD_HARD = 0.8        # Hard minimum — below this signal is still valid but weak
+
+# Trade fee and SL/TP boundary constraints
+TRADE_FEE_PCT = 0.002              # Round-trip trade fee: 0.2% (0.1% open + 0.1% close)
+SL_MAX_PCT = 0.05                  # Maximum stop-loss distance from entry: 5%
 
 # S/R Distance Thresholds (for using S/R vs ATR fallback)
 SR_SUPPORT_MAX_DISTANCE_PCT = 5.0  # Max 5% distance to use support for stop-loss
@@ -580,6 +584,8 @@ class TrendSignalConfig:
     take_profit_sr_discount: float = TAKE_PROFIT_SR_DISCOUNT
     min_risk_reward: float = MIN_RISK_REWARD
     min_risk_reward_hard: float = MIN_RISK_REWARD_HARD
+    trade_fee_pct: float = TRADE_FEE_PCT
+    sl_max_pct: float = SL_MAX_PCT
     sr_support_max_distance_pct: float = SR_SUPPORT_MAX_DISTANCE_PCT
     sr_resistance_max_distance_pct: float = SR_RESISTANCE_MAX_DISTANCE_PCT
     sr_support_soft_distance_pct: float = SR_SUPPORT_SOFT_DISTANCE_PCT
@@ -686,6 +692,8 @@ class TrendSignalConfig:
             self.take_profit_sr_discount = saved_config.get("TAKE_PROFIT_SR_DISCOUNT", TAKE_PROFIT_SR_DISCOUNT)
             self.min_risk_reward = saved_config.get("MIN_RISK_REWARD", MIN_RISK_REWARD)
             self.min_risk_reward_hard = saved_config.get("MIN_RISK_REWARD_HARD", MIN_RISK_REWARD_HARD)
+            self.trade_fee_pct = saved_config.get("TRADE_FEE_PCT", TRADE_FEE_PCT)
+            self.sl_max_pct = saved_config.get("SL_MAX_PCT", SL_MAX_PCT)
             self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
             self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
             self.sr_support_soft_distance_pct = saved_config.get("SR_SUPPORT_SOFT_DISTANCE_PCT", SR_SUPPORT_SOFT_DISTANCE_PCT)
@@ -883,6 +891,8 @@ class TrendSignalConfig:
             self.take_profit_sr_discount = saved_config.get("TAKE_PROFIT_SR_DISCOUNT", TAKE_PROFIT_SR_DISCOUNT)
             self.min_risk_reward = saved_config.get("MIN_RISK_REWARD", MIN_RISK_REWARD)
             self.min_risk_reward_hard = saved_config.get("MIN_RISK_REWARD_HARD", MIN_RISK_REWARD_HARD)
+            self.trade_fee_pct = saved_config.get("TRADE_FEE_PCT", TRADE_FEE_PCT)
+            self.sl_max_pct = saved_config.get("SL_MAX_PCT", SL_MAX_PCT)
             self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
             self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
             self.sr_support_soft_distance_pct = saved_config.get("SR_SUPPORT_SOFT_DISTANCE_PCT", SR_SUPPORT_SOFT_DISTANCE_PCT)
