@@ -169,6 +169,18 @@ export interface Signal {
   created_at: string;
   expires_at: string;
   status: 'active' | 'expired' | 'archived';
+  simulated_trade?: {
+    id: number;
+    status: 'OPEN' | 'CLOSED';
+    direction: 'LONG' | 'SHORT';
+    pnl_percent: number | null;
+    pnl_amount_huf: number | null;
+    exit_reason: string | null;
+    entry_price: number;
+    exit_price: number | null;
+    position_size_shares: number | null;
+    usd_huf_rate: number | null;
+  } | null;
 }
 
 export interface SentimentConfig {

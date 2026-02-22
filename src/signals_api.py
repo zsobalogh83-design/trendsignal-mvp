@@ -19,7 +19,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.database import get_db
-from src.models import Ticker, Signal, SignalCalculation  # ✅ ADD SignalCalculation
+from src.models import Ticker, Signal, SignalCalculation, SimulatedTrade  # ✅ ADD SignalCalculation
 
 logger = logging.getLogger(__name__)
 
@@ -482,11 +482,37 @@ async def get_signal_history(
         # Order by created_at descending (newest first) and apply pagination
         signals = query.order_by(Signal.created_at.desc()).limit(limit).offset(offset).all()
         
+        # Fetch all simulated trades for these signals in one query
+        signal_ids = [s.id for s in signals]
+        trades_by_signal = {}
+        if signal_ids:
+            trades = db.query(SimulatedTrade).filter(
+                SimulatedTrade.entry_signal_id.in_(signal_ids)
+            ).all()
+            for trade in trades:
+                trades_by_signal[trade.entry_signal_id] = trade
+
         # Format response (same format as get_signals)
         signals_list = []
         for signal in signals:
             reasoning = json.loads(signal.reasoning_json) if signal.reasoning_json else {}
-            
+
+            trade = trades_by_signal.get(signal.id)
+            simulated_trade = None
+            if trade:
+                simulated_trade = {
+                    "id": trade.id,
+                    "status": trade.status,
+                    "direction": trade.direction,
+                    "pnl_percent": float(trade.pnl_percent) if trade.pnl_percent is not None else None,
+                    "pnl_amount_huf": float(trade.pnl_amount_huf) if trade.pnl_amount_huf is not None else None,
+                    "exit_reason": trade.exit_reason,
+                    "entry_price": float(trade.entry_price),
+                    "exit_price": float(trade.exit_price) if trade.exit_price is not None else None,
+                    "position_size_shares": int(trade.position_size_shares) if trade.position_size_shares is not None else None,
+                    "usd_huf_rate": float(trade.usd_huf_rate) if trade.usd_huf_rate is not None else None,
+                }
+
             signals_list.append({
                 "id": signal.id,
                 "ticker_symbol": signal.ticker_symbol,
@@ -507,7 +533,8 @@ async def get_signal_history(
                 "reasoning": reasoning,
                 "created_at": signal.created_at.isoformat() + "Z",
                 "expires_at": signal.expires_at.isoformat() + "Z" if signal.expires_at else None,
-                "status": signal.status
+                "status": signal.status,
+                "simulated_trade": simulated_trade,
             })
         
         # Return response with applied filters info

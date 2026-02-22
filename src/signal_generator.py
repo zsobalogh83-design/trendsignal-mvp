@@ -646,28 +646,32 @@ class SignalGenerator:
         entry_price = current_price
         
         if "BUY" in decision:
-            # Stop-loss: Use support if available AND within reasonable distance
-            if nearest_support:
+            # Stop-loss: Use support if available, within distance, AND below current price
+            if nearest_support and nearest_support < current_price:
                 support_distance_pct = ((current_price - nearest_support) / current_price) * 100
-                
+
                 # Use config threshold (default 5%)
                 if support_distance_pct <= config.sr_support_max_distance_pct:
-                    # Use config S/R buffer (default 0.5× ATR)
-                    stop_loss = nearest_support - (atr * config.stop_loss_sr_buffer)
-                    print(f"  ✅ Support-based stop: {nearest_support:.2f} (-{support_distance_pct:.1f}%)")
+                    candidate_sl = nearest_support - (atr * config.stop_loss_sr_buffer)
+                    if candidate_sl < current_price:  # Sanity check: SL must be below entry
+                        stop_loss = candidate_sl
+                        print(f"  ✅ Support-based stop: {nearest_support:.2f} (-{support_distance_pct:.1f}%)")
+                    else:
+                        stop_loss = current_price - (atr * config.stop_loss_atr_mult)
+                        print(f"  ⚠️ Support-based SL above entry, ATR fallback: {stop_loss:.2f}")
                 else:
                     # Support too far, use ATR fallback (config multiplier, default 2×)
                     stop_loss = current_price - (atr * config.stop_loss_atr_mult)
                     print(f"  ⚠️ Support too far ({support_distance_pct:.1f}%), ATR stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
             else:
-                # Fallback: config ATR multiplier (default 2×)
+                # No valid support (missing or above entry price), use ATR fallback
                 stop_loss = current_price - (atr * config.stop_loss_atr_mult)
-                print(f"  ℹ️ No support found, ATR-based stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
-            
-            # Take-profit: Use resistance if available AND within reasonable distance
-            if nearest_resistance:
+                print(f"  ℹ️ No valid support, ATR-based stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
+
+            # Take-profit: Use resistance if available, within distance, AND above current price
+            if nearest_resistance and nearest_resistance > current_price:
                 resistance_distance_pct = ((nearest_resistance - current_price) / current_price) * 100
-                
+
                 # Use config threshold (default 8%)
                 if resistance_distance_pct <= config.sr_resistance_max_distance_pct:
                     take_profit = nearest_resistance
@@ -677,33 +681,37 @@ class SignalGenerator:
                     take_profit = current_price + (atr * config.take_profit_atr_mult)
                     print(f"  ⚠️ Resistance too far ({resistance_distance_pct:.1f}%), ATR target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
             else:
-                # Fallback: config ATR multiplier (default 3×)
+                # No valid resistance (missing or below entry price), use ATR fallback
                 take_profit = current_price + (atr * config.take_profit_atr_mult)
-                print(f"  ℹ️ No resistance found, ATR-based target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
-        
+                print(f"  ℹ️ No valid resistance, ATR-based target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
+
         else:  # SELL
-            # Stop-loss: Use resistance if available AND within reasonable distance
-            if nearest_resistance:
+            # Stop-loss: Use resistance if available, within distance, AND above current price
+            if nearest_resistance and nearest_resistance > current_price:
                 resistance_distance_pct = ((nearest_resistance - current_price) / current_price) * 100
-                
+
                 # Use config threshold (default 5%)
                 if resistance_distance_pct <= config.sr_support_max_distance_pct:
-                    # Use config S/R buffer (default 0.5× ATR)
-                    stop_loss = nearest_resistance + (atr * config.stop_loss_sr_buffer)
-                    print(f"  ✅ Resistance-based stop: {nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%)")
+                    candidate_sl = nearest_resistance + (atr * config.stop_loss_sr_buffer)
+                    if candidate_sl > current_price:  # Sanity check: SL must be above entry
+                        stop_loss = candidate_sl
+                        print(f"  ✅ Resistance-based stop: {nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%)")
+                    else:
+                        stop_loss = current_price + (atr * config.stop_loss_atr_mult)
+                        print(f"  ⚠️ Resistance-based SL below entry, ATR fallback: {stop_loss:.2f}")
                 else:
                     # Resistance too far, use ATR fallback (config multiplier, default 2×)
                     stop_loss = current_price + (atr * config.stop_loss_atr_mult)
                     print(f"  ⚠️ Resistance too far ({resistance_distance_pct:.1f}%), ATR stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
             else:
-                # Fallback: config ATR multiplier (default 2×)
+                # No valid resistance (missing or below entry price), use ATR fallback
                 stop_loss = current_price + (atr * config.stop_loss_atr_mult)
-                print(f"  ℹ️ No resistance found, ATR-based stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
-            
-            # Take-profit: Use support if available AND within reasonable distance
-            if nearest_support:
+                print(f"  ℹ️ No valid resistance, ATR-based stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
+
+            # Take-profit: Use support if available, within distance, AND below current price
+            if nearest_support and nearest_support < current_price:
                 support_distance_pct = ((current_price - nearest_support) / current_price) * 100
-                
+
                 # Use config threshold (default 8%)
                 if support_distance_pct <= config.sr_resistance_max_distance_pct:
                     take_profit = nearest_support
@@ -713,9 +721,9 @@ class SignalGenerator:
                     take_profit = current_price - (atr * config.take_profit_atr_mult)
                     print(f"  ⚠️ Support too far ({support_distance_pct:.1f}%), ATR target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
             else:
-                # Fallback: config ATR multiplier (default 3×)
+                # No valid support (missing or above entry price), use ATR fallback
                 take_profit = current_price - (atr * config.take_profit_atr_mult)
-                print(f"  ℹ️ No support found, ATR-based target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
+                print(f"  ℹ️ No valid support, ATR-based target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
         
         # Calculate Risk/Reward ratio
         risk = abs(entry_price - stop_loss)

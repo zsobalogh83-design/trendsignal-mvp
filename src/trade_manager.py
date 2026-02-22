@@ -241,7 +241,85 @@ class TradeManager:
         logger.info(f"   ✅ Position opened: {symbol} {direction} @ ${entry_price:.2f}")
         
         return trade
-    
+
+    def open_position_simulated(self, signal: Signal) -> Optional['SimulatedTrade']:
+        """
+        Open a simulated (fine-tuning only) trade without score/parallel checks.
+
+        Used by BacktestService for:
+        - Gyenge signalok (15 <= |score| < 25)
+        - Parallel signalok, amik valódi kereskedésben ki lettek volna hagyva
+
+        Az is_real_trade flag-et a hívó állítja be False-ra.
+
+        Raises:
+            InsufficientDataError: Ha nincs árfolyamadat
+            InvalidSignalError: Ha hiányzik SL/TP vagy érvénytelen szintek
+        """
+        symbol = signal.ticker_symbol
+        signal_utc = signal.created_at
+
+        direction = "LONG" if signal.combined_score >= 0 else "SHORT"
+
+        logger.debug(f"📍 Opening simulated {symbol} ({direction}): Signal @ {signal_utc} UTC")
+
+        # GET ENTRY PRICE
+        candle = self.price_service.get_5min_candle_at_time(symbol, signal_utc)
+        if not candle:
+            raise InsufficientDataError(symbol, signal_utc.isoformat(), "5m")
+
+        entry_price = candle['close']
+        execution_time_market = candle['timestamp']
+
+        # CALCULATE POSITION SIZE
+        position_size, position_value, usd_huf_rate = self._calculate_position_size(
+            symbol, entry_price
+        )
+
+        # VALIDATE SL/TP
+        stop_loss_price = signal.stop_loss
+        take_profit_price = signal.take_profit
+
+        if not stop_loss_price or not take_profit_price:
+            raise InvalidSignalError(signal.id, "Missing SL/TP")
+
+        if direction == "LONG":
+            if not (stop_loss_price < entry_price < take_profit_price):
+                raise InvalidSignalError(
+                    signal.id,
+                    f"Invalid LONG levels: SL={stop_loss_price}, Entry={entry_price}, TP={take_profit_price}"
+                )
+        else:
+            if not (take_profit_price < entry_price < stop_loss_price):
+                raise InvalidSignalError(
+                    signal.id,
+                    f"Invalid SHORT levels: TP={take_profit_price}, Entry={entry_price}, SL={stop_loss_price}"
+                )
+
+        trade = SimulatedTrade(
+            symbol=symbol,
+            direction=direction,
+            status="OPEN",
+            entry_signal_id=signal.id,
+            entry_signal_generated_at=signal.created_at,
+            entry_execution_time=execution_time_market,
+            entry_price=entry_price,
+            entry_score=signal.combined_score,
+            entry_confidence=signal.overall_confidence or 0.0,
+            stop_loss_price=stop_loss_price,
+            take_profit_price=take_profit_price,
+            initial_stop_loss_price=stop_loss_price,
+            initial_take_profit_price=take_profit_price,
+            sl_tp_update_count=0,
+            position_size_shares=position_size,
+            position_value_huf=position_value,
+            usd_huf_rate=usd_huf_rate,
+            is_real_trade=False,
+        )
+
+        self.db.add(trade)
+        return trade
+
     def close_position(
         self,
         trade: SimulatedTrade,

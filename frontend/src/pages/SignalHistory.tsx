@@ -1,10 +1,13 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { FiFilter, FiX, FiCalendar, FiTrendingUp, FiTrendingDown, FiMinus, FiChevronDown, FiChevronRight } from 'react-icons/fi';
+import { FiFilter, FiX, FiCalendar, FiTrendingUp, FiTrendingDown, FiMinus, FiChevronDown, FiChevronRight, FiPlay } from 'react-icons/fi';
 import { Signal, SignalHistoryFilters, SignalHistoryResponse, Ticker } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+// Map: trade_id → { current_price, unrealized_pnl_percent, unrealized_pnl_huf }
+type OpenPnlMap = Record<number, { current_price: number | null; unrealized_pnl_percent: number | null; unrealized_pnl_huf: number | null }>;
 
 export function SignalHistory() {
   const [filters, setFilters] = useState<SignalHistoryFilters>({
@@ -16,6 +19,10 @@ export function SignalHistory() {
   });
 
   const [showFilters, setShowFilters] = useState(true);
+  const [simulateStatus, setSimulateStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [simulateStats, setSimulateStats] = useState<Record<string, number> | null>(null);
+
+  const queryClient = useQueryClient();
 
   const { data: tickersData } = useQuery({
     queryKey: ['tickers'],
@@ -23,7 +30,7 @@ export function SignalHistory() {
       const response = await fetch(`${API_BASE}/tickers`);
       if (!response.ok) throw new Error('Failed to fetch tickers');
       const tickers = await response.json();
-      return { tickers }; // Wrap array into object
+      return { tickers };
     },
   });
 
@@ -31,7 +38,6 @@ export function SignalHistory() {
     queryKey: ['signal-history', filters],
     queryFn: async () => {
       const params = new URLSearchParams();
-      
       if (filters.from_date) params.append('from_date', filters.from_date);
       if (filters.to_date) params.append('to_date', filters.to_date);
       if (filters.ticker_symbols && filters.ticker_symbols.length > 0) {
@@ -43,11 +49,22 @@ export function SignalHistory() {
       if (filters.strengths && filters.strengths.length > 0) {
         filters.strengths.forEach(s => params.append('strengths', s));
       }
-
       const response = await fetch(`${API_BASE}/signals/history?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch signal history');
       return response.json() as Promise<SignalHistoryResponse>;
     },
+  });
+
+  // Fetch unrealized P&L for all open trades
+  const { data: openPnlData } = useQuery<OpenPnlMap>({
+    queryKey: ['open-pnl'],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE}/simulated-trades/open-pnl`);
+      if (!response.ok) throw new Error('Failed to fetch open PnL');
+      return response.json() as Promise<OpenPnlMap>;
+    },
+    refetchInterval: 60_000, // refresh every 60s
+    staleTime: 30_000,
   });
 
   const handleResetFilters = () => {
@@ -87,8 +104,35 @@ export function SignalHistory() {
     }));
   };
 
+  const handleSimulate = async () => {
+    setSimulateStatus('running');
+    setSimulateStats(null);
+    try {
+      const body: Record<string, unknown> = {};
+      if (filters.from_date) body.date_from = filters.from_date;
+      if (filters.to_date) body.date_to = filters.to_date;
+      if (filters.ticker_symbols && filters.ticker_symbols.length > 0) {
+        body.symbols = filters.ticker_symbols;
+      }
+      const response = await fetch(`${API_BASE}/simulated-trades/backtest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error('Backtest failed');
+      const result = await response.json();
+      setSimulateStats(result.stats);
+      setSimulateStatus('done');
+      // Refresh signal history and open PnL
+      queryClient.invalidateQueries({ queryKey: ['signal-history'] });
+      queryClient.invalidateQueries({ queryKey: ['open-pnl'] });
+    } catch (e) {
+      setSimulateStatus('error');
+    }
+  };
+
   return (
-    <div style={{ 
+    <div style={{
       minHeight: '100vh',
       background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)',
       color: '#e0e7ff',
@@ -96,9 +140,9 @@ export function SignalHistory() {
     }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         {/* Header */}
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
           alignItems: 'center',
           paddingBottom: '15px',
           borderBottom: '1px solid rgba(99, 102, 241, 0.2)',
@@ -120,20 +164,99 @@ export function SignalHistory() {
               Browse and analyze past trading signals
             </p>
           </div>
-          
-          <Link to="/" style={{ 
-            background: 'rgba(51, 65, 85, 0.5)',
-            border: '1px solid rgba(99, 102, 241, 0.3)',
-            color: '#cbd5e1',
-            padding: '10px 20px',
-            borderRadius: '8px',
-            textDecoration: 'none',
-            fontSize: '14px',
-            transition: 'all 0.3s'
-          }}>
-            ← Dashboard
-          </Link>
+
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            {/* Simulate button */}
+            <button
+              onClick={handleSimulate}
+              disabled={simulateStatus === 'running'}
+              style={{
+                background: simulateStatus === 'running'
+                  ? 'rgba(59, 130, 246, 0.2)'
+                  : simulateStatus === 'done'
+                  ? 'rgba(16, 185, 129, 0.2)'
+                  : simulateStatus === 'error'
+                  ? 'rgba(239, 68, 68, 0.2)'
+                  : 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)',
+                border: `1px solid ${simulateStatus === 'done' ? '#10b981' : simulateStatus === 'error' ? '#ef4444' : 'rgba(99, 102, 241, 0.5)'}`,
+                color: simulateStatus === 'done' ? '#34d399' : simulateStatus === 'error' ? '#f87171' : '#e0e7ff',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                cursor: simulateStatus === 'running' ? 'not-allowed' : 'pointer',
+                fontSize: '13px',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s',
+                opacity: simulateStatus === 'running' ? 0.7 : 1,
+              }}
+            >
+              {simulateStatus === 'running' ? (
+                <>
+                  <span style={{
+                    display: 'inline-block',
+                    width: '12px',
+                    height: '12px',
+                    border: '2px solid rgba(255,255,255,0.3)',
+                    borderTop: '2px solid white',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite'
+                  }} />
+                  Simulating...
+                </>
+              ) : simulateStatus === 'done' ? (
+                <>✓ Done</>
+              ) : simulateStatus === 'error' ? (
+                <>✗ Error</>
+              ) : (
+                <>
+                  <FiPlay size={13} />
+                  Simulate
+                </>
+              )}
+            </button>
+
+            <Link to="/" style={{
+              background: 'rgba(51, 65, 85, 0.5)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              color: '#cbd5e1',
+              padding: '10px 20px',
+              borderRadius: '8px',
+              textDecoration: 'none',
+              fontSize: '14px',
+              transition: 'all 0.3s'
+            }}>
+              ← Dashboard
+            </Link>
+          </div>
         </div>
+
+        {/* Simulate result banner */}
+        {simulateStatus === 'done' && simulateStats && (
+          <div style={{
+            background: 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
+            borderRadius: '10px',
+            padding: '10px 16px',
+            marginBottom: '15px',
+            display: 'flex',
+            gap: '24px',
+            flexWrap: 'wrap',
+            fontSize: '12px',
+            color: '#94a3b8'
+          }}>
+            <span style={{ color: '#34d399', fontWeight: '600' }}>✓ Simulation complete</span>
+            {Object.entries(simulateStats)
+              .filter(([k]) => k !== 'errors')
+              .map(([k, v]) => (
+                <span key={k}>
+                  <span style={{ color: '#cbd5e1' }}>{k.replace(/_/g, ' ')}:</span>{' '}
+                  <span style={{ color: '#e0e7ff', fontWeight: '600' }}>{String(v)}</span>
+                </span>
+              ))}
+          </div>
+        )}
 
         {/* Filters */}
         <div style={{
@@ -178,7 +301,7 @@ export function SignalHistory() {
           </button>
 
           {showFilters && (
-            <div style={{ 
+            <div style={{
               padding: '12px 16px',
               borderTop: '1px solid rgba(99, 102, 241, 0.2)'
             }}>
@@ -266,7 +389,7 @@ export function SignalHistory() {
                           background: filters.decisions?.includes(decision)
                             ? decision === 'BUY' ? 'rgba(16, 185, 129, 0.2)' : decision === 'SELL' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(107, 114, 128, 0.2)'
                             : 'rgba(51, 65, 85, 0.5)',
-                          border: `1px solid ${filters.decisions?.includes(decision) 
+                          border: `1px solid ${filters.decisions?.includes(decision)
                             ? decision === 'BUY' ? '#10b981' : decision === 'SELL' ? '#ef4444' : '#6b7280'
                             : 'rgba(99, 102, 241, 0.3)'}`,
                           color: filters.decisions?.includes(decision)
@@ -408,6 +531,8 @@ export function SignalHistory() {
                     <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Stop Loss</th>
                     <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Take Profit</th>
                     <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>R/R</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>P&L</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nettó</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -464,6 +589,12 @@ export function SignalHistory() {
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#f87171', fontSize: '12px' }}>${signal.stop_loss.toFixed(2)}</td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#34d399', fontSize: '12px' }}>${signal.take_profit.toFixed(2)}</td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500', color: '#e0e7ff', fontSize: '12px' }}>{signal.risk_reward_ratio.toFixed(2)}</td>
+                      <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', fontFamily: 'monospace' }}>
+                        {renderPnl(signal.simulated_trade, openPnlData)}
+                      </td>
+                      <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', fontFamily: 'monospace' }}>
+                        {renderHuf(signal.simulated_trade, openPnlData)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -493,6 +624,94 @@ export function SignalHistory() {
         </div>
       </div>
     </div>
+  );
+}
+
+function renderPnl(
+  trade: Signal['simulated_trade'],
+  openPnlMap: OpenPnlMap | undefined
+): React.ReactNode {
+  if (!trade) {
+    return <span style={{ color: '#475569', fontSize: '11px' }}>—</span>;
+  }
+
+  if (trade.status === 'OPEN') {
+    const live = openPnlMap?.[trade.id];
+    const pnl = live?.unrealized_pnl_percent;
+
+    const badge = (
+      <span style={{
+        display: 'inline-block',
+        background: 'rgba(251, 191, 36, 0.15)',
+        border: '1px solid rgba(251, 191, 36, 0.4)',
+        color: '#fbbf24',
+        fontSize: '9px',
+        fontWeight: '700',
+        letterSpacing: '0.04em',
+        padding: '1px 4px',
+        borderRadius: '4px',
+        marginRight: '5px',
+        verticalAlign: 'middle',
+      }}>OPEN</span>
+    );
+
+    if (pnl === null || pnl === undefined) {
+      return <span style={{ fontSize: '12px' }}>{badge}<span style={{ color: '#64748b' }}>—</span></span>;
+    }
+
+    const isProfit = pnl >= 0;
+    const color = isProfit ? '#34d399' : '#f87171';
+    const sign = isProfit ? '+' : '';
+
+    return (
+      <span style={{ fontSize: '12px' }} title="Unrealized P&L (live)">
+        {badge}
+        <span style={{ color, fontWeight: '600' }}>{sign}{pnl.toFixed(2)}%</span>
+        <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>~</span>
+      </span>
+    );
+  }
+
+  // CLOSED
+  const pnl = trade.pnl_percent;
+
+  const exitLabel = trade.exit_reason
+    ? trade.exit_reason === 'SL_HIT' ? 'SL'
+    : trade.exit_reason === 'TP_HIT' ? 'TP'
+    : trade.exit_reason === 'OPPOSING_SIGNAL' ? 'REV'
+    : trade.exit_reason === 'EOD_AUTO_LIQUIDATION' ? 'EOD'
+    : 'CL'
+    : 'CL';
+
+  const badge = (
+    <span style={{
+      display: 'inline-block',
+      background: 'rgba(100, 116, 139, 0.15)',
+      border: '1px solid rgba(100, 116, 139, 0.35)',
+      color: '#94a3b8',
+      fontSize: '9px',
+      fontWeight: '700',
+      letterSpacing: '0.04em',
+      padding: '1px 4px',
+      borderRadius: '4px',
+      marginRight: '5px',
+      verticalAlign: 'middle',
+    }} title={trade.exit_reason || 'CLOSED'}>{exitLabel}</span>
+  );
+
+  if (pnl === null || pnl === undefined) {
+    return <span style={{ fontSize: '12px' }}>{badge}<span style={{ color: '#475569' }}>—</span></span>;
+  }
+
+  const isProfit = pnl >= 0;
+  const color = isProfit ? '#34d399' : '#f87171';
+  const sign = isProfit ? '+' : '';
+
+  return (
+    <span style={{ fontSize: '12px' }}>
+      {badge}
+      <span style={{ color, fontWeight: '600' }}>{sign}{pnl.toFixed(2)}%</span>
+    </span>
   );
 }
 
