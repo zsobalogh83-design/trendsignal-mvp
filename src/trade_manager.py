@@ -166,27 +166,43 @@ class TradeManager:
         # 3. CALCULATE EXECUTION TIME (UTC + 15 min, handles weekends)
         # Signal.created_at is in UTC
         signal_utc = signal.created_at
-        
-        logger.info(f"📍 Opening {symbol}: Signal @ {signal_utc} UTC")
-        
+
+        # 3a. DIRECTION CHECK FOR SHORT TRADES
+        # SHORT trades are intraday-only: they MUST be opened and closed within the same
+        # trading day.  If the signal arrives outside trading hours (after close, weekend,
+        # etc.), the entry would be forwarded to the NEXT market open – but then the
+        # position can never be closed on the same day it was "generated".  Skip it.
+        direction = "LONG" if signal.combined_score >= 25 else "SHORT"
+        if direction == "SHORT":
+            execution_check = signal_utc + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
+            if (self.price_service._is_weekend(execution_check) or
+                    not self.price_service._is_trading_hours(execution_check, symbol)):
+                raise InvalidSignalError(
+                    signal.id,
+                    f"SHORT signal outside trading hours – skipping "
+                    f"(execution would be at {execution_check} UTC)"
+                )
+
+        logger.info(f"Opening {symbol} {direction}: Signal @ {signal_utc} UTC")
+
         # 4. GET ENTRY PRICE (with timezone conversion)
         try:
             candle = self.price_service.get_5min_candle_at_time(symbol, signal_utc)
-            
+
             if not candle:
                 raise InsufficientDataError(symbol, signal_utc.isoformat(), "5m")
-            
+
             entry_price = candle['close']
             execution_time_market = candle['timestamp']  # Market local time
-            
+
             logger.info(f"   Entry: ${entry_price:.2f} @ {execution_time_market} (market time)")
-            
+
         except InsufficientDataError as e:
-            logger.warning(f"   ⚠️  Skip {symbol}: {e}")
+            logger.warning(f"   Skip {symbol}: {e}")
             raise
-        
-        # 5. DETERMINE DIRECTION
-        direction = "LONG" if signal.combined_score >= 25 else "SHORT"
+
+        # 5. DETERMINE DIRECTION (already set above for SHORT guard, repeated for clarity)
+        # direction = "LONG" if signal.combined_score >= 25 else "SHORT"
         
         # 6. CALCULATE POSITION SIZE
         position_size, position_value, usd_huf_rate = self._calculate_position_size(
@@ -261,7 +277,18 @@ class TradeManager:
 
         direction = "LONG" if signal.combined_score >= 0 else "SHORT"
 
-        logger.debug(f"📍 Opening simulated {symbol} ({direction}): Signal @ {signal_utc} UTC")
+        # SHORT trades are intraday-only – skip if the signal arrives outside trading hours
+        if direction == "SHORT":
+            execution_check = signal_utc + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
+            if (self.price_service._is_weekend(execution_check) or
+                    not self.price_service._is_trading_hours(execution_check, symbol)):
+                raise InvalidSignalError(
+                    signal.id,
+                    f"SHORT simulated signal outside trading hours – skipping "
+                    f"(execution would be at {execution_check} UTC)"
+                )
+
+        logger.debug(f"Opening simulated {symbol} ({direction}): Signal @ {signal_utc} UTC")
 
         # GET ENTRY PRICE
         candle = self.price_service.get_5min_candle_at_time(symbol, signal_utc)

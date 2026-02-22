@@ -736,7 +736,7 @@ export function SignalHistory() {
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#34d399', fontSize: '12px' }}>${signal.take_profit.toFixed(2)}</td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500', color: '#e0e7ff', fontSize: '12px' }}>{signal.risk_reward_ratio.toFixed(2)}</td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', fontFamily: 'monospace' }}>
-                        {renderPnl(signal.simulated_trade, openPnlData)}
+                        {renderPnl(signal.simulated_trade, openPnlData, signal)}
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', fontFamily: 'monospace' }}>
                         {renderHuf(signal.simulated_trade, openPnlData)}
@@ -776,10 +776,36 @@ export function SignalHistory() {
 
 function renderPnl(
   trade: Signal['simulated_trade'],
-  openPnlMap: OpenPnlMap | undefined
+  openPnlMap: OpenPnlMap | undefined,
+  signal?: Signal
 ): React.ReactNode {
   if (!trade) {
-    return <span style={{ color: '#475569', fontSize: '11px' }}>—</span>;
+    // SHORT/SELL signals that arrived outside trading hours get no trade.
+    // Show a clear "NO TRADE" badge so users understand the signal was skipped,
+    // not that the trade has zero P&L.
+    const isShortSignal = signal && signal.combined_score !== undefined && signal.combined_score < -14;
+    const title = isShortSignal
+      ? 'Nincs trade – a SELL signal piacon kívül érkezett, SHORT pozíció nem nyitható tőzsdei nyitvatartáson kívül'
+      : 'Nincs szimulált trade ehhez a signalhoz';
+    return (
+      <span title={title}>
+        <span style={{
+          display: 'inline-block',
+          background: isShortSignal ? 'rgba(239, 68, 68, 0.08)' : 'rgba(71, 85, 105, 0.15)',
+          border: `1px solid ${isShortSignal ? 'rgba(239, 68, 68, 0.25)' : 'rgba(71, 85, 105, 0.35)'}`,
+          color: isShortSignal ? '#ef4444' : '#475569',
+          fontSize: '9px',
+          fontWeight: '700',
+          letterSpacing: '0.03em',
+          padding: '1px 5px',
+          borderRadius: '4px',
+          verticalAlign: 'middle',
+          opacity: 0.7,
+        }}>
+          {isShortSignal ? 'ZÁRVA' : '—'}
+        </span>
+      </span>
+    );
   }
 
   if (trade.status === 'OPEN') {
@@ -866,7 +892,7 @@ function renderHuf(
   trade: Signal['simulated_trade'],
   openPnlMap: OpenPnlMap | undefined
 ): React.ReactNode {
-  if (!trade) return <span style={{ color: '#475569', fontSize: '11px' }}>—</span>;
+  if (!trade) return null;
 
   const fmt = (huf: number) => {
     const abs = Math.abs(huf);

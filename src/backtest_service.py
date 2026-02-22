@@ -246,7 +246,7 @@ class BacktestService:
             check_plus_15 = check_time_utc + timedelta(minutes=15)
             if not price_service._is_trading_hours(check_plus_15, trade.symbol):
                 # Last slot of the trading day: SHORT trades get EOD-liquidated here,
-                # LONG trades skip to next day (no price data available after hours).
+                # LONG trades apply trailing SL then skip to next day.
                 if trade.direction == 'SHORT':
                     trigger = self._check_exit_triggers_at_time(trade, check_time_utc)
                     if trigger:
@@ -261,6 +261,9 @@ class BacktestService:
                             trigger_time_utc=check_time_utc
                         )
                         return True
+                else:
+                    # LONG: nap végén price-based trailing SL igazítás
+                    self._apply_eod_trailing_sl(trade, check_time_utc)
                 check_time_utc = price_service._next_market_open_utc(check_time_utc, trade.symbol)
                 continue
 
@@ -286,6 +289,90 @@ class BacktestService:
         # Still open
         return False
     
+    def _apply_eod_trailing_sl(self, trade: SimulatedTrade, eod_time_utc: datetime) -> None:
+        """
+        Nap végi price-based trailing SL igazítás LONG trade-eknél.
+
+        Logika:
+        - Az entry-kori SL-TP távolságot (%-ban) rögzítjük – ez az eredeti kockázati
+          paraméter, amit meg akarunk őrizni.
+        - Az aznapi utolsó 5 perces gyertya záróárát (day_close) vesszük referenciának:
+          trailing_sl = day_close * (1 - sl_pct)
+        - Miért close és nem high?
+          A záróár a nap végén kialakult, stabilabb árszint. Az intraday high egy pillanatnyi
+          csúcs lehet, amely után rögtön visszaesés következhet – arra alapozva a SL-t
+          feleslegesen magasra húznánk, és az egy kisebb korrekció esetén is kiverne.
+          A záróár reálisabb: azt az árat tükrözi, amelyen a piac valóban bezárt.
+        - Ha a záróár az entry fölé ment → kiszámítjuk az új trailing SL-t
+        - Ha ez magasabb az aktuális SL-nél → felhúzzuk (csak felfelé mozog!)
+
+        Ez biztosítja, hogy az árfolyam emelkedésével a veszteség csökken, és egy hosszabb
+        uptrend esetén végül nyereséggel zárhatunk.
+        """
+        if trade.direction != 'LONG':
+            return
+
+        # Az aznapi utolsó 5m gyertya záróárának lekérése
+        try:
+            from database import SessionLocal
+            from models import PriceData
+
+            day_start = eod_time_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = eod_time_utc
+
+            db = SessionLocal()
+            try:
+                result = db.query(PriceData.close).filter(
+                    PriceData.ticker_symbol == trade.symbol,
+                    PriceData.interval == '5m',
+                    PriceData.timestamp >= day_start,
+                    PriceData.timestamp <= day_end
+                ).order_by(PriceData.timestamp.desc()).first()
+
+                day_close = float(result[0]) if result else None
+            finally:
+                db.close()
+
+        except Exception as e:
+            logger.warning(f"   EOD trailing SL: nem sikerult a napi close lekérese ({trade.symbol}): {e}")
+            return
+
+        if not day_close:
+            return
+
+        # Csak akkor érdekes, ha a záróár az entry fölé ment
+        if day_close <= trade.entry_price:
+            return
+
+        # Eredeti SL távolság %-ban az entry ártól
+        # LONG: SL < entry_price → sl_pct = (entry - orig_SL) / entry
+        orig_sl = trade.initial_stop_loss_price
+        if not orig_sl or orig_sl >= trade.entry_price:
+            return
+
+        sl_distance_pct = (trade.entry_price - orig_sl) / trade.entry_price
+
+        # Trailing SL: day_close alapján számítva
+        trailing_sl = day_close * (1.0 - sl_distance_pct)
+
+        # Csak felfelé mozgatjuk
+        if trailing_sl <= trade.stop_loss_price:
+            return
+
+        # Nem mehet a TP fölé (az nem SL lenne, hanem TP)
+        trailing_sl = min(trailing_sl, trade.take_profit_price * 0.999)
+
+        old_sl = trade.stop_loss_price
+        trade.stop_loss_price = round(trailing_sl, 4)
+        trade.sl_tp_update_count = (trade.sl_tp_update_count or 0) + 1
+        trade.sl_tp_last_updated_at = eod_time_utc
+
+        logger.debug(
+            f"   📈 EOD trailing SL: {trade.symbol} LONG "
+            f"day_close={day_close:.4f}, {old_sl:.4f} → {trade.stop_loss_price:.4f} "
+            f"(sl_dist={sl_distance_pct*100:.2f}%, @ {eod_time_utc})"
+        )
+
     def _check_exit_triggers_at_time(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Dict]:
         """Check all exit triggers at specific UTC time.
 
@@ -363,58 +450,44 @@ class BacktestService:
         check_time_utc: datetime
     ) -> bool:
         """
-        Update trade SL/TP from a same-direction signal if the new levels are
-        more favourable (i.e. lock in more profit or raise the target).
+        Update trade SL from a same-direction signal if the new level is more
+        favourable (locks in more profit / reduces risk).
 
-        LONG: better SL = higher SL (closer to price from below)
-              better TP = higher TP (more ambitious upside target)
-        SHORT: better SL = lower SL (closer to price from above)
-               better TP = lower TP (more ambitious downside target)
+        Csak az SL-t frissítjük signal alapján – a TP-t NEM.
+        Indok: a TP emelése megakadályozza a nyereség realizálását. Ha az esti signal
+        TP-t 273-ról 291-re emeli, de az ár másnap csak 279-ig megy, a trade sosem
+        zár TP-n. Az entry-kori TP marad érvényes célárként; a trailing SL (EOD
+        price-based) gondoskodik a nyereség védelméről, ha az ár emelkedik.
+
+        LONG: jobb SL = magasabb SL (közelebb az árhoz alulról → profit lock-in)
+        SHORT: jobb SL = alacsonyabb SL (közelebb az árhoz felülről → profit lock-in)
 
         Returns:
-            True if at least one level was updated, False otherwise
+            True if SL was updated, False otherwise
         """
-        if signal.stop_loss is None and signal.take_profit is None:
+        if signal.stop_loss is None:
             return False
 
         updated = False
 
         if trade.direction == 'LONG':
-            if signal.stop_loss is not None and signal.stop_loss > trade.stop_loss_price:
+            if signal.stop_loss > trade.stop_loss_price:
                 logger.debug(
                     f"      SL updated {trade.symbol} LONG: "
-                    f"{trade.stop_loss_price:.4f} → {signal.stop_loss:.4f} "
+                    f"{trade.stop_loss_price:.4f} -> {signal.stop_loss:.4f} "
                     f"(signal {signal.id} @ {check_time_utc})"
                 )
                 trade.stop_loss_price = signal.stop_loss
-                updated = True
-
-            if signal.take_profit is not None and signal.take_profit > trade.take_profit_price:
-                logger.debug(
-                    f"      TP updated {trade.symbol} LONG: "
-                    f"{trade.take_profit_price:.4f} → {signal.take_profit:.4f} "
-                    f"(signal {signal.id} @ {check_time_utc})"
-                )
-                trade.take_profit_price = signal.take_profit
                 updated = True
 
         else:  # SHORT
-            if signal.stop_loss is not None and signal.stop_loss < trade.stop_loss_price:
+            if signal.stop_loss < trade.stop_loss_price:
                 logger.debug(
                     f"      SL updated {trade.symbol} SHORT: "
-                    f"{trade.stop_loss_price:.4f} → {signal.stop_loss:.4f} "
+                    f"{trade.stop_loss_price:.4f} -> {signal.stop_loss:.4f} "
                     f"(signal {signal.id} @ {check_time_utc})"
                 )
                 trade.stop_loss_price = signal.stop_loss
-                updated = True
-
-            if signal.take_profit is not None and signal.take_profit < trade.take_profit_price:
-                logger.debug(
-                    f"      TP updated {trade.symbol} SHORT: "
-                    f"{trade.take_profit_price:.4f} → {signal.take_profit:.4f} "
-                    f"(signal {signal.id} @ {check_time_utc})"
-                )
-                trade.take_profit_price = signal.take_profit
                 updated = True
 
         if updated:
@@ -423,21 +496,55 @@ class BacktestService:
 
         return updated
     
-    def _find_opposing_signal(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Signal]:
-        """Find opposing signal on the same trading day up to check_time.
-
-        An opposing signal anywhere during the current trading day is sufficient
-        to trigger a position reversal - it does not need to be within ±15 min.
-        We return the strongest (highest abs score) opposing signal of the day,
-        so the most decisive reversal wins.
+    def _trading_session_start(self, check_time_utc: datetime, symbol: str) -> datetime:
         """
-        # Search from the start of the current UTC day up to check_time
-        day_start = check_time_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        Az előző kereskedési nap nyitányától keresünk signalokat.
+
+        PROBLÉMA: A US piaci signalok este 18-22 UTC-kor érkeznek (piaczárás után).
+        Ha check_time = Feb 4 14:30 UTC és day_start = Feb 4 00:00 UTC, akkor a
+        Feb 3 19:15 UTC-kor érkezett esti signalok LÁTHATATLANOK maradnak –
+        mert az előző UTC nap estéjén keletkeztek.
+
+        MEGOLDÁS: A keresési ablak az ELŐZŐ kereskedési nap nyitányától indul.
+        - US (nem .BD): nyitány 14:30 UTC → session_start = tegnap 14:30 UTC
+        - BÉT (.BD):    nyitány 08:00 UTC → session_start = tegnap 08:00 UTC
+
+        Ez biztosítja, hogy az előző est összes signalját (18-22 UTC) a következő
+        nap kereskedési ideje alatt (14:30-21:00 UTC) is látjuk.
+
+        Hétvégi napokat visszafelé átugrik (pénteki nyitányig megy vissza).
+        """
+        if symbol.endswith('.BD'):
+            open_hour, open_minute = 8, 0
+        else:
+            open_hour, open_minute = 14, 30
+
+        # Az előző kereskedési nap nyitánya: 1 nappal visszalépünk, hétvégét átugorjuk
+        prev_day = check_time_utc - timedelta(days=1)
+        # Hétvégén visszamegyünk péntekig
+        while prev_day.weekday() >= 5:  # 5=Sat, 6=Sun
+            prev_day -= timedelta(days=1)
+
+        return prev_day.replace(
+            hour=open_hour, minute=open_minute, second=0, microsecond=0
+        )
+
+    def _find_opposing_signal(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Signal]:
+        """Find opposing signal since the current trading session start up to check_time.
+
+        Uses trading-session boundaries instead of UTC-midnight so that signals
+        arriving in the evening (e.g. 19-22 UTC for US markets) are visible during
+        the NEXT trading day's checks (14:30+ UTC), which are in a different UTC day.
+
+        We return the strongest (highest abs score) opposing signal so the most
+        decisive reversal wins.
+        """
+        session_start = self._trading_session_start(check_time_utc, trade.symbol)
 
         signals = self.db.query(Signal).filter(
             and_(
                 Signal.ticker_symbol == trade.symbol,
-                Signal.created_at >= day_start,
+                Signal.created_at >= session_start,
                 Signal.created_at <= check_time_utc,
                 Signal.id != trade.entry_signal_id
             )
@@ -455,25 +562,26 @@ class BacktestService:
                     best = signal
 
         return best
-    
+
     def _find_same_direction_signal(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Signal]:
-        """Find the strongest same-direction signal on the current trading day up to check_time.
+        """Find the strongest same-direction signal since the current trading session
+        start up to check_time.
+
+        Uses trading-session boundaries (not UTC midnight) so that evening signals
+        (19-22 UTC for US) are visible during the next trading day's 14:30+ UTC checks.
 
         Used for signal-based adaptive SL/TP update:
-        - LONG trade → look for signals with combined_score >= 25
-        - SHORT trade → look for signals with combined_score <= -25
+        - LONG trade → signals with combined_score >= 25
+        - SHORT trade → signals with combined_score <= -25
 
-        The entry signal is excluded. We pick the strongest (highest abs score)
-        same-direction signal so the most decisive confirmation drives the update.
-
-        Only signals that have valid SL or TP values are considered useful.
+        The entry signal is excluded. Only signals with at least one of SL/TP are useful.
         """
-        day_start = check_time_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        session_start = self._trading_session_start(check_time_utc, trade.symbol)
 
         signals = self.db.query(Signal).filter(
             and_(
                 Signal.ticker_symbol == trade.symbol,
-                Signal.created_at >= day_start,
+                Signal.created_at >= session_start,
                 Signal.created_at <= check_time_utc,
                 Signal.id != trade.entry_signal_id
             )
@@ -481,7 +589,6 @@ class BacktestService:
 
         best = None
         for signal in signals:
-            # Must have at least one of SL or TP to be useful for updating
             if signal.stop_loss is None and signal.take_profit is None:
                 continue
 
