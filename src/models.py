@@ -366,7 +366,12 @@ class SimulatedTrade(Base):
     
     # ===== DURATION =====
     duration_minutes = Column(Integer, nullable=True)
-    
+
+    # ===== FINE-TUNING FLAG =====
+    # True  = valódi trade lett volna (|score| >= 25, nem volt párhuzamos pozíció)
+    # False = csak modell finomhangoláshoz szimulálva (|score| < 25, vagy párhuzamos lett volna)
+    is_real_trade = Column(Boolean, nullable=False, default=True, index=True)
+
     # ===== AUDIT FIELDS =====
     created_at = Column(DateTime, server_default=func.now(), index=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -1,12 +1,18 @@
 """
-TrendSignal - Backtest Service (v3 - Signal-based adaptive SL/TP)
-Processes ALL non-neutral signals, creates trade for each
+TrendSignal - Backtest Service (v4 - Fine-tuning simulation)
+Processes ALL actionable signals, creates trade for each
+
+SIGNAL THRESHOLDS:
+- SIGNAL_THRESHOLD = 15: HOLD zone határa (signal generálás küszöbe, változatlan)
+- ALERT_THRESHOLD  = 25: Valódi alert küszöb (Telegram, éles kereskedés)
+
+IS_REAL_TRADE FLAG:
+- True:  |score| >= 25 ÉS nem volt párhuzamos pozíció → valódi trade lett volna
+- False: |score| < 25 VAGY párhuzamos lett volna → csak modell finomhangoláshoz
 
 LOGIC:
-- Every NON-NEUTRAL signal (|score| >= 25) gets a trade
-- First run: All trades are new
-- Subsequent runs: Skip already processed signals
-- Development: DROP TABLE before each run
+- Minden |score| >= 15 signal szimulálva (HOLD zone-on kívül)
+- Alert/exit logika (SL/TP, opposing signal, EOD) minden szimulált trade-re fut
 - SL/TP updated in-flight by same-direction signals (signal-based trailing)
 
 SL/TP UPDATE RULES:
@@ -17,7 +23,7 @@ SL/TP UPDATE RULES:
 - Only non-neutral same-direction signals trigger updates (|score| >= 25)
 - The entry signal itself is excluded from updates
 
-Version: 3.0 - Signal-based adaptive SL/TP
+Version: 4.0 - Fine-tuning simulation
 Date: 2026-02-21
 """
 
@@ -47,17 +53,19 @@ class BacktestService:
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         symbols: Optional[List[str]] = None,
-        reprocess_closed: bool = False
     ) -> Dict:
         """
-        Run backtest ensuring every signal has a trade.
-        
+        Run incremental backtest ensuring every signal has a trade.
+
+        - CLOSED trades: skipped (never modified)
+        - OPEN trades: exit triggers checked, SL/TP updated
+        - Missing trades: created fresh
+
         Args:
             date_from: Start date (UTC)
             date_to: End date (UTC)
             symbols: Filter symbols
-            reprocess_closed: Reprocess closed trades
-        
+
         Returns:
             Stats dict
         """
@@ -94,7 +102,7 @@ class BacktestService:
                 logger.info(f"   Progress: {i}/{len(signals)}...")
             
             try:
-                result = self._process_signal(signal, reprocess_closed)
+                result = self._process_signal(signal)
                 stats[result] += 1
                 
             except Exception as e:
@@ -128,10 +136,14 @@ class BacktestService:
             'stats': stats
         }
     
-    def _process_signal(self, signal: Signal, reprocess_closed: bool) -> str:
+    def _process_signal(self, signal: Signal) -> str:
         """
         Process single signal - ensure it has a trade.
-        
+
+        - CLOSED trade → skip (final)
+        - OPEN trade → check exit triggers / update SL-TP
+        - No trade → create new
+
         Returns:
             Status string for stats
         """
@@ -139,16 +151,10 @@ class BacktestService:
         trade = self.db.query(SimulatedTrade).filter(
             SimulatedTrade.entry_signal_id == signal.id
         ).first()
-        
-        # Case 1: Already closed
+
+        # Case 1: Already closed - never touch it
         if trade and trade.status == 'CLOSED':
-            if reprocess_closed:
-                logger.debug(f"   Reprocessing {signal.ticker_symbol} signal {signal.id}")
-                self.db.delete(trade)
-                self.db.flush()
-                trade = None
-            else:
-                return 'already_closed'
+            return 'already_closed'
         
         # Case 2: Open trade - check exit triggers
         if trade and trade.status == 'OPEN':
@@ -156,21 +162,30 @@ class BacktestService:
             return 'newly_closed' if was_closed else 'still_open'
         
         # Case 3: No trade - create new
+        # Meghatározzuk, hogy valódi alert-szintű signal-e
+        is_real = abs(signal.combined_score) >= self.ALERT_THRESHOLD
+
         try:
-            logger.debug(f"   Creating trade for {signal.ticker_symbol} signal {signal.id}")
-            
-            trade = self.trade_manager.open_position(signal)
-            
+            logger.debug(f"   Creating trade for {signal.ticker_symbol} signal {signal.id} (real={is_real})")
+
+            if is_real:
+                # Valódi alert-szintű signal: normál open_position() futtatása
+                # (score + parallel ellenőrzéssel)
+                trade = self.trade_manager.open_position(signal)
+                if trade:
+                    trade.is_real_trade = True
+            else:
+                # Gyenge signal (15 <= |score| < 25): ellenőrzések nélkül szimulálva
+                trade = self.trade_manager.open_position_simulated(signal)
+
             if not trade:
                 return 'skipped_invalid'
-            
+
             self.db.flush()
-            
-            # Immediately check exit triggers
+
             was_closed = self._check_and_close_trade(trade)
-            
             return 'newly_opened' if not was_closed else 'newly_closed'
-        
+
         except InsufficientDataError as e:
             logger.debug(f"   Skip {signal.ticker_symbol}: No price data")
             return 'skipped_no_data'
@@ -180,9 +195,18 @@ class BacktestService:
             return 'skipped_invalid'
 
         except PositionAlreadyExistsError as e:
-            # Another open trade exists for this symbol - skip this signal
-            logger.debug(f"   Skip {signal.ticker_symbol}: {e}")
-            return 'skipped_invalid'
+            # Párhuzamos trade lett volna - szimulálva is_real_trade=False-szal
+            logger.debug(f"   Parallel signal {signal.ticker_symbol}: simulating as non-real trade")
+            try:
+                trade = self.trade_manager.open_position_simulated(signal)
+                if not trade:
+                    return 'skipped_invalid'
+                self.db.flush()
+                was_closed = self._check_and_close_trade(trade)
+                return 'newly_opened' if not was_closed else 'newly_closed'
+            except (InsufficientDataError, InvalidSignalError) as inner_e:
+                logger.debug(f"   Skip parallel {signal.ticker_symbol}: {inner_e}")
+                return 'skipped_invalid'
 
         except Exception as e:
             logger.error(f"   Error {signal.ticker_symbol}: {e}")
@@ -456,32 +480,40 @@ class BacktestService:
 
         return best
 
+    ALERT_THRESHOLD = 25  # Valódi alert küszöb (Telegram, real trade)
+    SIGNAL_THRESHOLD = 15  # Signal generálási küszöb (HOLD zone határa)
+
     def _get_signals(
         self,
         date_from: Optional[datetime],
         date_to: Optional[datetime],
         symbols: Optional[List[str]]
     ) -> List[Signal]:
-        """Get NON-NEUTRAL signals to process"""
+        """Get all actionable signals to process.
+
+        Két kategória kerül szimulációba:
+        - |score| >= 25: valódi alert-szintű signalok (is_real_trade lehet True vagy False)
+        - 15 <= |score| < 25: gyengébb signalok (is_real_trade=False, csak finomhangoláshoz)
+        """
         query = self.db.query(Signal)
-        
+
         if date_from:
             query = query.filter(Signal.created_at >= date_from)
-        
+
         if date_to:
             query = query.filter(Signal.created_at <= date_to)
-        
+
         if symbols:
             query = query.filter(Signal.ticker_symbol.in_(symbols))
-        
-        # Only non-neutral
+
+        # Minden nem-neutral signal (HOLD zone határán túl)
         query = query.filter(
             or_(
-                Signal.combined_score >= 25,
-                Signal.combined_score <= -25
+                Signal.combined_score >= self.SIGNAL_THRESHOLD,
+                Signal.combined_score <= -self.SIGNAL_THRESHOLD
             )
         )
-        
+
         query = query.order_by(Signal.created_at.asc())
-        
+
         return query.all()
