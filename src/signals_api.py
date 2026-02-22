@@ -410,12 +410,12 @@ async def get_signal_history(
     - limit: Maximum number of results (default: 100)
     - offset: Pagination offset (default: 0)
     
-    Returns signals with status='expired' or 'archived'
+    Returns signals with status='active', 'expired' or 'archived'
     """
     try:
-        # Start with base query - only expired or archived signals
+        # Start with base query - all signals (active, expired, archived)
         query = db.query(Signal).filter(
-            Signal.status.in_(['expired', 'archived'])
+            Signal.status.in_(['active', 'expired', 'archived'])
         )
         
         # Date range filtering
