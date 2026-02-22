@@ -477,10 +477,39 @@ export function SignalHistory() {
           borderRadius: '12px',
           overflow: 'hidden'
         }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(99, 102, 241, 0.2)' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(99, 102, 241, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#e0e7ff', margin: 0 }}>
               {isLoading ? 'Loading...' : `${data?.total || 0} signals found`}
             </h2>
+            {!isLoading && data?.signals && data.signals.length > 0 && (() => {
+              const summary = calcSummary(data.signals, openPnlData);
+              if (!summary.hasAnyHuf && summary.totalPct === null) return null;
+              const isProfit = summary.totalHuf >= 0;
+              const hasOpen = summary.openCount > 0;
+              const color = isProfit ? '#34d399' : '#f87171';
+              const borderColor = isProfit ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)';
+              const bg = isProfit ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)';
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: bg, border: `1px solid ${borderColor}`, borderRadius: '8px', padding: '5px 12px' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
+                    {summary.closedCount} lezárt{hasOpen ? ` + ${summary.openCount} nyitott` : ''}
+                  </span>
+                  {summary.totalPct !== null && (
+                    <span style={{ fontSize: '12px', fontWeight: '700', fontFamily: 'monospace', color }}>
+                      {summary.totalPct >= 0 ? '+' : ''}{summary.totalPct.toFixed(2)}%
+                      {hasOpen && <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>~</span>}
+                    </span>
+                  )}
+                  {summary.hasAnyHuf && (
+                    <span style={{ fontSize: '13px', fontWeight: '700', fontFamily: 'monospace', color, whiteSpace: 'nowrap' }}
+                      title={hasOpen ? 'Tartalmaz nyitott (nem realizált) HUF összeget is' : undefined}>
+                      {summary.totalHuf >= 0 ? '+' : ''}{formatHuf(summary.totalHuf)}
+                      {hasOpen && <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>~</span>}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {isLoading ? (
@@ -713,6 +742,105 @@ function renderPnl(
       <span style={{ color, fontWeight: '600' }}>{sign}{pnl.toFixed(2)}%</span>
     </span>
   );
+}
+
+function renderHuf(
+  trade: Signal['simulated_trade'],
+  openPnlMap: OpenPnlMap | undefined
+): React.ReactNode {
+  if (!trade) return <span style={{ color: '#475569', fontSize: '11px' }}>—</span>;
+
+  const fmt = (huf: number) => {
+    const abs = Math.abs(huf);
+    const sign = huf >= 0 ? '+' : '−';
+    if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M`;
+    if (abs >= 1_000) return `${sign}${Math.round(abs / 1_000)}k`;
+    return `${sign}${Math.round(abs)}`;
+  };
+
+  if (trade.status === 'OPEN') {
+    const live = openPnlMap?.[trade.id];
+    const huf = live?.unrealized_pnl_huf;
+    if (huf === null || huf === undefined) {
+      return <span style={{ color: '#64748b', fontSize: '11px' }}>—</span>;
+    }
+    const color = huf >= 0 ? '#34d399' : '#f87171';
+    return (
+      <span style={{ color, fontSize: '12px' }} title="Unrealized HUF (live)">
+        {fmt(huf)} Ft
+        <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>~</span>
+      </span>
+    );
+  }
+
+  // CLOSED
+  const huf = trade.pnl_amount_huf;
+  if (huf === null || huf === undefined) {
+    return <span style={{ color: '#475569', fontSize: '11px' }}>—</span>;
+  }
+  const color = huf >= 0 ? '#34d399' : '#f87171';
+  return <span style={{ color, fontSize: '12px' }}>{fmt(huf)} Ft</span>;
+}
+
+function formatHuf(value: number): string {
+  return new Intl.NumberFormat('hu-HU', {
+    style: 'currency',
+    currency: 'HUF',
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+interface SummaryResult {
+  closedCount: number;
+  openCount: number;
+  totalHuf: number;
+  totalPct: number | null;
+  hasAnyHuf: boolean;
+}
+
+function calcSummary(signals: Signal[], openPnlMap: OpenPnlMap | undefined): SummaryResult {
+  let totalHuf = 0;
+  let totalPct = 0;
+  let pctCount = 0;
+  let closedCount = 0;
+  let openCount = 0;
+  let hasAnyHuf = false;
+
+  for (const signal of signals) {
+    const trade = signal.simulated_trade;
+    if (!trade) continue;
+
+    if (trade.status === 'CLOSED') {
+      closedCount++;
+      if (trade.pnl_amount_huf !== null && trade.pnl_amount_huf !== undefined) {
+        totalHuf += trade.pnl_amount_huf;
+        hasAnyHuf = true;
+      }
+      if (trade.pnl_percent !== null && trade.pnl_percent !== undefined) {
+        totalPct += trade.pnl_percent;
+        pctCount++;
+      }
+    } else if (trade.status === 'OPEN') {
+      openCount++;
+      const live = openPnlMap?.[trade.id];
+      if (live?.unrealized_pnl_huf !== null && live?.unrealized_pnl_huf !== undefined) {
+        totalHuf += live.unrealized_pnl_huf;
+        hasAnyHuf = true;
+      }
+      if (live?.unrealized_pnl_percent !== null && live?.unrealized_pnl_percent !== undefined) {
+        totalPct += live.unrealized_pnl_percent;
+        pctCount++;
+      }
+    }
+  }
+
+  return {
+    closedCount,
+    openCount,
+    totalHuf,
+    totalPct: pctCount > 0 ? totalPct : null,
+    hasAnyHuf,
+  };
 }
 
 function getDefaultFromDate(): string {
