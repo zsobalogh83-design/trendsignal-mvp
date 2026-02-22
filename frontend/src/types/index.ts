@@ -250,6 +250,7 @@ export interface SignalHistoryFilters {
   strengths?: ('STRONG' | 'MODERATE' | 'WEAK')[];
   min_score?: number;
   max_score?: number;
+  exit_reasons?: ('SL' | 'TP' | 'REV' | 'EOD' | 'OPEN' | 'NONE')[];
   limit?: number;
   offset?: number;
 }
@@ -339,9 +340,18 @@ export interface PerformanceByStrategy {
 }
 
 // API response types for trackback
+export interface SignalHistoryPnlSummary {
+  closed_count: number;
+  open_count: number;
+  open_trade_ids: number[];
+  total_pnl_huf: number | null;
+  total_pnl_percent: number | null;
+}
+
 export interface SignalHistoryResponse {
   signals: Signal[];
   total: number;
+  pnl_summary: SignalHistoryPnlSummary;
   filters_applied: SignalHistoryFilters;
 }
 

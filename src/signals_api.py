@@ -8,6 +8,7 @@ Add to your FastAPI app (api.py):
 """
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
@@ -392,6 +393,7 @@ async def get_signal_history(
     strengths: Optional[List[str]] = Query(None),
     min_score: Optional[float] = None,
     max_score: Optional[float] = None,
+    exit_reasons: Optional[List[str]] = Query(None),
     limit: int = 100,
     offset: int = 0,
     db: Session = Depends(get_db)
@@ -470,18 +472,95 @@ async def get_signal_history(
                 )
             query = query.filter(Signal.strength.in_(strengths_upper))
         
-        # Score range filtering
+        # Score range filtering (on absolute value, so SELL signals with negative scores are included)
         if min_score is not None:
-            query = query.filter(Signal.combined_score >= min_score)
+            query = query.filter(func.abs(Signal.combined_score) >= min_score)
         if max_score is not None:
-            query = query.filter(Signal.combined_score <= max_score)
-        
+            query = query.filter(func.abs(Signal.combined_score) <= max_score)
+
+        # Exit reason filtering (joins SimulatedTrade)
+        # Frontend categories -> DB values:
+        #   SL   -> SL_HIT
+        #   TP   -> TP_HIT
+        #   REV  -> OPPOSING_SIGNAL
+        #   EOD  -> EOD_AUTO_LIQUIDATION
+        #   OPEN -> trade.status == 'OPEN'
+        #   NONE -> no trade exists
+        if exit_reasons:
+            exit_reason_conditions = []
+            db_reason_map = {
+                'SL':   'SL_HIT',
+                'TP':   'TP_HIT',
+                'REV':  'OPPOSING_SIGNAL',
+                'EOD':  'EOD_AUTO_LIQUIDATION',
+            }
+            db_reasons = [db_reason_map[r] for r in exit_reasons if r in db_reason_map]
+            include_open = 'OPEN' in exit_reasons
+            include_none = 'NONE' in exit_reasons
+
+            from sqlalchemy import or_, and_, exists
+            trade_alias = SimulatedTrade
+
+            if db_reasons:
+                exit_reason_conditions.append(
+                    exists().where(
+                        and_(trade_alias.entry_signal_id == Signal.id,
+                             trade_alias.exit_reason.in_(db_reasons))
+                    )
+                )
+            if include_open:
+                exit_reason_conditions.append(
+                    exists().where(
+                        and_(trade_alias.entry_signal_id == Signal.id,
+                             trade_alias.status == 'OPEN')
+                    )
+                )
+            if include_none:
+                exit_reason_conditions.append(
+                    ~exists().where(trade_alias.entry_signal_id == Signal.id)
+                )
+
+            if exit_reason_conditions:
+                query = query.filter(or_(*exit_reason_conditions))
+
         # Get total count before pagination
         total_count = query.count()
-        
+
+        # Compute P&L summary across ALL filtered signals (not just current page)
+        all_signal_ids_for_summary = [s.id for s in query.all()]
+
+        pnl_summary = {
+            "closed_count": 0,
+            "open_count": 0,
+            "open_trade_ids": [],
+            "total_pnl_huf": None,
+            "total_pnl_percent": None,
+        }
+        if all_signal_ids_for_summary:
+            all_trades_for_summary = db.query(SimulatedTrade).filter(
+                SimulatedTrade.entry_signal_id.in_(all_signal_ids_for_summary)
+            ).all()
+            closed_huf_values = [
+                float(t.pnl_amount_huf)
+                for t in all_trades_for_summary
+                if t.status == 'CLOSED' and t.pnl_amount_huf is not None
+            ]
+            closed_pct_values = [
+                float(t.pnl_percent)
+                for t in all_trades_for_summary
+                if t.status == 'CLOSED' and t.pnl_percent is not None
+            ]
+            pnl_summary["closed_count"] = sum(1 for t in all_trades_for_summary if t.status == 'CLOSED')
+            pnl_summary["open_count"] = sum(1 for t in all_trades_for_summary if t.status == 'OPEN')
+            pnl_summary["open_trade_ids"] = [t.id for t in all_trades_for_summary if t.status == 'OPEN']
+            if closed_huf_values:
+                pnl_summary["total_pnl_huf"] = sum(closed_huf_values)
+            if closed_pct_values:
+                pnl_summary["total_pnl_percent"] = sum(closed_pct_values)
+
         # Order by created_at descending (newest first) and apply pagination
         signals = query.order_by(Signal.created_at.desc()).limit(limit).offset(offset).all()
-        
+
         # Fetch all simulated trades for these signals in one query
         signal_ids = [s.id for s in signals]
         trades_by_signal = {}
@@ -541,6 +620,7 @@ async def get_signal_history(
         return {
             "signals": signals_list,
             "total": total_count,
+            "pnl_summary": pnl_summary,
             "filters_applied": {
                 "from_date": from_date,
                 "to_date": to_date,

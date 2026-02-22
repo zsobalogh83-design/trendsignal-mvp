@@ -28,9 +28,8 @@ export function SignalHistory() {
     ticker_symbols: [],
     decisions: [],
     strengths: [],
+    exit_reasons: [],
   });
-
-  const [exitReasonFilters, setExitReasonFilters] = useState<ExitReasonFilter[]>([]);
 
   const [showFilters, setShowFilters] = useState(true);
   const [simulateStatus, setSimulateStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
@@ -63,6 +62,10 @@ export function SignalHistory() {
       if (filters.strengths && filters.strengths.length > 0) {
         filters.strengths.forEach(s => params.append('strengths', s));
       }
+      if (filters.min_score !== undefined) params.append('min_score', String(filters.min_score));
+      if (filters.exit_reasons && filters.exit_reasons.length > 0) {
+        filters.exit_reasons.forEach(r => params.append('exit_reasons', r));
+      }
       const response = await fetch(`${API_BASE}/signals/history?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch signal history');
       return response.json() as Promise<SignalHistoryResponse>;
@@ -88,14 +91,18 @@ export function SignalHistory() {
       ticker_symbols: [],
       decisions: [],
       strengths: [],
+      min_score: undefined,
+      exit_reasons: [],
     });
-    setExitReasonFilters([]);
   };
 
   const toggleExitReasonFilter = (reason: ExitReasonFilter) => {
-    setExitReasonFilters(prev =>
-      prev.includes(reason) ? prev.filter(r => r !== reason) : [...prev, reason]
-    );
+    setFilters(prev => ({
+      ...prev,
+      exit_reasons: prev.exit_reasons?.includes(reason)
+        ? prev.exit_reasons.filter(r => r !== reason)
+        : [...(prev.exit_reasons || []), reason],
+    }));
   };
 
   const toggleTickerFilter = (symbol: string) => {
@@ -306,7 +313,7 @@ export function SignalHistory() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <FiFilter style={{ color: '#3b82f6', fontSize: '14px' }} />
               <span>Filters</span>
-              {((filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + exitReasonFilters.length) > 0 && (
+              {((filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0)) > 0 && (
                 <span style={{
                   background: 'rgba(59, 130, 246, 0.2)',
                   color: '#60a5fa',
@@ -314,7 +321,7 @@ export function SignalHistory() {
                   borderRadius: '10px',
                   fontSize: '11px'
                 }}>
-                  {(filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + exitReasonFilters.length} active
+                  {(filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0)} active
                 </span>
               )}
             </div>
@@ -370,10 +377,12 @@ export function SignalHistory() {
                 </div>
               </div>
 
-              {/* Tickers */}
+              {/* Tickers + Alert filter */}
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', color: '#cbd5e1', fontSize: '12px', marginBottom: '6px', fontWeight: '500' }}>Tickers</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <label style={{ color: '#cbd5e1', fontSize: '12px', fontWeight: '500' }}>Tickers</label>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
                   {tickersData?.tickers?.map((ticker) => (
                     <button
                       key={ticker.symbol}
@@ -393,6 +402,27 @@ export function SignalHistory() {
                       {ticker.symbol}
                     </button>
                   ))}
+                  <div style={{ width: '1px', height: '20px', background: 'rgba(99, 102, 241, 0.3)', margin: '0 2px' }} />
+                  <button
+                    onClick={() => setFilters(prev => ({ ...prev, min_score: prev.min_score !== undefined ? undefined : 25 }))}
+                    style={{
+                      background: filters.min_score !== undefined ? 'rgba(245, 158, 11, 0.2)' : 'rgba(51, 65, 85, 0.5)',
+                      border: `1px solid ${filters.min_score !== undefined ? '#f59e0b' : 'rgba(99, 102, 241, 0.3)'}`,
+                      color: filters.min_score !== undefined ? '#fbbf24' : '#cbd5e1',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      transition: 'all 0.2s'
+                    }}
+                    title="Csak kereskedési alertek (combined score ≥ 25)"
+                  >
+                    ⚡ Alert
+                  </button>
                 </div>
               </div>
 
@@ -474,7 +504,7 @@ export function SignalHistory() {
                       { key: 'OPEN', label: 'OPEN', activeColor: '#fbbf24', activeBg: 'rgba(251, 191, 36, 0.2)',  activeBorder: '#f59e0b' },
                       { key: 'NONE', label: '—',    activeColor: '#64748b', activeBg: 'rgba(51, 65, 85, 0.4)',    activeBorder: '#475569' },
                     ] as const).map(({ key, label, activeColor, activeBg, activeBorder }) => {
-                      const active = exitReasonFilters.includes(key);
+                      const active = (filters.exit_reasons || []).includes(key);
                       return (
                         <button
                           key={key}
@@ -540,31 +570,55 @@ export function SignalHistory() {
               {isLoading ? 'Loading...' : `${data?.total || 0} signals found`}
             </h2>
             {!isLoading && data?.signals && data.signals.length > 0 && (() => {
-              const visibleForSummary = exitReasonFilters.length === 0
-                ? data.signals
-                : data.signals.filter(s => exitReasonFilters.includes(getExitCategory(s.simulated_trade)));
-              const summary = calcSummary(visibleForSummary, openPnlData);
-              if (!summary.hasAnyHuf && summary.totalPct === null) return null;
-              const isProfit = summary.totalHuf >= 0;
-              const hasOpen = summary.openCount > 0;
+              let closedCount: number;
+              let openCount: number;
+              let totalHuf: number;
+              let totalPct: number | null;
+              let hasAnyHuf: boolean;
+
+              {
+                const backendSummary = data.pnl_summary;
+                closedCount = backendSummary?.closed_count ?? 0;
+                openCount = backendSummary?.open_count ?? 0;
+                totalHuf = backendSummary?.total_pnl_huf ?? 0;
+                totalPct = backendSummary?.total_pnl_percent ?? null;
+                hasAnyHuf = backendSummary?.total_pnl_huf !== null && backendSummary?.total_pnl_huf !== undefined;
+                // Add unrealized PnL for open trades using the exact trade IDs from the backend summary
+                if (openPnlData && backendSummary?.open_trade_ids?.length) {
+                  for (const tradeId of backendSummary.open_trade_ids) {
+                    const live = openPnlData[tradeId];
+                    if (live?.unrealized_pnl_huf !== null && live?.unrealized_pnl_huf !== undefined) {
+                      totalHuf += live.unrealized_pnl_huf;
+                      hasAnyHuf = true;
+                    }
+                    if (live?.unrealized_pnl_percent !== null && live?.unrealized_pnl_percent !== undefined) {
+                      totalPct = (totalPct ?? 0) + live.unrealized_pnl_percent;
+                    }
+                  }
+                }
+              }
+
+              if (!hasAnyHuf && totalPct === null) return null;
+              const isProfit = totalHuf >= 0;
+              const hasOpen = openCount > 0;
               const color = isProfit ? '#34d399' : '#f87171';
               const borderColor = isProfit ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)';
               const bg = isProfit ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)';
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: bg, border: `1px solid ${borderColor}`, borderRadius: '8px', padding: '5px 12px' }}>
                   <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
-                    {summary.closedCount} lezárt{hasOpen ? ` + ${summary.openCount} nyitott` : ''}
+                    {closedCount} lezárt{hasOpen ? ` + ${openCount} nyitott` : ''}
                   </span>
-                  {summary.totalPct !== null && (
+                  {totalPct !== null && (
                     <span style={{ fontSize: '12px', fontWeight: '700', fontFamily: 'monospace', color }}>
-                      {summary.totalPct >= 0 ? '+' : ''}{summary.totalPct.toFixed(2)}%
+                      {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
                       {hasOpen && <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>~</span>}
                     </span>
                   )}
-                  {summary.hasAnyHuf && (
+                  {hasAnyHuf && (
                     <span style={{ fontSize: '13px', fontWeight: '700', fontFamily: 'monospace', color, whiteSpace: 'nowrap' }}
                       title={hasOpen ? 'Tartalmaz nyitott (nem realizált) HUF összeget is' : undefined}>
-                      {summary.totalHuf >= 0 ? '+' : ''}{formatHuf(summary.totalHuf)}
+                      {totalHuf >= 0 ? '+' : ''}{formatHuf(totalHuf)}
                       {hasOpen && <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>~</span>}
                     </span>
                   )}
@@ -607,9 +661,7 @@ export function SignalHistory() {
               </button>
             </div>
           ) : data?.signals && data.signals.length > 0 ? (() => {
-            const visibleSignals = exitReasonFilters.length === 0
-              ? data.signals
-              : data.signals.filter(s => exitReasonFilters.includes(getExitCategory(s.simulated_trade)));
+            const visibleSignals = data.signals;
             return (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', fontSize: '13px' }}>

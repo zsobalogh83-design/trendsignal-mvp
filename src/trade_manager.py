@@ -351,9 +351,19 @@ class TradeManager:
         logger.info(f"🔴 Closing {trade.symbol}: {exit_reason} @ {trigger_utc} UTC")
         
         # Get exit price (with timezone conversion)
+        # For EOD liquidation the trigger_utc is the last valid trading slot.
+        # get_5min_candle_at_time adds a 15-min execution offset internally, which would
+        # push the lookup into after-hours and cause InsufficientDataError.
+        # Work around this by passing trigger_utc - 15min so the internal offset lands
+        # exactly on trigger_utc (the last available candle of the day).
+        candle_lookup_utc = (
+            trigger_utc - timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
+            if exit_reason == 'EOD_AUTO_LIQUIDATION'
+            else trigger_utc
+        )
         try:
-            candle = self.price_service.get_5min_candle_at_time(trade.symbol, trigger_utc)
-            
+            candle = self.price_service.get_5min_candle_at_time(trade.symbol, candle_lookup_utc)
+
             if not candle:
                 # Fallback: use theoretical price
                 if exit_reason == 'SL_HIT':
@@ -363,14 +373,14 @@ class TradeManager:
                 else:
                     current = self.price_service.get_current_price(trade.symbol)
                     exit_price = current if current else trade.entry_price
-                
-                execution_time_market = trigger_utc + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
+
+                execution_time_market = trigger_utc
                 logger.warning(f"   No candle, using theoretical: ${exit_price:.2f}")
             else:
                 exit_price = candle['close']
                 execution_time_market = candle['timestamp']
                 logger.info(f"   Exit: ${exit_price:.2f} @ {execution_time_market}")
-        
+
         except InsufficientDataError:
             # Use theoretical prices
             if exit_reason == 'SL_HIT':
@@ -379,8 +389,8 @@ class TradeManager:
                 exit_price = trade.take_profit_price
             else:
                 exit_price = trade.entry_price
-            
-            execution_time_market = trigger_utc + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
+
+            execution_time_market = trigger_utc
             logger.warning(f"   No data, theoretical: ${exit_price:.2f}")
         
         # Calculate P&L
