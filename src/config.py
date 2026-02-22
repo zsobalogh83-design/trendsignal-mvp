@@ -209,17 +209,34 @@ RISK_TREND_STRENGTH_WEIGHT = 0.25  # 25% - ADX trend strength risk
 
 # Stop-loss calculation
 STOP_LOSS_SR_BUFFER = 0.5          # S/R buffer multiplier (0.5×ATR below support)
-STOP_LOSS_ATR_MULTIPLIER = 2.0     # ATR-based stop multiplier (2×ATR)
+STOP_LOSS_ATR_MULTIPLIER = 2.0     # ATR-based stop multiplier (2×ATR), fallback
+STOP_LOSS_ATR_HIGH_CONF = 1.5      # ATR multiplier for high-confidence signals (≥0.75)
+STOP_LOSS_ATR_LOW_CONF = 2.5       # ATR multiplier for low-confidence signals (<0.50)
 MIN_STOP_LOSS_PCT = 0.02           # 2% (deprecated - kept for compatibility)
 MAX_STOP_LOSS_PCT = 0.05           # 5% (deprecated - kept for compatibility)
 
 # Take-profit calculation
-TAKE_PROFIT_ATR_MULTIPLIER = 3.0   # ATR-based target multiplier (3×ATR, 1:1.5 R:R)
+TAKE_PROFIT_ATR_MULTIPLIER = 3.0   # ATR-based target multiplier (3×ATR fallback, normal vol)
+TAKE_PROFIT_SR_DISCOUNT = 0.005    # Pull TP 0.5% below resistance (realistic fill)
 RISK_REWARD_RATIO = 2.0            # Target R:R = 1:2 (deprecated - kept for compatibility)
+
+# Volatility-adjusted TP ATR multiplier thresholds
+# Low vol (ATR% < 2%) → tighter TP (2.5×ATR); High vol (ATR% > 4%) → wider TP (4.0×ATR)
+TAKE_PROFIT_ATR_LOW_VOL = 2.5     # Tight TP for calm markets (ATR% < 2%)
+TAKE_PROFIT_ATR_HIGH_VOL = 4.0    # Wide TP for volatile markets (ATR% > 4%)
+TAKE_PROFIT_VOL_LOW_THRESHOLD = 2.0   # ATR% below this → low vol regime
+TAKE_PROFIT_VOL_HIGH_THRESHOLD = 4.0  # ATR% above this → high vol regime
+
+# Minimum R:R enforcement for swing trading
+MIN_RISK_REWARD = 1.5              # Minimum acceptable R:R — tighten SL if needed
+MIN_RISK_REWARD_HARD = 0.8        # Hard minimum — below this signal is still valid but weak
 
 # S/R Distance Thresholds (for using S/R vs ATR fallback)
 SR_SUPPORT_MAX_DISTANCE_PCT = 5.0  # Max 5% distance to use support for stop-loss
 SR_RESISTANCE_MAX_DISTANCE_PCT = 8.0  # Max 8% distance to use resistance for take-profit
+# Soft blend zone: between SOFT and MAX distance, blend S/R with ATR proportionally
+SR_SUPPORT_SOFT_DISTANCE_PCT = 3.0    # Below this: pure S/R; above: blend toward ATR
+SR_RESISTANCE_SOFT_DISTANCE_PCT = 5.0 # Below this: pure S/R; above: blend toward ATR
 
 # S/R DBSCAN Detection Parameters
 SR_DBSCAN_EPS = 4.0          # Clustering proximity threshold (4%)
@@ -553,9 +570,20 @@ class TrendSignalConfig:
     risk_trend_strength_weight: float = RISK_TREND_STRENGTH_WEIGHT
     stop_loss_sr_buffer: float = STOP_LOSS_SR_BUFFER
     stop_loss_atr_mult: float = STOP_LOSS_ATR_MULTIPLIER
+    stop_loss_atr_high_conf: float = STOP_LOSS_ATR_HIGH_CONF
+    stop_loss_atr_low_conf: float = STOP_LOSS_ATR_LOW_CONF
     take_profit_atr_mult: float = TAKE_PROFIT_ATR_MULTIPLIER
+    take_profit_atr_low_vol: float = TAKE_PROFIT_ATR_LOW_VOL
+    take_profit_atr_high_vol: float = TAKE_PROFIT_ATR_HIGH_VOL
+    take_profit_vol_low_threshold: float = TAKE_PROFIT_VOL_LOW_THRESHOLD
+    take_profit_vol_high_threshold: float = TAKE_PROFIT_VOL_HIGH_THRESHOLD
+    take_profit_sr_discount: float = TAKE_PROFIT_SR_DISCOUNT
+    min_risk_reward: float = MIN_RISK_REWARD
+    min_risk_reward_hard: float = MIN_RISK_REWARD_HARD
     sr_support_max_distance_pct: float = SR_SUPPORT_MAX_DISTANCE_PCT
     sr_resistance_max_distance_pct: float = SR_RESISTANCE_MAX_DISTANCE_PCT
+    sr_support_soft_distance_pct: float = SR_SUPPORT_SOFT_DISTANCE_PCT
+    sr_resistance_soft_distance_pct: float = SR_RESISTANCE_SOFT_DISTANCE_PCT
     sr_dbscan_eps: float = SR_DBSCAN_EPS
     sr_dbscan_min_samples: int = SR_DBSCAN_MIN_SAMPLES
     sr_dbscan_order: int = SR_DBSCAN_ORDER
@@ -648,9 +676,20 @@ class TrendSignalConfig:
             self.risk_trend_strength_weight = saved_config.get("RISK_TREND_STRENGTH_WEIGHT", RISK_TREND_STRENGTH_WEIGHT)
             self.stop_loss_sr_buffer = saved_config.get("STOP_LOSS_SR_BUFFER", STOP_LOSS_SR_BUFFER)
             self.stop_loss_atr_mult = saved_config.get("STOP_LOSS_ATR_MULTIPLIER", STOP_LOSS_ATR_MULTIPLIER)
+            self.stop_loss_atr_high_conf = saved_config.get("STOP_LOSS_ATR_HIGH_CONF", STOP_LOSS_ATR_HIGH_CONF)
+            self.stop_loss_atr_low_conf = saved_config.get("STOP_LOSS_ATR_LOW_CONF", STOP_LOSS_ATR_LOW_CONF)
             self.take_profit_atr_mult = saved_config.get("TAKE_PROFIT_ATR_MULTIPLIER", TAKE_PROFIT_ATR_MULTIPLIER)
+            self.take_profit_atr_low_vol = saved_config.get("TAKE_PROFIT_ATR_LOW_VOL", TAKE_PROFIT_ATR_LOW_VOL)
+            self.take_profit_atr_high_vol = saved_config.get("TAKE_PROFIT_ATR_HIGH_VOL", TAKE_PROFIT_ATR_HIGH_VOL)
+            self.take_profit_vol_low_threshold = saved_config.get("TAKE_PROFIT_VOL_LOW_THRESHOLD", TAKE_PROFIT_VOL_LOW_THRESHOLD)
+            self.take_profit_vol_high_threshold = saved_config.get("TAKE_PROFIT_VOL_HIGH_THRESHOLD", TAKE_PROFIT_VOL_HIGH_THRESHOLD)
+            self.take_profit_sr_discount = saved_config.get("TAKE_PROFIT_SR_DISCOUNT", TAKE_PROFIT_SR_DISCOUNT)
+            self.min_risk_reward = saved_config.get("MIN_RISK_REWARD", MIN_RISK_REWARD)
+            self.min_risk_reward_hard = saved_config.get("MIN_RISK_REWARD_HARD", MIN_RISK_REWARD_HARD)
             self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
             self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
+            self.sr_support_soft_distance_pct = saved_config.get("SR_SUPPORT_SOFT_DISTANCE_PCT", SR_SUPPORT_SOFT_DISTANCE_PCT)
+            self.sr_resistance_soft_distance_pct = saved_config.get("SR_RESISTANCE_SOFT_DISTANCE_PCT", SR_RESISTANCE_SOFT_DISTANCE_PCT)
             self.sr_dbscan_eps = saved_config.get("SR_DBSCAN_EPS", SR_DBSCAN_EPS)
             self.sr_dbscan_min_samples = saved_config.get("SR_DBSCAN_MIN_SAMPLES", SR_DBSCAN_MIN_SAMPLES)
             self.sr_dbscan_order = saved_config.get("SR_DBSCAN_ORDER", SR_DBSCAN_ORDER)
@@ -834,9 +873,20 @@ class TrendSignalConfig:
             self.risk_trend_strength_weight = saved_config.get("RISK_TREND_STRENGTH_WEIGHT", RISK_TREND_STRENGTH_WEIGHT)
             self.stop_loss_sr_buffer = saved_config.get("STOP_LOSS_SR_BUFFER", STOP_LOSS_SR_BUFFER)
             self.stop_loss_atr_mult = saved_config.get("STOP_LOSS_ATR_MULTIPLIER", STOP_LOSS_ATR_MULTIPLIER)
+            self.stop_loss_atr_high_conf = saved_config.get("STOP_LOSS_ATR_HIGH_CONF", STOP_LOSS_ATR_HIGH_CONF)
+            self.stop_loss_atr_low_conf = saved_config.get("STOP_LOSS_ATR_LOW_CONF", STOP_LOSS_ATR_LOW_CONF)
             self.take_profit_atr_mult = saved_config.get("TAKE_PROFIT_ATR_MULTIPLIER", TAKE_PROFIT_ATR_MULTIPLIER)
+            self.take_profit_atr_low_vol = saved_config.get("TAKE_PROFIT_ATR_LOW_VOL", TAKE_PROFIT_ATR_LOW_VOL)
+            self.take_profit_atr_high_vol = saved_config.get("TAKE_PROFIT_ATR_HIGH_VOL", TAKE_PROFIT_ATR_HIGH_VOL)
+            self.take_profit_vol_low_threshold = saved_config.get("TAKE_PROFIT_VOL_LOW_THRESHOLD", TAKE_PROFIT_VOL_LOW_THRESHOLD)
+            self.take_profit_vol_high_threshold = saved_config.get("TAKE_PROFIT_VOL_HIGH_THRESHOLD", TAKE_PROFIT_VOL_HIGH_THRESHOLD)
+            self.take_profit_sr_discount = saved_config.get("TAKE_PROFIT_SR_DISCOUNT", TAKE_PROFIT_SR_DISCOUNT)
+            self.min_risk_reward = saved_config.get("MIN_RISK_REWARD", MIN_RISK_REWARD)
+            self.min_risk_reward_hard = saved_config.get("MIN_RISK_REWARD_HARD", MIN_RISK_REWARD_HARD)
             self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
             self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
+            self.sr_support_soft_distance_pct = saved_config.get("SR_SUPPORT_SOFT_DISTANCE_PCT", SR_SUPPORT_SOFT_DISTANCE_PCT)
+            self.sr_resistance_soft_distance_pct = saved_config.get("SR_RESISTANCE_SOFT_DISTANCE_PCT", SR_RESISTANCE_SOFT_DISTANCE_PCT)
             self.sr_dbscan_eps = saved_config.get("SR_DBSCAN_EPS", SR_DBSCAN_EPS)
             self.sr_dbscan_min_samples = saved_config.get("SR_DBSCAN_MIN_SAMPLES", SR_DBSCAN_MIN_SAMPLES)
             self.sr_dbscan_order = saved_config.get("SR_DBSCAN_ORDER", SR_DBSCAN_ORDER)

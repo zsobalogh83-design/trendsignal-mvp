@@ -256,16 +256,21 @@ class SignalGenerator:
         
         # ===== CALCULATE ENTRY/EXIT LEVELS =====
         current_price = technical_data.get("current_price")
-        entry_price, stop_loss, take_profit, rr_ratio = self._calculate_levels(
+        levels = self._calculate_levels(
             preliminary_decision, current_price, technical_data, risk_data
         )
-        
+        if levels[0] is None:
+            entry_price = stop_loss = take_profit = rr_ratio = None
+            sl_method = tp_method = None
+        else:
+            entry_price, stop_loss, take_profit, rr_ratio, sl_method, tp_method = levels
+
         # DEBUG: Log calculated levels
         print(f"[{ticker_symbol}] 📊 Entry/Exit Levels:")
         print(f"   Entry: ${entry_price if entry_price else 'None'}")
         print(f"   Stop-Loss: ${stop_loss if stop_loss else 'None'} ({((stop_loss/entry_price-1)*100) if (entry_price and stop_loss) else 0:+.2f}%)")
         print(f"   Take-Profit: ${take_profit if take_profit else 'None'} ({((take_profit/entry_price-1)*100) if (entry_price and take_profit) else 0:+.2f}%)")
-        print(f"   R:R Ratio: {rr_ratio if rr_ratio else 'None'}")
+        print(f"   R:R Ratio: {rr_ratio if rr_ratio else 'None'} | SL: {sl_method} | TP: {tp_method}")
         
         # ===== DETERMINE FINAL DECISION & STRENGTH =====
         # Now we can use entry/exit levels to assess setup quality
@@ -308,7 +313,11 @@ class SignalGenerator:
                     }
                 }
             },
-            "alignment_bonus": alignment_bonus if alignment_bonus != 0 else None
+            "alignment_bonus": alignment_bonus if alignment_bonus != 0 else None,
+            "levels_meta": {
+                "sl_method": sl_method,   # 'sr' | 'atr' | 'atr_conf' | 'blended' | 'tightened'
+                "tp_method": tp_method,   # 'sr' | 'atr' | 'blended' | 'atr_override'
+            } if sl_method else None
         }
         
         # ===== CREATE SIGNAL OBJECT =====
@@ -534,23 +543,23 @@ class SignalGenerator:
             
             # Assess setup quality for swing trading
             good_setup = (
-                2.0 <= stop_dist_pct <= 6.0 and  # Stop in ideal swing range
-                target_dist_pct >= 3.0 and        # Target far enough
-                rr_ratio >= 1.5                   # Good risk/reward
+                2.0 <= stop_dist_pct <= 6.0 and          # Stop in ideal swing range
+                target_dist_pct >= 3.0 and                # Target far enough
+                rr_ratio >= self.config.min_risk_reward    # Good risk/reward (config: 1.5)
             )
-            
+
             poor_setup = (
-                stop_dist_pct > 8.0 or            # Stop too far (support broken?)
-                target_dist_pct < 2.0 or          # Target too close
-                rr_ratio < 1.0                    # Bad risk/reward
+                stop_dist_pct > 8.0 or                        # Stop too far (support broken?)
+                target_dist_pct < 2.0 or                      # Target too close
+                rr_ratio < self.config.min_risk_reward_hard   # Bad risk/reward (config: 0.8)
             )
-            
+
             if good_setup:
                 setup_quality = "good"
                 logger.info(f"✅ GOOD swing setup")
             elif poor_setup:
                 setup_quality = "poor"
-                logger.info(f"⚠️ POOR swing setup (Stop>8% OR Target<2% OR R:R<1.0)")
+                logger.info(f"⚠️ POOR swing setup (Stop>8% OR Target<2% OR R:R<{self.config.min_risk_reward_hard})")
             else:
                 setup_quality = "neutral"
                 logger.info(f"⚪ NEUTRAL swing setup")
@@ -616,138 +625,220 @@ class SignalGenerator:
         risk_data: Dict
     ) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
         """
-        Calculate entry, stop-loss, take-profit levels using DYNAMIC config parameters.
-        
-        S/R levels now include distance information:
-        - Uses nearest S/R regardless of distance
-        - Stop-loss: config.stop_loss_sr_buffer× ATR buffer below support
-        - User can see if S/R is too close and decide not to trade
-        
-        Stop-loss buffer logic:
-        - Support = psychological level where buyers step in
-        - Stop BELOW support = only triggers if support truly breaks
-        - Small buffer (default 0.5× ATR) prevents spike-outs while confirming breaks
+        Calculate entry, stop-loss, take-profit levels — swing trading optimized.
+
+        Improvements over previous version:
+        1. Confidence-adaptive ATR multiplier for SL (high conf → tighter SL)
+        2. TP placed 0.5% below resistance (realistic fill, not exactly at level)
+        3. Soft blend zone: S/R → ATR transition is gradual, not cliff-edge
+        4. Minimum R:R enforcement (≥1.5): if SL too wide, tighten it to meet target
+        5. Hard minimum R:R guard (≥0.8): last resort ATR TP override
+
+        SL method tags: 'sr' | 'atr' | 'atr_conf' | 'blended' | 'tightened'
+        TP method tags: 'sr' | 'atr' | 'blended' | 'atr_override'
         """
         if decision == "HOLD" or current_price is None:
-            return None, None, None, None
-        
+            return None, None, None, None, None, None
+
         # ===== RELOAD CONFIG FOR DYNAMIC PARAMETERS =====
         from src.config import get_config
         config = get_config()
         if hasattr(config, 'reload'):
             config.reload()
-        
-        # Get data
+
+        # ===== INPUT DATA =====
         atr = technical_data.get("atr", current_price * 0.02)
-        
-        # Parse S/R (handles both old and new formats)
+        confidence = technical_data.get("overall_confidence", 0.60)
+
+        # Confidence-adaptive ATR multiplier for SL
+        if confidence >= 0.75:
+            atr_sl_mult = config.stop_loss_atr_high_conf   # 1.5× — tighter SL for strong signals
+        elif confidence < 0.50:
+            atr_sl_mult = config.stop_loss_atr_low_conf    # 2.5× — wider SL for weak signals
+        else:
+            atr_sl_mult = config.stop_loss_atr_mult        # 2.0× — default
+
+        # Volatility-adjusted ATR multiplier for TP
+        # Low vol: tighter TP target (calmer market, price moves less)
+        # High vol: wider TP target (volatile market, price has more room)
+        atr_pct = technical_data.get("atr_pct", 2.5)
+        if atr_pct < config.take_profit_vol_low_threshold:       # < 2% ATR → low vol
+            atr_tp_mult = config.take_profit_atr_low_vol         # 2.5× — tighter TP
+        elif atr_pct > config.take_profit_vol_high_threshold:    # > 4% ATR → high vol
+            atr_tp_mult = config.take_profit_atr_high_vol        # 4.0× — wider TP
+        else:
+            # Linear interpolation between 2.5× and 4.0× as ATR% goes from 2% to 4%
+            t = (atr_pct - config.take_profit_vol_low_threshold) / (
+                config.take_profit_vol_high_threshold - config.take_profit_vol_low_threshold
+            )
+            atr_tp_mult = config.take_profit_atr_low_vol + t * (
+                config.take_profit_atr_high_vol - config.take_profit_atr_low_vol
+            )
+        print(f"  📈 ATR%={atr_pct:.2f}% → TP multiplier={atr_tp_mult:.2f}× (fallback ATR TP)")
+
         nearest_support, nearest_resistance = parse_support_resistance(risk_data)
-        
         entry_price = current_price
-        
+
+        # ===== HELPER: soft blend between S/R price and ATR-based price =====
+        def blend(sr_price: float, atr_price: float, distance_pct: float,
+                  soft_limit: float, hard_limit: float) -> tuple:
+            """
+            Returns (blended_price, method_tag).
+            - distance < soft_limit  → pure S/R
+            - soft_limit ≤ distance ≤ hard_limit → linear blend toward ATR
+            - distance > hard_limit  → pure ATR
+            """
+            if distance_pct <= soft_limit:
+                return sr_price, "sr"
+            elif distance_pct >= hard_limit:
+                return atr_price, "atr"
+            else:
+                t = (distance_pct - soft_limit) / (hard_limit - soft_limit)  # 0→1
+                blended = sr_price + t * (atr_price - sr_price)
+                return blended, "blended"
+
+        # ===== BUY =====
         if "BUY" in decision:
-            # Stop-loss: Use support if available, within distance, AND below current price
+
+            # --- Stop-Loss ---
+            atr_sl = current_price - (atr * atr_sl_mult)
+            sl_method = "atr_conf" if confidence >= 0.75 or confidence < 0.50 else "atr"
+
             if nearest_support and nearest_support < current_price:
                 support_distance_pct = ((current_price - nearest_support) / current_price) * 100
+                sr_sl = nearest_support - (atr * config.stop_loss_sr_buffer)
 
-                # Use config threshold (default 5%)
-                if support_distance_pct <= config.sr_support_max_distance_pct:
-                    candidate_sl = nearest_support - (atr * config.stop_loss_sr_buffer)
-                    if candidate_sl < current_price:  # Sanity check: SL must be below entry
-                        stop_loss = candidate_sl
-                        print(f"  ✅ Support-based stop: {nearest_support:.2f} (-{support_distance_pct:.1f}%)")
-                    else:
-                        stop_loss = current_price - (atr * config.stop_loss_atr_mult)
-                        print(f"  ⚠️ Support-based SL above entry, ATR fallback: {stop_loss:.2f}")
+                if sr_sl < current_price:  # Sanity: SL must be below entry
+                    stop_loss, sl_method = blend(
+                        sr_price=sr_sl,
+                        atr_price=atr_sl,
+                        distance_pct=support_distance_pct,
+                        soft_limit=config.sr_support_soft_distance_pct,
+                        hard_limit=config.sr_support_max_distance_pct
+                    )
+                    print(f"  ✅ SL [{sl_method}]: support={nearest_support:.2f} (-{support_distance_pct:.1f}%) → SL={stop_loss:.2f}")
                 else:
-                    # Support too far, use ATR fallback (config multiplier, default 2×)
-                    stop_loss = current_price - (atr * config.stop_loss_atr_mult)
-                    print(f"  ⚠️ Support too far ({support_distance_pct:.1f}%), ATR stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
+                    stop_loss, sl_method = atr_sl, "atr"
+                    print(f"  ⚠️ S/R SL above entry, ATR fallback: {stop_loss:.2f}")
             else:
-                # No valid support (missing or above entry price), use ATR fallback
-                stop_loss = current_price - (atr * config.stop_loss_atr_mult)
-                print(f"  ℹ️ No valid support, ATR-based stop: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
+                stop_loss = atr_sl
+                print(f"  ℹ️ No valid support, SL [{sl_method}]: {stop_loss:.2f} (-{((current_price-stop_loss)/current_price*100):.1f}%)")
 
-            # Take-profit: Use resistance if available, within distance, AND above current price
+            # --- Take-Profit ---
+            atr_tp = current_price + (atr * atr_tp_mult)
+            tp_method = "atr"
+
             if nearest_resistance and nearest_resistance > current_price:
                 resistance_distance_pct = ((nearest_resistance - current_price) / current_price) * 100
+                # Pull TP 0.5% below resistance for realistic fill
+                sr_tp = nearest_resistance * (1.0 - config.take_profit_sr_discount)
 
-                # Use config threshold (default 8%)
-                if resistance_distance_pct <= config.sr_resistance_max_distance_pct:
-                    take_profit = nearest_resistance
-                    print(f"  ✅ Resistance-based target: {nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%)")
-                else:
-                    # Resistance too far, use ATR fallback (config multiplier, default 3×)
-                    take_profit = current_price + (atr * config.take_profit_atr_mult)
-                    print(f"  ⚠️ Resistance too far ({resistance_distance_pct:.1f}%), ATR target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
+                take_profit, tp_method = blend(
+                    sr_price=sr_tp,
+                    atr_price=atr_tp,
+                    distance_pct=resistance_distance_pct,
+                    soft_limit=config.sr_resistance_soft_distance_pct,
+                    hard_limit=config.sr_resistance_max_distance_pct
+                )
+                print(f"  ✅ TP [{tp_method}]: resistance={nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%) → TP={take_profit:.2f}")
             else:
-                # No valid resistance (missing or below entry price), use ATR fallback
-                take_profit = current_price + (atr * config.take_profit_atr_mult)
-                print(f"  ℹ️ No valid resistance, ATR-based target: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
+                take_profit = atr_tp
+                print(f"  ℹ️ No valid resistance, TP [atr]: {take_profit:.2f} (+{((take_profit-current_price)/current_price*100):.1f}%)")
 
-        else:  # SELL
-            # Stop-loss: Use resistance if available, within distance, AND above current price
+        # ===== SELL =====
+        else:
+
+            # --- Stop-Loss ---
+            atr_sl = current_price + (atr * atr_sl_mult)
+            sl_method = "atr_conf" if confidence >= 0.75 or confidence < 0.50 else "atr"
+
             if nearest_resistance and nearest_resistance > current_price:
                 resistance_distance_pct = ((nearest_resistance - current_price) / current_price) * 100
+                sr_sl = nearest_resistance + (atr * config.stop_loss_sr_buffer)
 
-                # Use config threshold (default 5%)
-                if resistance_distance_pct <= config.sr_support_max_distance_pct:
-                    candidate_sl = nearest_resistance + (atr * config.stop_loss_sr_buffer)
-                    if candidate_sl > current_price:  # Sanity check: SL must be above entry
-                        stop_loss = candidate_sl
-                        print(f"  ✅ Resistance-based stop: {nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%)")
-                    else:
-                        stop_loss = current_price + (atr * config.stop_loss_atr_mult)
-                        print(f"  ⚠️ Resistance-based SL below entry, ATR fallback: {stop_loss:.2f}")
+                if sr_sl > current_price:  # Sanity: SL must be above entry
+                    stop_loss, sl_method = blend(
+                        sr_price=sr_sl,
+                        atr_price=atr_sl,
+                        distance_pct=resistance_distance_pct,
+                        soft_limit=config.sr_support_soft_distance_pct,
+                        hard_limit=config.sr_support_max_distance_pct
+                    )
+                    print(f"  ✅ SL [{sl_method}]: resistance={nearest_resistance:.2f} (+{resistance_distance_pct:.1f}%) → SL={stop_loss:.2f}")
                 else:
-                    # Resistance too far, use ATR fallback (config multiplier, default 2×)
-                    stop_loss = current_price + (atr * config.stop_loss_atr_mult)
-                    print(f"  ⚠️ Resistance too far ({resistance_distance_pct:.1f}%), ATR stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
+                    stop_loss, sl_method = atr_sl, "atr"
+                    print(f"  ⚠️ S/R SL below entry, ATR fallback: {stop_loss:.2f}")
             else:
-                # No valid resistance (missing or below entry price), use ATR fallback
-                stop_loss = current_price + (atr * config.stop_loss_atr_mult)
-                print(f"  ℹ️ No valid resistance, ATR-based stop: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
+                stop_loss = atr_sl
+                print(f"  ℹ️ No valid resistance, SL [{sl_method}]: {stop_loss:.2f} (+{((stop_loss-current_price)/current_price*100):.1f}%)")
 
-            # Take-profit: Use support if available, within distance, AND below current price
+            # --- Take-Profit ---
+            atr_tp = current_price - (atr * atr_tp_mult)
+            tp_method = "atr"
+
             if nearest_support and nearest_support < current_price:
                 support_distance_pct = ((current_price - nearest_support) / current_price) * 100
+                # Pull TP 0.5% above support (realistic fill for shorts)
+                sr_tp = nearest_support * (1.0 + config.take_profit_sr_discount)
 
-                # Use config threshold (default 8%)
-                if support_distance_pct <= config.sr_resistance_max_distance_pct:
-                    take_profit = nearest_support
-                    print(f"  ✅ Support-based target: {nearest_support:.2f} (-{support_distance_pct:.1f}%)")
-                else:
-                    # Support too far, use ATR fallback (config multiplier, default 3×)
-                    take_profit = current_price - (atr * config.take_profit_atr_mult)
-                    print(f"  ⚠️ Support too far ({support_distance_pct:.1f}%), ATR target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
+                take_profit, tp_method = blend(
+                    sr_price=sr_tp,
+                    atr_price=atr_tp,
+                    distance_pct=support_distance_pct,
+                    soft_limit=config.sr_resistance_soft_distance_pct,
+                    hard_limit=config.sr_resistance_max_distance_pct
+                )
+                print(f"  ✅ TP [{tp_method}]: support={nearest_support:.2f} (-{support_distance_pct:.1f}%) → TP={take_profit:.2f}")
             else:
-                # No valid support (missing or above entry price), use ATR fallback
-                take_profit = current_price - (atr * config.take_profit_atr_mult)
-                print(f"  ℹ️ No valid support, ATR-based target: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
-        
-        # Calculate Risk/Reward ratio
+                take_profit = atr_tp
+                print(f"  ℹ️ No valid support, TP [atr]: {take_profit:.2f} (-{((current_price-take_profit)/current_price*100):.1f}%)")
+
+        # ===== R:R CALCULATION & MINIMUM ENFORCEMENT =====
         risk = abs(entry_price - stop_loss)
         reward = abs(take_profit - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
 
-        # Minimum R/R guard: if S/R-based TP is too close to entry (R/R < 0.5),
-        # fall back to ATR-based TP to ensure a meaningful reward target
-        MIN_RR = 0.5
-        if rr_ratio < MIN_RR:
+        # Step 1: Try to tighten SL to reach minimum R:R (1.5) without moving TP
+        if rr_ratio < config.min_risk_reward and risk > 0:
+            required_risk = reward / config.min_risk_reward
             if "BUY" in decision:
-                take_profit = entry_price + (atr * config.take_profit_atr_mult)
-                print(f"  ⚠️ R/R {rr_ratio:.2f} too low (SR too close), ATR target: {take_profit:.2f}")
+                tightened_sl = entry_price - required_risk
+                # Only tighten if not more than 20% tighter than original SL
+                if tightened_sl > stop_loss * 1.20 or tightened_sl < entry_price:
+                    stop_loss = tightened_sl
+                    sl_method = "tightened"
+                    risk = abs(entry_price - stop_loss)
+                    rr_ratio = reward / risk if risk > 0 else 0
+                    print(f"  🔧 SL tightened to meet R:R≥{config.min_risk_reward}: {stop_loss:.2f} → R:R={rr_ratio:.2f}")
             else:
-                take_profit = entry_price - (atr * config.take_profit_atr_mult)
-                print(f"  ⚠️ R/R {rr_ratio:.2f} too low (SR too close), ATR target: {take_profit:.2f}")
+                tightened_sl = entry_price + required_risk
+                if tightened_sl < stop_loss * 0.80 or tightened_sl > entry_price:
+                    stop_loss = tightened_sl
+                    sl_method = "tightened"
+                    risk = abs(entry_price - stop_loss)
+                    rr_ratio = reward / risk if risk > 0 else 0
+                    print(f"  🔧 SL tightened to meet R:R≥{config.min_risk_reward}: {stop_loss:.2f} → R:R={rr_ratio:.2f}")
+
+        # Step 2: Hard minimum — if still below 0.8, override TP with ATR-based (vol-adjusted)
+        if rr_ratio < config.min_risk_reward_hard:
+            if "BUY" in decision:
+                take_profit = entry_price + (atr * atr_tp_mult)
+            else:
+                take_profit = entry_price - (atr * atr_tp_mult)
+            tp_method = "atr_override"
             reward = abs(take_profit - entry_price)
             rr_ratio = reward / risk if risk > 0 else 0
+            print(f"  ⚠️ Hard R:R minimum triggered, ATR TP override: {take_profit:.2f} → R:R={rr_ratio:.2f}")
+
+        print(f"  📊 Final: SL={stop_loss:.2f} [{sl_method}], TP={take_profit:.2f} [{tp_method}], R:R=1:{rr_ratio:.2f}")
 
         return (
             round(entry_price, 2),
             round(stop_loss, 2),
             round(take_profit, 2),
-            round(rr_ratio, 2)
+            round(rr_ratio, 2),
+            sl_method,
+            tp_method
         )
     
     def _save_audit_trail(

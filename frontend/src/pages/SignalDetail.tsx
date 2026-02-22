@@ -290,43 +290,149 @@ export function SignalDetail() {
         </CollapsibleSection>
 
         {/* Levels */}
-        <CollapsibleSection
-          id="levels"
-          icon="💰"
-          title="Entry & Exit Levels"
-          badge="Recommended"
-          isOpen={openSections.includes('levels')}
-          onToggle={() => toggleSection('levels')}
-        >
-          <div style={{ background: 'rgba(15, 23, 42, 0.5)', borderRadius: '12px', padding: '20px', margin: '20px 0' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-              {[
-                { type: '🎯 Take-Profit', price: signal.take_profit, change: ((signal.take_profit - signal.entry_price) / signal.entry_price * 100), style: 'take-profit', color: '#10b981' },
-                { type: '📍 Entry Price', price: signal.entry_price, change: 0, style: 'entry', color: '#3b82f6' },
-                { type: '🛡️ Stop-Loss', price: signal.stop_loss, change: ((signal.stop_loss - signal.entry_price) / signal.entry_price * 100), style: 'stop-loss', color: '#ef4444' }
-              ].map((level, idx) => (
-                <div key={idx} style={{
-                  textAlign: 'center',
-                  padding: '16px',
-                  borderRadius: '8px',
-                  background: 'rgba(30, 41, 59, 0.5)',
-                  border: `2px solid ${level.color}33`
-                }}>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>
-                    {level.type}
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: '700', marginBottom: '4px', color: level.color }}>
-                    {level.price.toFixed(2)} {signal.ticker_symbol.includes('.') ? 'HUF' : 'USD'}
-                  </div>
-                  <div style={{ fontSize: '13px', color: '#94a3b8' }}>
-                    {level.change !== 0 && `${level.change > 0 ? '+' : ''}${level.change.toFixed(1)}%`}
-                    {level.change === 0 && 'Current Price'}
-                  </div>
+        {(() => {
+          const rr = signal.risk_reward_ratio;
+          const rrGood = rr >= 1.5;
+          const rrWarn = rr >= 0.8 && rr < 1.5;
+          const rrBad  = rr < 0.8;
+          const rrColor  = rrGood ? '#10b981' : rrWarn ? '#f59e0b' : '#ef4444';
+          const rrBg     = rrGood ? 'rgba(16,185,129,0.12)' : rrWarn ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)';
+          const rrBorder = rrGood ? 'rgba(16,185,129,0.35)' : rrWarn ? 'rgba(245,158,11,0.35)' : 'rgba(239,68,68,0.35)';
+          const rrIcon   = rrGood ? '✅' : rrWarn ? '⚠️' : '🚨';
+          const rrLabel  = rrGood ? 'Jó R:R arány' : rrWarn ? 'Gyenge R:R arány' : 'Rossz R:R arány';
+          const rrSub    = rrGood ? 'Kedvező kockázat/hozam' : rrWarn ? 'Minimális szint alatt' : 'ATR override aktív';
+
+          const currency = signal.ticker_symbol.includes('.') ? 'HUF' : 'USD';
+
+          return (
+            <CollapsibleSection
+              id="levels"
+              icon="💰"
+              title="Entry & Exit Levels"
+              badge={`R:R 1:${rr.toFixed(2)}`}
+              isOpen={openSections.includes('levels')}
+              onToggle={() => toggleSection('levels')}
+            >
+              {/* R:R Quality Banner */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                background: rrBg,
+                border: `1px solid ${rrBorder}`,
+                borderRadius: '10px',
+                padding: '12px 16px',
+                margin: '16px 0 8px 0'
+              }}>
+                <span style={{ fontSize: '20px' }}>{rrIcon}</span>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontWeight: '700', color: rrColor, fontSize: '14px' }}>{rrLabel}</span>
+                  <span style={{ color: '#64748b', fontSize: '13px', marginLeft: '10px' }}>{rrSub}</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </CollapsibleSection>
+                <div style={{
+                  background: rrBg,
+                  border: `1px solid ${rrBorder}`,
+                  borderRadius: '6px',
+                  padding: '4px 10px',
+                  fontWeight: '700',
+                  fontSize: '15px',
+                  color: rrColor,
+                  fontFamily: 'monospace'
+                }}>
+                  1:{rr.toFixed(2)}
+                </div>
+              </div>
+
+              {/* SL/TP method badges */}
+              {(() => {
+                const meta = signal.reasoning?.levels_meta;
+                if (!meta) return null;
+
+                const methodLabel: Record<string, string> = {
+                  sr: 'S/R alapú',
+                  atr: 'ATR alapú',
+                  atr_conf: 'ATR (conf-adj)',
+                  blended: 'S/R + ATR blend',
+                  tightened: 'Tightened (R:R)',
+                  atr_override: 'ATR override',
+                };
+                const methodColor: Record<string, string> = {
+                  sr: '#10b981',
+                  atr: '#60a5fa',
+                  atr_conf: '#818cf8',
+                  blended: '#f59e0b',
+                  tightened: '#fb923c',
+                  atr_override: '#ef4444',
+                };
+
+                const slColor = methodColor[meta.sl_method] || '#94a3b8';
+                const tpColor = methodColor[meta.tp_method] || '#94a3b8';
+
+                return (
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(30,41,59,0.6)', borderRadius: '6px', padding: '5px 10px', border: `1px solid ${slColor}44` }}>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>🛡️ SL módszer:</span>
+                      <span style={{ fontSize: '12px', fontWeight: '700', color: slColor }}>{methodLabel[meta.sl_method] || meta.sl_method}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(30,41,59,0.6)', borderRadius: '6px', padding: '5px 10px', border: `1px solid ${tpColor}44` }}>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>🎯 TP módszer:</span>
+                      <span style={{ fontSize: '12px', fontWeight: '700', color: tpColor }}>{methodLabel[meta.tp_method] || meta.tp_method}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ background: 'rgba(15, 23, 42, 0.5)', borderRadius: '12px', padding: '20px', margin: '12px 0 20px 0' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                  {[
+                    { type: '🎯 Take-Profit', price: signal.take_profit, change: ((signal.take_profit - signal.entry_price) / signal.entry_price * 100), color: '#10b981' },
+                    { type: '📍 Entry Price', price: signal.entry_price, change: 0, color: '#3b82f6' },
+                    { type: '🛡️ Stop-Loss',   price: signal.stop_loss,   change: ((signal.stop_loss - signal.entry_price) / signal.entry_price * 100), color: '#ef4444' }
+                  ].map((level, idx) => (
+                    <div key={idx} style={{
+                      textAlign: 'center',
+                      padding: '16px',
+                      borderRadius: '8px',
+                      background: 'rgba(30, 41, 59, 0.5)',
+                      border: `2px solid ${level.color}33`
+                    }}>
+                      <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>
+                        {level.type}
+                      </div>
+                      <div style={{ fontSize: '24px', fontWeight: '700', marginBottom: '4px', color: level.color }}>
+                        {level.price.toFixed(2)} {currency}
+                      </div>
+                      <div style={{ fontSize: '13px', color: '#94a3b8' }}>
+                        {level.change !== 0 ? `${level.change > 0 ? '+' : ''}${level.change.toFixed(1)}%` : 'Current Price'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* R:R visual bar */}
+                {(() => {
+                  const risk   = Math.abs((signal.stop_loss - signal.entry_price) / signal.entry_price * 100);
+                  const reward = Math.abs((signal.take_profit - signal.entry_price) / signal.entry_price * 100);
+                  const total  = risk + reward;
+                  const riskPct   = (risk / total * 100).toFixed(1);
+                  const rewardPct = (reward / total * 100).toFixed(1);
+                  return (
+                    <div style={{ marginTop: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>
+                        <span>🛡️ Kockázat {risk.toFixed(1)}%</span>
+                        <span>🎯 Hozam {reward.toFixed(1)}%</span>
+                      </div>
+                      <div style={{ display: 'flex', height: '8px', borderRadius: '4px', overflow: 'hidden', background: 'rgba(30,41,59,0.8)' }}>
+                        <div style={{ width: `${riskPct}%`, background: 'linear-gradient(90deg, #ef4444, #f87171)', transition: 'width 0.4s' }} />
+                        <div style={{ width: `${rewardPct}%`, background: 'linear-gradient(90deg, #34d399, #10b981)', transition: 'width 0.4s' }} />
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </CollapsibleSection>
+          );
+        })()}
 
         {/* Sentiment */}
         <CollapsibleSection
