@@ -245,7 +245,22 @@ class BacktestService:
             # Guard: ensure check_time + 15min (execution offset) is still within trading hours
             check_plus_15 = check_time_utc + timedelta(minutes=15)
             if not price_service._is_trading_hours(check_plus_15, trade.symbol):
-                # This candle would be fetched outside trading hours - skip to next day open
+                # Last slot of the trading day: SHORT trades get EOD-liquidated here,
+                # LONG trades skip to next day (no price data available after hours).
+                if trade.direction == 'SHORT':
+                    trigger = self._check_exit_triggers_at_time(trade, check_time_utc)
+                    if trigger:
+                        logger.debug(
+                            f"      Exit: {trade.symbol} {trigger['exit_reason']} "
+                            f"@ {check_time_utc} UTC (EOD)"
+                        )
+                        self.trade_manager.close_position(
+                            trade,
+                            exit_reason=trigger['exit_reason'],
+                            exit_signal=trigger.get('exit_signal'),
+                            trigger_time_utc=check_time_utc
+                        )
+                        return True
                 check_time_utc = price_service._next_market_open_utc(check_time_utc, trade.symbol)
                 continue
 
@@ -327,14 +342,13 @@ class BacktestService:
             }
 
         # Priority 4: EOD (SHORT only, weekdays only)
+        # Triggered at the last valid trading slot of the day: when check_time is
+        # within trading hours but check_time + 15min is already outside (market close).
         if trade.direction == 'SHORT':
             price_service = self.trade_manager.price_service
             if not price_service._is_weekend(check_time_utc):
-                market_time = price_service._utc_to_market_time(
-                    check_time_utc,
-                    trade.symbol
-                )
-                if self.trade_manager._is_eod_time(market_time):
+                check_plus_15 = check_time_utc + timedelta(minutes=15)
+                if not price_service._is_trading_hours(check_plus_15, trade.symbol):
                     return {
                         'exit_reason': 'EOD_AUTO_LIQUIDATION',
                         'exit_signal': None
