@@ -729,7 +729,20 @@ class SignalGenerator:
         risk = abs(entry_price - stop_loss)
         reward = abs(take_profit - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
-        
+
+        # Minimum R/R guard: if S/R-based TP is too close to entry (R/R < 0.5),
+        # fall back to ATR-based TP to ensure a meaningful reward target
+        MIN_RR = 0.5
+        if rr_ratio < MIN_RR:
+            if "BUY" in decision:
+                take_profit = entry_price + (atr * config.take_profit_atr_mult)
+                print(f"  ⚠️ R/R {rr_ratio:.2f} too low (SR too close), ATR target: {take_profit:.2f}")
+            else:
+                take_profit = entry_price - (atr * config.take_profit_atr_mult)
+                print(f"  ⚠️ R/R {rr_ratio:.2f} too low (SR too close), ATR target: {take_profit:.2f}")
+            reward = abs(take_profit - entry_price)
+            rr_ratio = reward / risk if risk > 0 else 0
+
         return (
             round(entry_price, 2),
             round(stop_loss, 2),
