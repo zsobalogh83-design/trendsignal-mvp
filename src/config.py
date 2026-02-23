@@ -554,10 +554,10 @@ def save_config_to_file(config_instance):
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config_dict, f, indent=2)
         
-        print(f"✅ Configuration saved to {CONFIG_FILE}")
+        print(f"[OK] Configuration saved to {CONFIG_FILE}")
         return True
     except Exception as e:
-        print(f"❌ Error saving config: {e}")
+        print(f"[ERROR] Error saving config: {e}")
         return False
 
 def load_config_from_file():
@@ -566,10 +566,10 @@ def load_config_from_file():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 config = json.load(f)
-                print(f"✅ Configuration loaded from {CONFIG_FILE}")
+                print(f"[OK] Configuration loaded from {CONFIG_FILE}")
                 return config
         except Exception as e:
-            print(f"⚠️ Error loading config: {e}, using defaults")
+            print(f"[WARN] Error loading config: {e}, using defaults")
     else:
         print(f"Config file not found at {CONFIG_FILE}, using defaults")
     return None
@@ -593,10 +593,10 @@ def update_config_values(config_instance, updates: dict):
             setattr(config_instance, attr_name, value)
             print(f"  ✓ Updated {key} = {value}")
         else:
-            print(f"  ⚠️ Attribute not found: {attr_name} (from key: {key})")
-    
+            print(f"  [WARN] Attribute not found: {attr_name} (from key: {key})")
+
     save_config_to_file(config_instance)
-    print(f"✅ Configuration updated with {len(updates)} changes")
+    print(f"[OK] Configuration updated with {len(updates)} changes")
     return config_instance
 
 
@@ -951,7 +951,7 @@ class TrendSignalConfig:
             self.sentiment_conf_low_news_count = saved_config.get("SENTIMENT_CONF_LOW_NEWS_COUNT", SENTIMENT_CONF_LOW_NEWS_COUNT)
             self.sentiment_positive_threshold = saved_config.get("SENTIMENT_POSITIVE_THRESHOLD", SENTIMENT_POSITIVE_THRESHOLD)
             self.sentiment_negative_threshold = saved_config.get("SENTIMENT_NEGATIVE_THRESHOLD", SENTIMENT_NEGATIVE_THRESHOLD)
-            print("📝 Config loaded from file with custom weights")
+            print("[OK] Config loaded from file with custom weights")
         
         # Initialize nested dicts if not loaded (legacy compatibility)
         if self.decay_weights is None:
@@ -993,10 +993,10 @@ class TrendSignalConfig:
             missing_params = [p for p in new_params if p not in saved_config]
             
             if missing_params:
-                print(f"🔄 Auto-migration: Detected {len(missing_params)} new parameters")
+                print(f"[INFO] Auto-migration: Detected {len(missing_params)} new parameters")
                 print(f"   New params: {', '.join(missing_params[:3])}...")
                 save_config_to_file(self)
-                print("✅ Config auto-migrated with new parameters")
+                print("[OK] Config auto-migrated with new parameters")
     
     # Uppercase property aliases for backward compatibility
     @property
@@ -1207,26 +1207,26 @@ class TrendSignalConfig:
             self.telegram_max_alerts_per_hour = saved_config.get("TELEGRAM_MAX_ALERTS_PER_HOUR", TELEGRAM_MAX_ALERTS_PER_HOUR)
             self.telegram_include_news = saved_config.get("TELEGRAM_INCLUDE_NEWS", TELEGRAM_INCLUDE_NEWS)
             self.telegram_include_link = saved_config.get("TELEGRAM_INCLUDE_LINK", TELEGRAM_INCLUDE_LINK)
-            print("🔄 Config reloaded from file")
+            print("[OK] Config reloaded from file")
     
     def validate(self) -> bool:
         """Validate configuration"""
         # Check API keys
         if not self.newsapi_key or self.newsapi_key == "YOUR_NEWSAPI_KEY_HERE":
-            print("⚠️ Warning: NewsAPI key not set!")
+            print("[WARN] Warning: NewsAPI key not set!")
             return False
-        
+
         if not self.alphavantage_key or self.alphavantage_key == "YOUR_ALPHAVANTAGE_KEY_HERE":
-            print("⚠️ Warning: Alpha Vantage key not set!")
+            print("[WARN] Warning: Alpha Vantage key not set!")
             return False
-        
+
         # Check weights sum to 1.0
         total_weight = self.sentiment_weight + self.technical_weight + self.risk_weight
         if abs(total_weight - 1.0) > 0.01:
-            print(f"⚠️ Warning: Component weights sum to {total_weight}, not 1.0!")
+            print(f"[WARN] Warning: Component weights sum to {total_weight}, not 1.0!")
             return False
-        
-        print("✅ Configuration validated!")
+
+        print("[OK] Configuration validated!")
         return True
     
     def display(self):
@@ -1236,34 +1236,34 @@ class TrendSignalConfig:
         print("=" * 60)
         print()
         
-        print("⚖️ Component Weights:")
+        print("Component Weights:")
         print(f"  Sentiment: {self.sentiment_weight:.0%}")
         print(f"  Technical: {self.technical_weight:.0%}")
         print(f"  Risk:      {self.risk_weight:.0%}")
         print()
-        
-        print("⏱️ Sentiment Decay Model (24h window):")
+
+        print("Sentiment Decay Model (24h window):")
         for period, weight in self.decay_weights.items():
-            marker = "🆕" if '24h' in period else ""
+            marker = "[NEW]" if '24h' in period else ""
             print(f"  {period:8s}: {weight:.0%}  {marker}")
         print()
-        
-        print("🎯 Decision Thresholds:")
-        print(f"  STRONG BUY:  Score ≥ {self.strong_buy_score:+d}, Conf ≥ {self.strong_buy_confidence:.0%}")
-        print(f"  MOD BUY:     Score ≥ {self.moderate_buy_score:+d}, Conf ≥ {self.moderate_buy_confidence:.0%}")
-        print(f"  STRONG SELL: Score ≤ {self.strong_sell_score:+d}, Conf ≥ {self.strong_sell_confidence:.0%}")
-        print(f"  MOD SELL:    Score ≤ {self.moderate_sell_score:+d}, Conf ≥ {self.moderate_sell_confidence:.0%}")
+
+        print("Decision Thresholds:")
+        print(f"  STRONG BUY:  Score >= {self.strong_buy_score:+d}, Conf >= {self.strong_buy_confidence:.0%}")
+        print(f"  MOD BUY:     Score >= {self.moderate_buy_score:+d}, Conf >= {self.moderate_buy_confidence:.0%}")
+        print(f"  STRONG SELL: Score <= {self.strong_sell_score:+d}, Conf >= {self.strong_sell_confidence:.0%}")
+        print(f"  MOD SELL:    Score <= {self.moderate_sell_score:+d}, Conf >= {self.moderate_sell_confidence:.0%}")
         print()
-        
-        print("📊 Technical Indicators:")
+
+        print("Technical Indicators:")
         print(f"  SMA: {self.sma_periods['short']}, {self.sma_periods['medium']}, {self.sma_periods['long']}")
         print(f"  MACD: ({self.macd_params['fast']}, {self.macd_params['slow']}, {self.macd_params['signal']})")
         print(f"  RSI: {self.rsi_period}")
         print()
-        
-        print("⏰ Scheduler Settings:")
+
+        print("Scheduler Settings:")
         print(f"  Refresh Interval: {self.signal_refresh_interval} minutes")
-        print(f"  BÉT Hours: {self.bet_market_open}-{self.bet_market_close} {self.bet_timezone}")
+        print(f"  BET Hours: {self.bet_market_open}-{self.bet_market_close} {self.bet_timezone}")
         print(f"  US Hours:  {self.us_market_open}-{self.us_market_close} {self.us_timezone}")
         print()
         

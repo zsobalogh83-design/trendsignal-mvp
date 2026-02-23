@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, UseQueryResult } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
-import type { Signal, Ticker, TickerUpdate } from '../types/index';
+import type { Signal, Ticker, TickerUpdate, StartRunRequest } from '../types/index';
 
 // ✅ Type aliases for convenience
 type SignalsResponse = { signals: Signal[]; total: number };
@@ -112,11 +112,109 @@ export function useToggleTickerActive() {
 
 export function useDeleteTicker() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (id: number) => apiClient.deleteTicker(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tickers'] });
+    },
+  });
+}
+
+// ==========================================
+// OPTIMIZER HOOKS
+// ==========================================
+
+/** Optimizer status (idle panel data). Refetch every 30s when not running. */
+export function useOptimizerStatus() {
+  return useQuery({
+    queryKey: ['optimizer-status'],
+    queryFn: () => apiClient.getOptimizerStatus(),
+    refetchInterval: 30_000,
+  });
+}
+
+/** Live progress for an active run. Polls every 3s when enabled. */
+export function useOptimizerProgress(runId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: ['optimizer-progress', runId],
+    queryFn: () => apiClient.getOptimizerProgress(runId!),
+    enabled: !!runId && enabled,
+    refetchInterval: 3_000,
+    staleTime: 0,
+  });
+}
+
+/** List of recent runs. */
+export function useOptimizerRuns(limit = 10) {
+  return useQuery({
+    queryKey: ['optimizer-runs', limit],
+    queryFn: () => apiClient.getOptimizerRuns(limit),
+    staleTime: 5_000,
+  });
+}
+
+/** Proposals for a specific run (or latest). */
+export function useProposals(runId?: number) {
+  return useQuery({
+    queryKey: ['optimizer-proposals', runId],
+    queryFn: () => apiClient.getProposals(runId, 10),
+    staleTime: 5_000,
+  });
+}
+
+/** Single proposal detail. */
+export function useProposal(proposalId: number | null) {
+  return useQuery({
+    queryKey: ['optimizer-proposal', proposalId],
+    queryFn: () => apiClient.getProposal(proposalId!),
+    enabled: !!proposalId,
+    staleTime: 60_000,
+  });
+}
+
+/** Start optimizer run mutation. */
+export function useStartOptimizer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: StartRunRequest) => apiClient.startOptimizer(req),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['optimizer-status'] });
+      queryClient.invalidateQueries({ queryKey: ['optimizer-runs'] });
+    },
+  });
+}
+
+/** Stop optimizer mutation. */
+export function useStopOptimizer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: number) => apiClient.stopOptimizer(runId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['optimizer-status'] });
+    },
+  });
+}
+
+/** Approve proposal mutation. */
+export function useApproveProposal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (proposalId: number) => apiClient.approveProposal(proposalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['optimizer-proposals'] });
+      queryClient.invalidateQueries({ queryKey: ['optimizer-status'] });
+    },
+  });
+}
+
+/** Reject proposal mutation. */
+export function useRejectProposal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (proposalId: number) => apiClient.rejectProposal(proposalId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['optimizer-proposals'] });
     },
   });
 }

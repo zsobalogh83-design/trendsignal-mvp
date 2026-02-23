@@ -15,6 +15,7 @@ from config_api import router as config_router
 from signals_api import router as signals_router
 from tickers_api import router as tickers_router  # ✅ Ticker management
 from simulated_trades_api import router as simulated_trades_router  # ✅ NEW: Simulated Trades (Trackback)
+from optimizer_api import router as optimizer_router  # ✅ Self-Tuning Engine
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -127,6 +128,7 @@ app.include_router(config_router)
 app.include_router(signals_router)
 app.include_router(tickers_router)  # ✅ Ticker CRUD endpoints
 app.include_router(simulated_trades_router)  # ✅ NEW: Trackback System
+app.include_router(optimizer_router)  # ✅ Self-Tuning Engine
 
 # ==========================================
 # CORS CONFIGURATION - CRITICAL FOR FRONTEND

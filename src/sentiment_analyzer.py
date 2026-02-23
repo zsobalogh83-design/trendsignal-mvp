@@ -22,13 +22,13 @@ from src.config import TrendSignalConfig, get_config, USE_FINBERT
 if USE_FINBERT:
     try:
         from finbert_analyzer import SentimentAnalyzerFinBERT as _SentimentEngine
-        print("🧠 Using FinBERT sentiment analysis")
+        print("[OK] Using FinBERT sentiment analysis")
     except ImportError as e:
-        print(f"⚠️ FinBERT not available ({e}), falling back to mock")
+        print(f"[WARN] FinBERT not available ({e}), falling back to mock")
         USE_FINBERT = False
 
 if not USE_FINBERT:
-    print("🔤 Using keyword-based sentiment (mock)")
+    print("[INFO] Using keyword-based sentiment (mock)")
     _SentimentEngine = None  # Will use mock below
 
 
