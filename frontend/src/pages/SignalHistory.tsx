@@ -780,20 +780,16 @@ function renderPnl(
   signal?: Signal
 ): React.ReactNode {
   if (!trade) {
-    // SHORT/SELL signals that arrived outside trading hours get no trade.
-    // Show a clear "NO TRADE" badge so users understand the signal was skipped,
-    // not that the trade has zero P&L.
-    const isShortSignal = signal && signal.combined_score !== undefined && signal.combined_score < -14;
-    const title = isShortSignal
-      ? 'Nincs trade – a SELL signal piacon kívül érkezett, SHORT pozíció nem nyitható tőzsdei nyitvatartáson kívül'
-      : 'Nincs szimulált trade ehhez a signalhoz';
+    // No simulated trade for this signal yet.
+    // Could be: backtest not yet run, signal too recent (active), or genuinely outside hours.
+    const title = 'Nincs szimulált trade ehhez a signalhoz (backtest még nem futott rá, vagy a signal aktív/mai)';
     return (
       <span title={title}>
         <span style={{
           display: 'inline-block',
-          background: isShortSignal ? 'rgba(239, 68, 68, 0.08)' : 'rgba(71, 85, 105, 0.15)',
-          border: `1px solid ${isShortSignal ? 'rgba(239, 68, 68, 0.25)' : 'rgba(71, 85, 105, 0.35)'}`,
-          color: isShortSignal ? '#ef4444' : '#475569',
+          background: 'rgba(71, 85, 105, 0.15)',
+          border: '1px solid rgba(71, 85, 105, 0.35)',
+          color: '#475569',
           fontSize: '9px',
           fontWeight: '700',
           letterSpacing: '0.03em',
@@ -802,7 +798,7 @@ function renderPnl(
           verticalAlign: 'middle',
           opacity: 0.7,
         }}>
-          {isShortSignal ? 'ZÁRVA' : '—'}
+          —
         </span>
       </span>
     );
