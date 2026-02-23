@@ -117,7 +117,10 @@ def run_backtest(
             date_from = datetime.strptime(request.date_from, "%Y-%m-%d")
 
         if request.date_to:
-            date_to = datetime.strptime(request.date_to, "%Y-%m-%d")
+            # Include the full day: parse to end-of-day (23:59:59)
+            date_to = datetime.strptime(request.date_to, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59
+            )
 
         # Run backtest
         service = BacktestService(db)
