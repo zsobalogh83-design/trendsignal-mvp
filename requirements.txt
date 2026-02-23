@@ -42,6 +42,9 @@ ipython>=8.14.0
 # Phase 2: Technical indicators
 # pandas-ta>=0.3.14     # Clean indicator library (upgrade from manual)
 
+# Self-Tuning Engine
+deap>=1.4.3            # Genetic algorithm optimizer
+
 # Phase 2: Task queue
 # redis>=4.6.0          # Cache
 # celery>=5.3.0         # Task queue

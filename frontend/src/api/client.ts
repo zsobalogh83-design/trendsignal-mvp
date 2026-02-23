@@ -9,6 +9,12 @@ import type {
   SentimentConfig,
   SignalConfig,
   PaginatedResponse,
+  OptimizerRun,
+  OptimizerProgress,
+  OptimizerStatus,
+  ConfigProposal,
+  StartRunRequest,
+  StartRunResponse,
 } from '../types/index';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
@@ -221,6 +227,50 @@ class ApiClient {
       method: 'PUT',
       body: JSON.stringify(source),
     });
+  }
+
+  // ==========================================
+  // SELF-TUNING ENGINE (OPTIMIZER)
+  // ==========================================
+
+  async startOptimizer(req: StartRunRequest = {}): Promise<StartRunResponse> {
+    return this.request('/optimizer/run', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    });
+  }
+
+  async getOptimizerRuns(limit = 10): Promise<OptimizerRun[]> {
+    return this.request(`/optimizer/runs?limit=${limit}`);
+  }
+
+  async getOptimizerProgress(runId: number): Promise<OptimizerProgress> {
+    return this.request(`/optimizer/runs/${runId}/progress`);
+  }
+
+  async stopOptimizer(runId: number): Promise<{ message: string }> {
+    return this.request(`/optimizer/runs/${runId}/stop`, { method: 'POST' });
+  }
+
+  async getProposals(runId?: number, limit = 10): Promise<ConfigProposal[]> {
+    const qs = runId ? `?run_id=${runId}&limit=${limit}` : `?limit=${limit}`;
+    return this.request(`/optimizer/proposals${qs}`);
+  }
+
+  async getProposal(proposalId: number): Promise<ConfigProposal> {
+    return this.request(`/optimizer/proposals/${proposalId}`);
+  }
+
+  async approveProposal(proposalId: number): Promise<{ message: string; applied_keys: string[] }> {
+    return this.request(`/optimizer/proposals/${proposalId}/approve`, { method: 'POST' });
+  }
+
+  async rejectProposal(proposalId: number): Promise<{ message: string }> {
+    return this.request(`/optimizer/proposals/${proposalId}/reject`, { method: 'POST' });
+  }
+
+  async getOptimizerStatus(): Promise<OptimizerStatus> {
+    return this.request('/optimizer/status');
   }
 }
 

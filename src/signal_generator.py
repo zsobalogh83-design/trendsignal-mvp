@@ -2024,27 +2024,27 @@ def calculate_technical_score(
         # RSI
         if pd.notna(current.get('rsi')):
             indicators_checked += 1
-            if current['rsi'] > self.config.tech_conf_rsi_bullish:
+            if current['rsi'] > config.tech_conf_rsi_bullish:
                 indicators_bullish += 1
-            elif current['rsi'] < self.config.tech_conf_rsi_bearish:
+            elif current['rsi'] < config.tech_conf_rsi_bearish:
                 indicators_bearish += 1
 
         # ADX (strong trend = higher confidence)
         adx_boost = 0
         if adx is not None:
-            if adx > self.config.tech_conf_adx_strong:
-                adx_boost = self.config.tech_conf_adx_strong_boost
-            elif adx > self.config.tech_conf_adx_moderate:
-                adx_boost = self.config.tech_conf_adx_moderate_boost
+            if adx > config.tech_conf_adx_strong:
+                adx_boost = config.tech_conf_adx_strong_boost
+            elif adx > config.tech_conf_adx_moderate:
+                adx_boost = config.tech_conf_adx_moderate_boost
 
         # Calculate alignment (what % of indicators agree)
         alignment = max(indicators_bullish, indicators_bearish) / indicators_checked if indicators_checked > 0 else 0.5
 
         # Base confidence from alignment
-        base_confidence = self.config.tech_conf_base + (alignment * self.config.tech_conf_alignment_weight)
+        base_confidence = config.tech_conf_base + (alignment * config.tech_conf_alignment_weight)
 
         # Add ADX boost
-        technical_confidence = min(base_confidence + adx_boost, self.config.tech_conf_max)
+        technical_confidence = min(base_confidence + adx_boost, config.tech_conf_max)
         
         result = {
             "score": max(-100, min(100, tech_score)),
@@ -2165,13 +2165,19 @@ def calculate_risk_score(
         Dict with risk score (clamped -100 to +100), confidence, and components
     """
     try:
+        # Load config first so it's available throughout the function
+        from src.config import get_config as _get_config
+        config = _get_config()
+        if hasattr(config, 'reload'):
+            config.reload()
+
         atr_pct = technical_data.get("atr_pct", 2.0)
         current_price = technical_data["current_price"]
         adx = technical_data.get("adx", None)  # Trend strength
-        
+
         # ===== SUPPORT/RESISTANCE SELECTION =====
         # PRIORITY: swing_sr (daily 180d, order=7) > intraday S/R (15m min/max)
-        
+
         if swing_sr and (swing_sr.get('support') or swing_sr.get('resistance')):
             # Use swing S/R from detect_support_resistance()
             support_levels = swing_sr.get('support', [])
@@ -2203,10 +2209,10 @@ def calculate_risk_score(
             nearest_resistance = current_price * 1.03
         
         # ===== 1. VOLATILITY RISK (ATR-based) - 40% =====
-        vl = self.config.atr_vol_very_low
-        lo = self.config.atr_vol_low
-        mo = self.config.atr_vol_moderate
-        hi = self.config.atr_vol_high
+        vl = config.atr_vol_very_low
+        lo = config.atr_vol_low
+        mo = config.atr_vol_moderate
+        hi = config.atr_vol_high
         if atr_pct < vl:
             volatility_risk = +0.8
             vol_status = f"🟢 Very Low Vol"
@@ -2256,11 +2262,11 @@ def calculate_risk_score(
             proximity_confidence = 0.85
 
         # ===== 3. TREND STRENGTH (ADX) - 25% =====
-        adx_vs = self.config.adx_very_strong
-        adx_s  = self.config.adx_strong
-        adx_mo = self.config.adx_moderate
-        adx_w  = self.config.adx_weak
-        adx_vw = self.config.adx_very_weak
+        adx_vs = config.adx_very_strong
+        adx_s  = config.adx_strong
+        adx_mo = config.adx_moderate
+        adx_w  = config.adx_weak
+        adx_vw = config.adx_very_weak
         if adx is not None:
             if adx > adx_vs:
                 trend_risk = +0.8
@@ -2293,12 +2299,6 @@ def calculate_risk_score(
             trend_confidence = 0.60
         
         # ===== AGGREGATE RISK SCORE =====
-        # Load dynamic weights from config
-        from src.config import get_config
-        config = get_config()
-        if hasattr(config, 'reload'):
-            config.reload()
-        
         risk_score = (
             volatility_risk * config.risk_volatility_weight +
             proximity_risk * config.risk_proximity_weight +

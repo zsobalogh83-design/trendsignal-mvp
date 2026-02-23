@@ -132,6 +132,9 @@ export function Dashboard() {
             <Link to="/news" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
               📰 News
             </Link>
+            <Link to="/optimizer" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
+              🧬 Optimizer
+            </Link>
             <Link to="/settings" style={{ color: '#94a3b8', textDecoration: 'none', fontSize: '14px' }}>
               ⚙️ Settings
             </Link>

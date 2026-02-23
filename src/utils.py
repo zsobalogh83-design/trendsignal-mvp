@@ -180,9 +180,9 @@ def fetch_dual_timeframe(
             print(f"   ✅ Cached: {ticker} {interval} {period} ({len(df)} candles)")
         return df
     
-    # Intraday momentum (5m, 2 days = 2× MACD_26 buffer)
-    print(f"\n🔍 DEBUG: Fetching 5m data (2d for 2× MACD buffer)...")
-    df_5m = get_cached_price_data(ticker_symbol, interval='5m', period='2d')
+    # Intraday momentum (5m, 5 days = ensures enough candles even after weekends/holidays)
+    print(f"\n🔍 DEBUG: Fetching 5m data (5d for weekend-safe MACD buffer)...")
+    df_5m = get_cached_price_data(ticker_symbol, interval='5m', period='5d')
     print(f"🔍 DEBUG: df_5m result: {type(df_5m)}, length: {len(df_5m) if df_5m is not None else 'None'}")
     
     # Trend context (1h, 3 months = 2× SMA_200 buffer)

@@ -364,3 +364,137 @@ export interface SimulatedTradesResponse {
     avg_holding_hours: number;
   };
 }
+
+// ====================================================================
+// SELF-TUNING ENGINE (OPTIMIZER) TYPES
+// ====================================================================
+
+export type OptimizerRunStatus = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'STOPPED';
+export type ProposalVerdict    = 'PROPOSABLE' | 'CONDITIONAL' | 'REJECTED';
+export type ProposalReview     = 'PENDING' | 'APPROVED' | 'REJECTED_BY_USER';
+
+export interface OptimizerRun {
+  id: number;
+  status: OptimizerRunStatus;
+  started_at: string;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  population_size: number;
+  max_generations: number;
+  generations_run: number | null;
+  best_train_fitness: number | null;
+  best_val_fitness: number | null;
+  proposals_generated: number;
+}
+
+export interface GenerationRow {
+  generation: number;
+  best_train_fitness: number;
+  avg_train_fitness: number;
+  best_val_fitness: number | null;
+  train_val_gap: number | null;
+  recorded_at: string;
+}
+
+export interface OptimizerProgress {
+  run_id: number;
+  status: OptimizerRunStatus;
+  generations_run: number;
+  max_generations: number;
+  best_train_fitness: number | null;
+  best_val_fitness: number | null;
+  train_val_gap_pct: number | null;
+  recent_generations: GenerationRow[];
+  proposals_ready: number;
+  elapsed_seconds: number | null;
+}
+
+export interface RegimeStats {
+  profit_factor: number | null;
+  win_rate: number | null;
+  trade_count: number;
+}
+
+export interface WalkForwardWindow {
+  window: number;
+  signal_range: string;
+  test_signals: number;
+  prop_fitness: number;
+  base_fitness: number;
+  prop_pf: number;
+  base_pf: number;
+  pf_delta: number;
+  positive: boolean;
+}
+
+export interface ConfigProposal {
+  id: number;
+  run_id: number;
+  rank: number;
+  verdict: ProposalVerdict;
+  review_status: ProposalReview;
+
+  train_fitness: number;
+  val_fitness: number;
+  test_fitness: number;
+  baseline_fitness: number;
+  fitness_improvement_pct: number;
+
+  test_trade_count: number | null;
+  test_win_rate: number | null;
+  test_profit_factor: number | null;
+  baseline_profit_factor: number | null;
+
+  train_val_gap: number | null;
+  overfitting_ok: number;
+
+  bootstrap_p_value: number | null;
+  bootstrap_significant: number;
+
+  wf_window_count: number | null;
+  wf_positive_count: number | null;
+  wf_result_json: WalkForwardWindow[] | string | null;
+  wf_consistent: number;
+
+  regime_trending_pf: number | null;
+  regime_trending_trades: number | null;
+  regime_sideways_pf: number | null;
+  regime_sideways_trades: number | null;
+  regime_highvol_pf: number | null;
+  regime_highvol_trades: number | null;
+
+  gate_min_trades_ok: number;
+  gate_fitness_improvement_ok: number;
+  gate_bootstrap_ok: number;
+  gate_overfitting_ok: number;
+  gate_profit_factor_ok: number;
+  gate_sideways_pf_ok: number;
+
+  verdict_reason: string | null;
+  config_vector_json: number[] | string | null;
+  config_diff_json: Record<string, { before: number; after: number }> | string | null;
+
+  created_at: string;
+  reviewed_at: string | null;
+}
+
+export interface OptimizerStatus {
+  optimizer_running: boolean;
+  active_run_id: number | null;
+  last_run: OptimizerRun | null;
+  signal_count: number;
+  trade_count: number;
+}
+
+export interface StartRunRequest {
+  population_size?: number;
+  max_generations?: number;
+  crossover_prob?: number;
+  mutation_prob?: number;
+}
+
+export interface StartRunResponse {
+  run_id: number;
+  status: string;
+  message: string;
+}
