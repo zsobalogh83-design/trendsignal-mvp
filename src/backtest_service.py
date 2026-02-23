@@ -230,9 +230,9 @@ class BacktestService:
 
         # Check every 15 minutes
         while check_time_utc <= now_utc:
-            # Skip weekends entirely - markets are closed, no candles, no exits possible
+            # Skip weekends entirely - jump directly to next market open
             if price_service._is_weekend(check_time_utc):
-                check_time_utc += timedelta(minutes=15)
+                check_time_utc = price_service._next_market_open_utc(check_time_utc, trade.symbol)
                 continue
 
             # Skip outside trading hours - no candles available
