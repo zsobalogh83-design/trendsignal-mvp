@@ -34,7 +34,8 @@ from sqlalchemy import and_, or_
 import logging
 import time
 
-from src.models import Signal, SimulatedTrade
+from src.models import Signal, SimulatedTrade, PriceData
+from src.database import SessionLocal
 from src.trade_manager import TradeManager
 from src.exceptions import InsufficientDataError, InvalidSignalError, PositionAlreadyExistsError
 
@@ -314,9 +315,6 @@ class BacktestService:
 
         # Az aznapi utolsó 5m gyertya záróárának lekérése
         try:
-            from database import SessionLocal
-            from models import PriceData
-
             day_start = eod_time_utc.replace(hour=0, minute=0, second=0, microsecond=0)
             day_end = eod_time_utc
 

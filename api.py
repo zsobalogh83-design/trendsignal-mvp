@@ -12,7 +12,7 @@ FIXED: CORS + Host settings for proper frontend connection
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy.orm import Session
 from config_api import router as config_router
-from signals_api import router as signals_router
+from src.signals_api import router as signals_router
 from tickers_api import router as tickers_router  # ✅ Ticker management
 from simulated_trades_api import router as simulated_trades_router  # ✅ NEW: Simulated Trades (Trackback)
 from optimizer_api import router as optimizer_router  # ✅ Self-Tuning Engine
@@ -42,8 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Database imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-from database import get_db
+from src.database import get_db
 from src.models import Ticker, Signal, NewsItem, NewsSource, NewsTicker
 
 # Import NewsCollector with fixed datetime handling
@@ -172,21 +171,37 @@ async def get_news(
 ):
     """Get news items from database"""
     try:
+        from src.models import NewsCategory
         query = db.query(NewsItem)
-        
+
         # Filter by ticker if specified
         if ticker_symbol:
-            query = query.join(NewsTicker).join(Ticker).filter(
+            query = query.join(NewsTicker, NewsTicker.news_id == NewsItem.id).join(Ticker, Ticker.id == NewsTicker.ticker_id).filter(
                 Ticker.symbol == ticker_symbol.upper()
             )
-        
+
         # Filter by sentiment if specified
         if sentiment and sentiment != 'all':
             query = query.filter(NewsItem.sentiment_label == sentiment)
-        
+
         # Order by published date and limit
         news_items = query.order_by(NewsItem.published_at.desc()).limit(limit).all()
-        
+
+        # Pre-fetch sources and categories to avoid N+1 and missing relationship issues
+        news_ids = [item.id for item in news_items]
+        source_ids = list({item.source_id for item in news_items if item.source_id})
+
+        sources_by_id = {}
+        if source_ids:
+            sources = db.query(NewsSource).filter(NewsSource.id.in_(source_ids)).all()
+            sources_by_id = {s.id: s.name for s in sources}
+
+        categories_by_news_id = {}
+        if news_ids:
+            cats = db.query(NewsCategory).filter(NewsCategory.news_id.in_(news_ids)).all()
+            for cat in cats:
+                categories_by_news_id.setdefault(cat.news_id, []).append(cat.category)
+
         # Format response
         news_list = []
         for item in news_items:
@@ -195,17 +210,20 @@ async def get_news(
                 "title": item.title,
                 "description": item.description,
                 "url": item.url,
-                "source": item.source.name if item.source else "Unknown",
+                "source": sources_by_id.get(item.source_id, "Unknown"),
                 "published_at": item.published_at.isoformat() + "Z" if item.published_at else None,
                 "sentiment_score": float(item.sentiment_score) if item.sentiment_score else 0.0,
                 "sentiment_confidence": float(item.sentiment_confidence) if item.sentiment_confidence else 0.0,
                 "sentiment_label": item.sentiment_label,
-                "categories": [cat.category for cat in item.categories]
+                "categories": categories_by_news_id.get(item.id, [])
             })
-        
+
         return {"news": news_list, "total": len(news_list)}
-        
+
     except Exception as e:
+        logger.error(f"❌ Error getting news: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/database/status")

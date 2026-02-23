@@ -19,6 +19,8 @@ import logging
 import pytz
 
 from src.exceptions import InsufficientDataError
+from src.database import SessionLocal
+from src.models import PriceData
 
 logger = logging.getLogger(__name__)
 
@@ -157,9 +159,6 @@ class PriceService:
         
         # STEP 1: Try DB first (FAST)
         try:
-            from database import SessionLocal
-            from models import PriceData
-            
             db = SessionLocal()
             try:
                 # Search window

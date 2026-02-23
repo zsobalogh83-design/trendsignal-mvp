@@ -8,7 +8,7 @@ Date: 2026-02-17
 """
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, BigInteger
 from sqlalchemy.sql import func
-from database import Base
+from src.database import Base
 
 # ===== CORE TABLES =====
 

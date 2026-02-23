@@ -92,6 +92,9 @@ def migrate():
                 -- Duration
                 duration_minutes INTEGER,
 
+                -- Fine-tuning flag
+                is_real_trade INTEGER DEFAULT 0,
+
                 -- Audit fields
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
