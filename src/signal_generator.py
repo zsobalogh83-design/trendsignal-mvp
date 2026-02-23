@@ -457,28 +457,28 @@ class SignalGenerator:
         abs_risk = abs(risk_score)
         
         # Check each pair (using absolute values for strength)
-        tr_strong = abs_tech > 60 and abs_risk > 40
-        st_strong = abs_sent > 40 and abs_tech > 40
-        sr_strong = abs_sent > 40 and abs_risk > 40
-        
+        tr_strong = abs_tech > self.config.alignment_tech_threshold and abs_risk > self.config.alignment_risk_threshold
+        st_strong = abs_sent > self.config.alignment_sent_threshold and abs_tech > self.config.alignment_sent_threshold
+        sr_strong = abs_sent > self.config.alignment_sent_threshold and abs_risk > self.config.alignment_risk_threshold
+
         # Count strong pairs
         strong_pairs = sum([tr_strong, st_strong, sr_strong])
-        
+
         # Calculate bonus magnitude
         bonus_magnitude = 0
-        
-        # If all 3 pairs strong → maximum bonus (capped at 8)
+
+        # If all 3 pairs strong → maximum bonus
         if strong_pairs == 3:
-            bonus_magnitude = 8
-        
+            bonus_magnitude = self.config.alignment_bonus_all
+
         # If only 1 pair strong → specific bonus
         elif strong_pairs == 1:
             if tr_strong:
-                bonus_magnitude = 5  # Technical + Risk (strongest for swing trading)
+                bonus_magnitude = self.config.alignment_bonus_tr
             elif st_strong:
-                bonus_magnitude = 5  # Sentiment + Technical (strong confirmation)
+                bonus_magnitude = self.config.alignment_bonus_st
             elif sr_strong:
-                bonus_magnitude = 3  # Sentiment + Risk (weakest pair, no technical)
+                bonus_magnitude = self.config.alignment_bonus_sr
         
         # Apply bonus in the correct direction:
         # - Positive for BUY (all components positive)
@@ -543,15 +543,15 @@ class SignalGenerator:
             
             # Assess setup quality for swing trading
             good_setup = (
-                2.0 <= stop_dist_pct <= 6.0 and          # Stop in ideal swing range
-                target_dist_pct >= 3.0 and                # Target far enough
-                rr_ratio >= self.config.min_risk_reward    # Good risk/reward (config: 1.5)
+                self.config.setup_stop_min_pct <= stop_dist_pct <= self.config.setup_stop_max_pct and
+                target_dist_pct >= self.config.setup_target_min_pct and
+                rr_ratio >= self.config.min_risk_reward
             )
 
             poor_setup = (
-                stop_dist_pct > 8.0 or                        # Stop too far (support broken?)
-                target_dist_pct < 2.0 or                      # Target too close
-                rr_ratio < self.config.min_risk_reward_hard   # Bad risk/reward (config: 0.8)
+                stop_dist_pct > self.config.setup_stop_hard_max_pct or
+                target_dist_pct < self.config.setup_target_hard_min_pct or
+                rr_ratio < self.config.min_risk_reward_hard
             )
 
             if good_setup:
@@ -1313,20 +1313,20 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
     
     # Component 2: News volume factor (more news = higher confidence)
     news_count = len(news_items)
-    if news_count >= 10:
+    if news_count >= config.sentiment_conf_full_news_count:
         volume_factor = 1.0
-    elif news_count >= 5:
+    elif news_count >= config.sentiment_conf_high_news_count:
         volume_factor = 0.85
-    elif news_count >= 3:
+    elif news_count >= config.sentiment_conf_med_news_count:
         volume_factor = 0.70
-    elif news_count >= 2:
+    elif news_count >= config.sentiment_conf_low_news_count:
         volume_factor = 0.55
     else:
         volume_factor = 0.40  # Single news = low confidence
-    
+
     # Component 3: Sentiment consistency (all aligned = higher confidence)
-    positive_count = sum(1 for item in news_items if item.sentiment_score > 0.2)
-    negative_count = sum(1 for item in news_items if item.sentiment_score < -0.2)
+    positive_count = sum(1 for item in news_items if item.sentiment_score > config.sentiment_positive_threshold)
+    negative_count = sum(1 for item in news_items if item.sentiment_score < config.sentiment_negative_threshold)
     neutral_count = news_count - positive_count - negative_count
     
     # Consistency: what % agrees with majority direction
@@ -1427,26 +1427,26 @@ def calculate_rsi_component_score(rsi, sma_trend_direction, config) -> Tuple[flo
     details = {'value': float(rsi) if pd.notna(rsi) else None}
     
     if pd.notna(rsi):
-        if 45 < rsi < 55:
+        if config.rsi_neutral_low < rsi < config.rsi_neutral_high:
             rsi_score = config.tech_rsi_neutral
             details['zone'] = 'neutral'
-        elif 55 <= rsi < 70:
+        elif config.rsi_neutral_high <= rsi < config.rsi_overbought:
             rsi_score = config.tech_rsi_bullish
             details['zone'] = 'bullish'
-        elif 30 < rsi <= 45:
+        elif config.rsi_oversold < rsi <= config.rsi_neutral_low:
             rsi_score = config.tech_rsi_weak_bullish
             details['zone'] = 'weak_bullish'
-        elif rsi >= 70:
+        elif rsi >= config.rsi_overbought:
             rsi_score = -config.tech_rsi_overbought
             details['zone'] = 'overbought'
-        elif rsi <= 30:
+        elif rsi <= config.rsi_oversold:
             if sma_trend_direction >= 0:
                 rsi_score = config.tech_rsi_oversold
                 details['zone'] = 'oversold_bullish'
             else:
                 rsi_score = 0
                 details['zone'] = 'oversold_ignored'
-    
+
     # Normalize: max +30, min -20 → -100 to +100
     normalized = (rsi_score / 30.0) * 100
     return max(-100, min(100, normalized)), details
@@ -1497,19 +1497,19 @@ def calculate_bollinger_component_score(current, close_col, sma_trend_direction)
     return 0, {}
 
 
-def calculate_stochastic_component_score(current, sma_trend_direction) -> Tuple[float, Dict]:
+def calculate_stochastic_component_score(current, sma_trend_direction, config) -> Tuple[float, Dict]:
     """Calculate Stochastic score normalized to -100 to +100 (TREND-AWARE)"""
     if 'stoch_k' in current and pd.notna(current['stoch_k']):
         stoch_k = float(current['stoch_k'])
         
-        if stoch_k < 20:
+        if stoch_k < config.stoch_oversold:
             if sma_trend_direction >= 0:
                 score = +100
                 zone = 'oversold_bullish'
             else:
                 score = 0
                 zone = 'oversold_ignored'
-        elif stoch_k > 80:
+        elif stoch_k > config.stoch_overbought:
             score = -100
             zone = 'overbought'
         else:
@@ -1723,7 +1723,7 @@ def calculate_technical_score(
         
         # 5. Stochastic Score (trend-aware)
         stoch_score, stoch_details = calculate_stochastic_component_score(
-            current, sma_trend_direction
+            current, sma_trend_direction, config
         )
         
         # 6. Volume Score
@@ -2024,27 +2024,27 @@ def calculate_technical_score(
         # RSI
         if pd.notna(current.get('rsi')):
             indicators_checked += 1
-            if current['rsi'] > 55:
+            if current['rsi'] > self.config.tech_conf_rsi_bullish:
                 indicators_bullish += 1
-            elif current['rsi'] < 45:
+            elif current['rsi'] < self.config.tech_conf_rsi_bearish:
                 indicators_bearish += 1
-        
+
         # ADX (strong trend = higher confidence)
         adx_boost = 0
         if adx is not None:
-            if adx > 25:
-                adx_boost = 0.15  # Strong trend increases confidence
-            elif adx > 20:
-                adx_boost = 0.10
-        
+            if adx > self.config.tech_conf_adx_strong:
+                adx_boost = self.config.tech_conf_adx_strong_boost
+            elif adx > self.config.tech_conf_adx_moderate:
+                adx_boost = self.config.tech_conf_adx_moderate_boost
+
         # Calculate alignment (what % of indicators agree)
         alignment = max(indicators_bullish, indicators_bearish) / indicators_checked if indicators_checked > 0 else 0.5
-        
+
         # Base confidence from alignment
-        base_confidence = 0.50 + (alignment * 0.30)  # 50% to 80% range
-        
+        base_confidence = self.config.tech_conf_base + (alignment * self.config.tech_conf_alignment_weight)
+
         # Add ADX boost
-        technical_confidence = min(base_confidence + adx_boost, 0.90)  # Cap at 90%
+        technical_confidence = min(base_confidence + adx_boost, self.config.tech_conf_max)
         
         result = {
             "score": max(-100, min(100, tech_score)),
@@ -2203,96 +2203,87 @@ def calculate_risk_score(
             nearest_resistance = current_price * 1.03
         
         # ===== 1. VOLATILITY RISK (ATR-based) - 40% =====
-        # 🆕 Continuous scaling: 1.5% (very low) → 7.0% (very high)
-        if atr_pct < 1.5:
-            volatility_risk = +0.8  # Very low volatility = very low risk
+        vl = self.config.atr_vol_very_low
+        lo = self.config.atr_vol_low
+        mo = self.config.atr_vol_moderate
+        hi = self.config.atr_vol_high
+        if atr_pct < vl:
+            volatility_risk = +0.8
             vol_status = f"🟢 Very Low Vol"
             vol_confidence = 0.95
-        elif atr_pct < 2.5:
-            # Linear interpolation: 1.5% → +0.8, 2.5% → +0.4
-            volatility_risk = 0.8 - ((atr_pct - 1.5) / 1.0) * 0.4
+        elif atr_pct < lo:
+            volatility_risk = 0.8 - ((atr_pct - vl) / (lo - vl)) * 0.4
             vol_status = f"🟢 Low Vol"
             vol_confidence = 0.90
-        elif atr_pct < 3.5:
-            # Linear interpolation: 2.5% → +0.4, 3.5% → 0.0
-            volatility_risk = 0.4 - ((atr_pct - 2.5) / 1.0) * 0.4
+        elif atr_pct < mo:
+            volatility_risk = 0.4 - ((atr_pct - lo) / (mo - lo)) * 0.4
             vol_status = f"⚪ Moderate Vol"
             vol_confidence = 0.75
-        elif atr_pct < 5.0:
-            # Linear interpolation: 3.5% → 0.0, 5.0% → -0.4
-            volatility_risk = 0.0 - ((atr_pct - 3.5) / 1.5) * 0.4
+        elif atr_pct < hi:
+            volatility_risk = 0.0 - ((atr_pct - mo) / (hi - mo)) * 0.4
             vol_status = f"🟡 High Vol"
             vol_confidence = 0.65
         else:
-            # Linear scaling beyond 5%: 5% → -0.4, 7% → -0.8
-            volatility_risk = max(-0.8, -0.4 - ((atr_pct - 5.0) / 2.0) * 0.4)
+            volatility_risk = max(-0.8, -0.4 - ((atr_pct - hi) / 2.0) * 0.4)
             vol_status = f"🔴 Very High Vol"
             vol_confidence = 0.50
-        
+
         # ===== 2. S/R PROXIMITY RISK - 35% =====
         support_dist_pct = ((current_price - nearest_support) / current_price) * 100
         resistance_dist_pct = ((nearest_resistance - current_price) / current_price) * 100
         min_distance = min(abs(support_dist_pct), abs(resistance_dist_pct))
-        
-        # 🆕 Continuous scaling based on minimum distance to S/R
+
+        # Continuous scaling based on minimum distance to S/R
         if min_distance < 1.0:
-            # Very close to S/R (< 1%)
             proximity_risk = -0.8
             proximity_status = f"🔴 Very Close"
             proximity_confidence = 0.35
         elif min_distance < 2.0:
-            # Linear interpolation: 1% → -0.8, 2% → -0.4
             proximity_risk = -0.8 + ((min_distance - 1.0) / 1.0) * 0.4
             proximity_status = f"🟡 Close"
             proximity_confidence = 0.45
         elif min_distance < 4.0:
-            # Linear interpolation: 2% → -0.4, 4% → 0.0
             proximity_risk = -0.4 + ((min_distance - 2.0) / 2.0) * 0.4
             proximity_status = f"⚪ Neutral"
             proximity_confidence = 0.65
         elif min_distance < 6.0:
-            # Linear interpolation: 4% → 0.0, 6% → +0.4
             proximity_risk = 0.0 + ((min_distance - 4.0) / 2.0) * 0.4
             proximity_status = f"🟢 Good Zone"
             proximity_confidence = 0.80
         else:
-            # Excellent zone (> 6% from S/R)
-            # Linear interpolation: 6% → +0.4, 10% → +0.8
             proximity_risk = min(0.8, 0.4 + ((min_distance - 6.0) / 4.0) * 0.4)
             proximity_status = f"🟢 Safe Zone"
             proximity_confidence = 0.85
-        
+
         # ===== 3. TREND STRENGTH (ADX) - 25% =====
+        adx_vs = self.config.adx_very_strong
+        adx_s  = self.config.adx_strong
+        adx_mo = self.config.adx_moderate
+        adx_w  = self.config.adx_weak
+        adx_vw = self.config.adx_very_weak
         if adx is not None:
-            # 🆕 Continuous scaling based on ADX
-            if adx > 40:
-                # Very strong trend (ADX > 40)
+            if adx > adx_vs:
                 trend_risk = +0.8
                 trend_status = f"🟢 Very Strong Trend (ADX: {adx:.1f})"
                 trend_confidence = 0.95
-            elif adx > 30:
-                # Linear interpolation: 30 → +0.5, 40 → +0.8
-                trend_risk = 0.5 + ((adx - 30) / 10) * 0.3
+            elif adx > adx_s:
+                trend_risk = 0.5 + ((adx - adx_s) / (adx_vs - adx_s)) * 0.3
                 trend_status = f"🟢 Strong Trend (ADX: {adx:.1f})"
                 trend_confidence = 0.85
-            elif adx > 25:
-                # Linear interpolation: 25 → +0.3, 30 → +0.5
-                trend_risk = 0.3 + ((adx - 25) / 5) * 0.2
+            elif adx > adx_mo:
+                trend_risk = 0.3 + ((adx - adx_mo) / (adx_s - adx_mo)) * 0.2
                 trend_status = f"🟢 Strong Trend (ADX: {adx:.1f})"
                 trend_confidence = 0.80
-            elif adx > 20:
-                # Linear interpolation: 20 → 0.0, 25 → +0.3
-                trend_risk = 0.0 + ((adx - 20) / 5) * 0.3
+            elif adx > adx_w:
+                trend_risk = 0.0 + ((adx - adx_w) / (adx_mo - adx_w)) * 0.3
                 trend_status = f"⚪ Moderate Trend (ADX: {adx:.1f})"
                 trend_confidence = 0.70
-            elif adx > 15:
-                # Linear interpolation: 15 → -0.3, 20 → 0.0
-                trend_risk = -0.3 + ((adx - 15) / 5) * 0.3
+            elif adx > adx_vw:
+                trend_risk = -0.3 + ((adx - adx_vw) / (adx_w - adx_vw)) * 0.3
                 trend_status = f"🟡 Weak Trend (ADX: {adx:.1f})"
                 trend_confidence = 0.60
             else:
-                # Very weak trend (ADX < 15)
-                trend_risk = max(-0.8, -0.3 - ((15 - adx) / 10) * 0.5)
+                trend_risk = max(-0.8, -0.3 - ((adx_vw - adx) / 10) * 0.5)
                 trend_status = f"🔴 Very Weak Trend (ADX: {adx:.1f})"
                 trend_confidence = 0.50
         else:

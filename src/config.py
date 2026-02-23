@@ -248,6 +248,94 @@ SR_DBSCAN_MIN_SAMPLES = 3    # Minimum pivots per cluster
 SR_DBSCAN_ORDER = 7          # Pivot detection window (7 bars each side)
 SR_DBSCAN_LOOKBACK = 180     # Historical lookback period (180 days = 6 months)
 
+# S/R level filtering
+SR_MIN_DISTANCE_PCT = 0.5    # S/R levels closer than this % to price are discarded
+SR_TOP_N_LEVELS = 5          # Number of nearest S/R levels to return
+
+
+# ==========================================
+# RSI / STOCHASTIC ZONE THRESHOLDS
+# ==========================================
+
+RSI_OVERBOUGHT = 70
+RSI_OVERSOLD = 30
+RSI_NEUTRAL_LOW = 45
+RSI_NEUTRAL_HIGH = 55
+STOCH_OVERBOUGHT = 80
+STOCH_OVERSOLD = 20
+
+
+# ==========================================
+# ALIGNMENT BONUS THRESHOLDS
+# ==========================================
+
+ALIGNMENT_TECH_THRESHOLD = 60   # |tech_score| must exceed this for TR pair
+ALIGNMENT_SENT_THRESHOLD = 40   # |sent_score| must exceed this for ST/SR pairs
+ALIGNMENT_RISK_THRESHOLD = 40   # |risk_score| must exceed this for TR/SR pairs
+ALIGNMENT_BONUS_ALL = 8         # Bonus when all 3 pairs strong
+ALIGNMENT_BONUS_TR = 5          # Bonus for Tech+Risk pair only
+ALIGNMENT_BONUS_ST = 5          # Bonus for Sent+Tech pair only
+ALIGNMENT_BONUS_SR = 3          # Bonus for Sent+Risk pair only
+
+
+# ==========================================
+# SETUP QUALITY THRESHOLDS
+# ==========================================
+
+SETUP_STOP_MIN_PCT = 2.0        # Good setup: min stop distance %
+SETUP_STOP_MAX_PCT = 6.0        # Good setup: max stop distance %
+SETUP_TARGET_MIN_PCT = 3.0      # Good setup: min target distance %
+SETUP_STOP_HARD_MAX_PCT = 8.0   # Poor setup: stop too far
+SETUP_TARGET_HARD_MIN_PCT = 2.0 # Poor setup: target too close
+
+
+# ==========================================
+# ATR VOLATILITY SCALING THRESHOLDS
+# ==========================================
+
+ATR_VOL_VERY_LOW = 1.5      # ATR% below this → very low volatility
+ATR_VOL_LOW = 2.5           # ATR% below this → low volatility
+ATR_VOL_MODERATE = 3.5      # ATR% below this → moderate volatility
+ATR_VOL_HIGH = 5.0          # ATR% above this → high volatility (→ very high)
+
+
+# ==========================================
+# ADX TREND STRENGTH SCALING THRESHOLDS
+# ==========================================
+
+ADX_VERY_STRONG = 40        # ADX above this → very strong trend
+ADX_STRONG = 30             # ADX above this → strong trend
+ADX_MODERATE = 25           # ADX above this → moderate trend
+ADX_WEAK = 20               # ADX above this → weak trend (below → very weak)
+ADX_VERY_WEAK = 15          # ADX below this → very weak trend boundary
+
+
+# ==========================================
+# TECHNICAL CONFIDENCE PARAMETERS
+# ==========================================
+
+TECH_CONF_RSI_BULLISH = 55          # RSI above this counts as bullish for confidence
+TECH_CONF_RSI_BEARISH = 45          # RSI below this counts as bearish for confidence
+TECH_CONF_ADX_STRONG = 25           # ADX above this → strong trend confidence boost
+TECH_CONF_ADX_MODERATE = 20         # ADX above this → moderate trend confidence boost
+TECH_CONF_ADX_STRONG_BOOST = 0.15   # Confidence boost for strong ADX
+TECH_CONF_ADX_MODERATE_BOOST = 0.10 # Confidence boost for moderate ADX
+TECH_CONF_BASE = 0.50               # Base confidence (50%)
+TECH_CONF_ALIGNMENT_WEIGHT = 0.30   # Alignment contribution range (50%→80%)
+TECH_CONF_MAX = 0.90                # Maximum technical confidence cap
+
+
+# ==========================================
+# SENTIMENT CONFIDENCE PARAMETERS
+# ==========================================
+
+SENTIMENT_CONF_FULL_NEWS_COUNT = 10     # News count for volume_factor = 1.0
+SENTIMENT_CONF_HIGH_NEWS_COUNT = 5      # News count for volume_factor = 0.85
+SENTIMENT_CONF_MED_NEWS_COUNT = 3       # News count for volume_factor = 0.70
+SENTIMENT_CONF_LOW_NEWS_COUNT = 2       # News count for volume_factor = 0.55
+SENTIMENT_POSITIVE_THRESHOLD = 0.2     # Score above this → positive news item
+SENTIMENT_NEGATIVE_THRESHOLD = -0.2    # Score below this → negative news item
+
 
 # ==========================================
 # NEWS COLLECTION
@@ -408,6 +496,58 @@ def save_config_to_file(config_instance):
             "TELEGRAM_MAX_ALERTS_PER_HOUR": config_instance.telegram_max_alerts_per_hour,
             "TELEGRAM_INCLUDE_NEWS": config_instance.telegram_include_news,
             "TELEGRAM_INCLUDE_LINK": config_instance.telegram_include_link,
+            # S/R level filtering
+            "SR_MIN_DISTANCE_PCT": config_instance.sr_min_distance_pct,
+            "SR_TOP_N_LEVELS": config_instance.sr_top_n_levels,
+            # RSI / Stochastic zones
+            "RSI_OVERBOUGHT": config_instance.rsi_overbought,
+            "RSI_OVERSOLD": config_instance.rsi_oversold,
+            "RSI_NEUTRAL_LOW": config_instance.rsi_neutral_low,
+            "RSI_NEUTRAL_HIGH": config_instance.rsi_neutral_high,
+            "STOCH_OVERBOUGHT": config_instance.stoch_overbought,
+            "STOCH_OVERSOLD": config_instance.stoch_oversold,
+            # Alignment bonus
+            "ALIGNMENT_TECH_THRESHOLD": config_instance.alignment_tech_threshold,
+            "ALIGNMENT_SENT_THRESHOLD": config_instance.alignment_sent_threshold,
+            "ALIGNMENT_RISK_THRESHOLD": config_instance.alignment_risk_threshold,
+            "ALIGNMENT_BONUS_ALL": config_instance.alignment_bonus_all,
+            "ALIGNMENT_BONUS_TR": config_instance.alignment_bonus_tr,
+            "ALIGNMENT_BONUS_ST": config_instance.alignment_bonus_st,
+            "ALIGNMENT_BONUS_SR": config_instance.alignment_bonus_sr,
+            # Setup quality
+            "SETUP_STOP_MIN_PCT": config_instance.setup_stop_min_pct,
+            "SETUP_STOP_MAX_PCT": config_instance.setup_stop_max_pct,
+            "SETUP_TARGET_MIN_PCT": config_instance.setup_target_min_pct,
+            "SETUP_STOP_HARD_MAX_PCT": config_instance.setup_stop_hard_max_pct,
+            "SETUP_TARGET_HARD_MIN_PCT": config_instance.setup_target_hard_min_pct,
+            # ATR volatility scaling
+            "ATR_VOL_VERY_LOW": config_instance.atr_vol_very_low,
+            "ATR_VOL_LOW": config_instance.atr_vol_low,
+            "ATR_VOL_MODERATE": config_instance.atr_vol_moderate,
+            "ATR_VOL_HIGH": config_instance.atr_vol_high,
+            # ADX trend strength
+            "ADX_VERY_STRONG": config_instance.adx_very_strong,
+            "ADX_STRONG": config_instance.adx_strong,
+            "ADX_MODERATE": config_instance.adx_moderate,
+            "ADX_WEAK": config_instance.adx_weak,
+            "ADX_VERY_WEAK": config_instance.adx_very_weak,
+            # Technical confidence
+            "TECH_CONF_RSI_BULLISH": config_instance.tech_conf_rsi_bullish,
+            "TECH_CONF_RSI_BEARISH": config_instance.tech_conf_rsi_bearish,
+            "TECH_CONF_ADX_STRONG": config_instance.tech_conf_adx_strong,
+            "TECH_CONF_ADX_MODERATE": config_instance.tech_conf_adx_moderate,
+            "TECH_CONF_ADX_STRONG_BOOST": config_instance.tech_conf_adx_strong_boost,
+            "TECH_CONF_ADX_MODERATE_BOOST": config_instance.tech_conf_adx_moderate_boost,
+            "TECH_CONF_BASE": config_instance.tech_conf_base,
+            "TECH_CONF_ALIGNMENT_WEIGHT": config_instance.tech_conf_alignment_weight,
+            "TECH_CONF_MAX": config_instance.tech_conf_max,
+            # Sentiment confidence
+            "SENTIMENT_CONF_FULL_NEWS_COUNT": config_instance.sentiment_conf_full_news_count,
+            "SENTIMENT_CONF_HIGH_NEWS_COUNT": config_instance.sentiment_conf_high_news_count,
+            "SENTIMENT_CONF_MED_NEWS_COUNT": config_instance.sentiment_conf_med_news_count,
+            "SENTIMENT_CONF_LOW_NEWS_COUNT": config_instance.sentiment_conf_low_news_count,
+            "SENTIMENT_POSITIVE_THRESHOLD": config_instance.sentiment_positive_threshold,
+            "SENTIMENT_NEGATIVE_THRESHOLD": config_instance.sentiment_negative_threshold,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -594,7 +734,65 @@ class TrendSignalConfig:
     sr_dbscan_min_samples: int = SR_DBSCAN_MIN_SAMPLES
     sr_dbscan_order: int = SR_DBSCAN_ORDER
     sr_dbscan_lookback: int = SR_DBSCAN_LOOKBACK
-    
+    sr_min_distance_pct: float = SR_MIN_DISTANCE_PCT
+    sr_top_n_levels: int = SR_TOP_N_LEVELS
+
+    # RSI / Stochastic zone thresholds
+    rsi_overbought: int = RSI_OVERBOUGHT
+    rsi_oversold: int = RSI_OVERSOLD
+    rsi_neutral_low: int = RSI_NEUTRAL_LOW
+    rsi_neutral_high: int = RSI_NEUTRAL_HIGH
+    stoch_overbought: int = STOCH_OVERBOUGHT
+    stoch_oversold: int = STOCH_OVERSOLD
+
+    # Alignment bonus thresholds
+    alignment_tech_threshold: int = ALIGNMENT_TECH_THRESHOLD
+    alignment_sent_threshold: int = ALIGNMENT_SENT_THRESHOLD
+    alignment_risk_threshold: int = ALIGNMENT_RISK_THRESHOLD
+    alignment_bonus_all: int = ALIGNMENT_BONUS_ALL
+    alignment_bonus_tr: int = ALIGNMENT_BONUS_TR
+    alignment_bonus_st: int = ALIGNMENT_BONUS_ST
+    alignment_bonus_sr: int = ALIGNMENT_BONUS_SR
+
+    # Setup quality thresholds
+    setup_stop_min_pct: float = SETUP_STOP_MIN_PCT
+    setup_stop_max_pct: float = SETUP_STOP_MAX_PCT
+    setup_target_min_pct: float = SETUP_TARGET_MIN_PCT
+    setup_stop_hard_max_pct: float = SETUP_STOP_HARD_MAX_PCT
+    setup_target_hard_min_pct: float = SETUP_TARGET_HARD_MIN_PCT
+
+    # ATR volatility scaling thresholds
+    atr_vol_very_low: float = ATR_VOL_VERY_LOW
+    atr_vol_low: float = ATR_VOL_LOW
+    atr_vol_moderate: float = ATR_VOL_MODERATE
+    atr_vol_high: float = ATR_VOL_HIGH
+
+    # ADX trend strength scaling thresholds
+    adx_very_strong: int = ADX_VERY_STRONG
+    adx_strong: int = ADX_STRONG
+    adx_moderate: int = ADX_MODERATE
+    adx_weak: int = ADX_WEAK
+    adx_very_weak: int = ADX_VERY_WEAK
+
+    # Technical confidence parameters
+    tech_conf_rsi_bullish: int = TECH_CONF_RSI_BULLISH
+    tech_conf_rsi_bearish: int = TECH_CONF_RSI_BEARISH
+    tech_conf_adx_strong: int = TECH_CONF_ADX_STRONG
+    tech_conf_adx_moderate: int = TECH_CONF_ADX_MODERATE
+    tech_conf_adx_strong_boost: float = TECH_CONF_ADX_STRONG_BOOST
+    tech_conf_adx_moderate_boost: float = TECH_CONF_ADX_MODERATE_BOOST
+    tech_conf_base: float = TECH_CONF_BASE
+    tech_conf_alignment_weight: float = TECH_CONF_ALIGNMENT_WEIGHT
+    tech_conf_max: float = TECH_CONF_MAX
+
+    # Sentiment confidence parameters
+    sentiment_conf_full_news_count: int = SENTIMENT_CONF_FULL_NEWS_COUNT
+    sentiment_conf_high_news_count: int = SENTIMENT_CONF_HIGH_NEWS_COUNT
+    sentiment_conf_med_news_count: int = SENTIMENT_CONF_MED_NEWS_COUNT
+    sentiment_conf_low_news_count: int = SENTIMENT_CONF_LOW_NEWS_COUNT
+    sentiment_positive_threshold: float = SENTIMENT_POSITIVE_THRESHOLD
+    sentiment_negative_threshold: float = SENTIMENT_NEGATIVE_THRESHOLD
+
     # 🆕 Scheduler settings
     signal_refresh_interval: int = SIGNAL_REFRESH_INTERVAL
     bet_market_open: str = BET_MARKET_OPEN
@@ -702,6 +900,57 @@ class TrendSignalConfig:
             self.sr_dbscan_min_samples = saved_config.get("SR_DBSCAN_MIN_SAMPLES", SR_DBSCAN_MIN_SAMPLES)
             self.sr_dbscan_order = saved_config.get("SR_DBSCAN_ORDER", SR_DBSCAN_ORDER)
             self.sr_dbscan_lookback = saved_config.get("SR_DBSCAN_LOOKBACK", SR_DBSCAN_LOOKBACK)
+            self.sr_min_distance_pct = saved_config.get("SR_MIN_DISTANCE_PCT", SR_MIN_DISTANCE_PCT)
+            self.sr_top_n_levels = saved_config.get("SR_TOP_N_LEVELS", SR_TOP_N_LEVELS)
+            # RSI / Stochastic zones
+            self.rsi_overbought = saved_config.get("RSI_OVERBOUGHT", RSI_OVERBOUGHT)
+            self.rsi_oversold = saved_config.get("RSI_OVERSOLD", RSI_OVERSOLD)
+            self.rsi_neutral_low = saved_config.get("RSI_NEUTRAL_LOW", RSI_NEUTRAL_LOW)
+            self.rsi_neutral_high = saved_config.get("RSI_NEUTRAL_HIGH", RSI_NEUTRAL_HIGH)
+            self.stoch_overbought = saved_config.get("STOCH_OVERBOUGHT", STOCH_OVERBOUGHT)
+            self.stoch_oversold = saved_config.get("STOCH_OVERSOLD", STOCH_OVERSOLD)
+            # Alignment bonus
+            self.alignment_tech_threshold = saved_config.get("ALIGNMENT_TECH_THRESHOLD", ALIGNMENT_TECH_THRESHOLD)
+            self.alignment_sent_threshold = saved_config.get("ALIGNMENT_SENT_THRESHOLD", ALIGNMENT_SENT_THRESHOLD)
+            self.alignment_risk_threshold = saved_config.get("ALIGNMENT_RISK_THRESHOLD", ALIGNMENT_RISK_THRESHOLD)
+            self.alignment_bonus_all = saved_config.get("ALIGNMENT_BONUS_ALL", ALIGNMENT_BONUS_ALL)
+            self.alignment_bonus_tr = saved_config.get("ALIGNMENT_BONUS_TR", ALIGNMENT_BONUS_TR)
+            self.alignment_bonus_st = saved_config.get("ALIGNMENT_BONUS_ST", ALIGNMENT_BONUS_ST)
+            self.alignment_bonus_sr = saved_config.get("ALIGNMENT_BONUS_SR", ALIGNMENT_BONUS_SR)
+            # Setup quality
+            self.setup_stop_min_pct = saved_config.get("SETUP_STOP_MIN_PCT", SETUP_STOP_MIN_PCT)
+            self.setup_stop_max_pct = saved_config.get("SETUP_STOP_MAX_PCT", SETUP_STOP_MAX_PCT)
+            self.setup_target_min_pct = saved_config.get("SETUP_TARGET_MIN_PCT", SETUP_TARGET_MIN_PCT)
+            self.setup_stop_hard_max_pct = saved_config.get("SETUP_STOP_HARD_MAX_PCT", SETUP_STOP_HARD_MAX_PCT)
+            self.setup_target_hard_min_pct = saved_config.get("SETUP_TARGET_HARD_MIN_PCT", SETUP_TARGET_HARD_MIN_PCT)
+            # ATR volatility scaling
+            self.atr_vol_very_low = saved_config.get("ATR_VOL_VERY_LOW", ATR_VOL_VERY_LOW)
+            self.atr_vol_low = saved_config.get("ATR_VOL_LOW", ATR_VOL_LOW)
+            self.atr_vol_moderate = saved_config.get("ATR_VOL_MODERATE", ATR_VOL_MODERATE)
+            self.atr_vol_high = saved_config.get("ATR_VOL_HIGH", ATR_VOL_HIGH)
+            # ADX trend strength
+            self.adx_very_strong = saved_config.get("ADX_VERY_STRONG", ADX_VERY_STRONG)
+            self.adx_strong = saved_config.get("ADX_STRONG", ADX_STRONG)
+            self.adx_moderate = saved_config.get("ADX_MODERATE", ADX_MODERATE)
+            self.adx_weak = saved_config.get("ADX_WEAK", ADX_WEAK)
+            self.adx_very_weak = saved_config.get("ADX_VERY_WEAK", ADX_VERY_WEAK)
+            # Technical confidence
+            self.tech_conf_rsi_bullish = saved_config.get("TECH_CONF_RSI_BULLISH", TECH_CONF_RSI_BULLISH)
+            self.tech_conf_rsi_bearish = saved_config.get("TECH_CONF_RSI_BEARISH", TECH_CONF_RSI_BEARISH)
+            self.tech_conf_adx_strong = saved_config.get("TECH_CONF_ADX_STRONG", TECH_CONF_ADX_STRONG)
+            self.tech_conf_adx_moderate = saved_config.get("TECH_CONF_ADX_MODERATE", TECH_CONF_ADX_MODERATE)
+            self.tech_conf_adx_strong_boost = saved_config.get("TECH_CONF_ADX_STRONG_BOOST", TECH_CONF_ADX_STRONG_BOOST)
+            self.tech_conf_adx_moderate_boost = saved_config.get("TECH_CONF_ADX_MODERATE_BOOST", TECH_CONF_ADX_MODERATE_BOOST)
+            self.tech_conf_base = saved_config.get("TECH_CONF_BASE", TECH_CONF_BASE)
+            self.tech_conf_alignment_weight = saved_config.get("TECH_CONF_ALIGNMENT_WEIGHT", TECH_CONF_ALIGNMENT_WEIGHT)
+            self.tech_conf_max = saved_config.get("TECH_CONF_MAX", TECH_CONF_MAX)
+            # Sentiment confidence
+            self.sentiment_conf_full_news_count = saved_config.get("SENTIMENT_CONF_FULL_NEWS_COUNT", SENTIMENT_CONF_FULL_NEWS_COUNT)
+            self.sentiment_conf_high_news_count = saved_config.get("SENTIMENT_CONF_HIGH_NEWS_COUNT", SENTIMENT_CONF_HIGH_NEWS_COUNT)
+            self.sentiment_conf_med_news_count = saved_config.get("SENTIMENT_CONF_MED_NEWS_COUNT", SENTIMENT_CONF_MED_NEWS_COUNT)
+            self.sentiment_conf_low_news_count = saved_config.get("SENTIMENT_CONF_LOW_NEWS_COUNT", SENTIMENT_CONF_LOW_NEWS_COUNT)
+            self.sentiment_positive_threshold = saved_config.get("SENTIMENT_POSITIVE_THRESHOLD", SENTIMENT_POSITIVE_THRESHOLD)
+            self.sentiment_negative_threshold = saved_config.get("SENTIMENT_NEGATIVE_THRESHOLD", SENTIMENT_NEGATIVE_THRESHOLD)
             print("📝 Config loaded from file with custom weights")
         
         # Initialize nested dicts if not loaded (legacy compatibility)
@@ -901,6 +1150,57 @@ class TrendSignalConfig:
             self.sr_dbscan_min_samples = saved_config.get("SR_DBSCAN_MIN_SAMPLES", SR_DBSCAN_MIN_SAMPLES)
             self.sr_dbscan_order = saved_config.get("SR_DBSCAN_ORDER", SR_DBSCAN_ORDER)
             self.sr_dbscan_lookback = saved_config.get("SR_DBSCAN_LOOKBACK", SR_DBSCAN_LOOKBACK)
+            self.sr_min_distance_pct = saved_config.get("SR_MIN_DISTANCE_PCT", SR_MIN_DISTANCE_PCT)
+            self.sr_top_n_levels = saved_config.get("SR_TOP_N_LEVELS", SR_TOP_N_LEVELS)
+            # RSI / Stochastic zones
+            self.rsi_overbought = saved_config.get("RSI_OVERBOUGHT", RSI_OVERBOUGHT)
+            self.rsi_oversold = saved_config.get("RSI_OVERSOLD", RSI_OVERSOLD)
+            self.rsi_neutral_low = saved_config.get("RSI_NEUTRAL_LOW", RSI_NEUTRAL_LOW)
+            self.rsi_neutral_high = saved_config.get("RSI_NEUTRAL_HIGH", RSI_NEUTRAL_HIGH)
+            self.stoch_overbought = saved_config.get("STOCH_OVERBOUGHT", STOCH_OVERBOUGHT)
+            self.stoch_oversold = saved_config.get("STOCH_OVERSOLD", STOCH_OVERSOLD)
+            # Alignment bonus
+            self.alignment_tech_threshold = saved_config.get("ALIGNMENT_TECH_THRESHOLD", ALIGNMENT_TECH_THRESHOLD)
+            self.alignment_sent_threshold = saved_config.get("ALIGNMENT_SENT_THRESHOLD", ALIGNMENT_SENT_THRESHOLD)
+            self.alignment_risk_threshold = saved_config.get("ALIGNMENT_RISK_THRESHOLD", ALIGNMENT_RISK_THRESHOLD)
+            self.alignment_bonus_all = saved_config.get("ALIGNMENT_BONUS_ALL", ALIGNMENT_BONUS_ALL)
+            self.alignment_bonus_tr = saved_config.get("ALIGNMENT_BONUS_TR", ALIGNMENT_BONUS_TR)
+            self.alignment_bonus_st = saved_config.get("ALIGNMENT_BONUS_ST", ALIGNMENT_BONUS_ST)
+            self.alignment_bonus_sr = saved_config.get("ALIGNMENT_BONUS_SR", ALIGNMENT_BONUS_SR)
+            # Setup quality
+            self.setup_stop_min_pct = saved_config.get("SETUP_STOP_MIN_PCT", SETUP_STOP_MIN_PCT)
+            self.setup_stop_max_pct = saved_config.get("SETUP_STOP_MAX_PCT", SETUP_STOP_MAX_PCT)
+            self.setup_target_min_pct = saved_config.get("SETUP_TARGET_MIN_PCT", SETUP_TARGET_MIN_PCT)
+            self.setup_stop_hard_max_pct = saved_config.get("SETUP_STOP_HARD_MAX_PCT", SETUP_STOP_HARD_MAX_PCT)
+            self.setup_target_hard_min_pct = saved_config.get("SETUP_TARGET_HARD_MIN_PCT", SETUP_TARGET_HARD_MIN_PCT)
+            # ATR volatility scaling
+            self.atr_vol_very_low = saved_config.get("ATR_VOL_VERY_LOW", ATR_VOL_VERY_LOW)
+            self.atr_vol_low = saved_config.get("ATR_VOL_LOW", ATR_VOL_LOW)
+            self.atr_vol_moderate = saved_config.get("ATR_VOL_MODERATE", ATR_VOL_MODERATE)
+            self.atr_vol_high = saved_config.get("ATR_VOL_HIGH", ATR_VOL_HIGH)
+            # ADX trend strength
+            self.adx_very_strong = saved_config.get("ADX_VERY_STRONG", ADX_VERY_STRONG)
+            self.adx_strong = saved_config.get("ADX_STRONG", ADX_STRONG)
+            self.adx_moderate = saved_config.get("ADX_MODERATE", ADX_MODERATE)
+            self.adx_weak = saved_config.get("ADX_WEAK", ADX_WEAK)
+            self.adx_very_weak = saved_config.get("ADX_VERY_WEAK", ADX_VERY_WEAK)
+            # Technical confidence
+            self.tech_conf_rsi_bullish = saved_config.get("TECH_CONF_RSI_BULLISH", TECH_CONF_RSI_BULLISH)
+            self.tech_conf_rsi_bearish = saved_config.get("TECH_CONF_RSI_BEARISH", TECH_CONF_RSI_BEARISH)
+            self.tech_conf_adx_strong = saved_config.get("TECH_CONF_ADX_STRONG", TECH_CONF_ADX_STRONG)
+            self.tech_conf_adx_moderate = saved_config.get("TECH_CONF_ADX_MODERATE", TECH_CONF_ADX_MODERATE)
+            self.tech_conf_adx_strong_boost = saved_config.get("TECH_CONF_ADX_STRONG_BOOST", TECH_CONF_ADX_STRONG_BOOST)
+            self.tech_conf_adx_moderate_boost = saved_config.get("TECH_CONF_ADX_MODERATE_BOOST", TECH_CONF_ADX_MODERATE_BOOST)
+            self.tech_conf_base = saved_config.get("TECH_CONF_BASE", TECH_CONF_BASE)
+            self.tech_conf_alignment_weight = saved_config.get("TECH_CONF_ALIGNMENT_WEIGHT", TECH_CONF_ALIGNMENT_WEIGHT)
+            self.tech_conf_max = saved_config.get("TECH_CONF_MAX", TECH_CONF_MAX)
+            # Sentiment confidence
+            self.sentiment_conf_full_news_count = saved_config.get("SENTIMENT_CONF_FULL_NEWS_COUNT", SENTIMENT_CONF_FULL_NEWS_COUNT)
+            self.sentiment_conf_high_news_count = saved_config.get("SENTIMENT_CONF_HIGH_NEWS_COUNT", SENTIMENT_CONF_HIGH_NEWS_COUNT)
+            self.sentiment_conf_med_news_count = saved_config.get("SENTIMENT_CONF_MED_NEWS_COUNT", SENTIMENT_CONF_MED_NEWS_COUNT)
+            self.sentiment_conf_low_news_count = saved_config.get("SENTIMENT_CONF_LOW_NEWS_COUNT", SENTIMENT_CONF_LOW_NEWS_COUNT)
+            self.sentiment_positive_threshold = saved_config.get("SENTIMENT_POSITIVE_THRESHOLD", SENTIMENT_POSITIVE_THRESHOLD)
+            self.sentiment_negative_threshold = saved_config.get("SENTIMENT_NEGATIVE_THRESHOLD", SENTIMENT_NEGATIVE_THRESHOLD)
             # ✅ NEW: Telegram alert settings
             self.telegram_alerts_enabled = saved_config.get("TELEGRAM_ALERTS_ENABLED", TELEGRAM_ALERTS_ENABLED)
             self.telegram_score_threshold = saved_config.get("TELEGRAM_SCORE_THRESHOLD", TELEGRAM_SCORE_THRESHOLD)
