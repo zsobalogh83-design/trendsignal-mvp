@@ -108,7 +108,7 @@ def load_signal_rows(db_path: Path = DATABASE_PATH) -> List[SignalRow]:
 
     rows = conn.execute("""
         SELECT
-            sc.id                   AS signal_id,
+            sc.signal_id            AS signal_id,
             sc.ticker_symbol        AS ticker,
             sc.calculated_at,
             sc.rsi,
