@@ -906,3 +906,276 @@ async def update_technical_component_weights(updates: TechnicalComponentWeightsU
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+# ===== ADVANCED SIGNAL PARAMETERS =====
+
+class AdvancedSignalParamsUpdate(BaseModel):
+    """RSI/Stochastic zones + Alignment bonus + Setup quality"""
+    # RSI zones
+    rsi_overbought: Optional[int] = Field(None, ge=60, le=90)
+    rsi_oversold: Optional[int] = Field(None, ge=10, le=40)
+    rsi_neutral_low: Optional[int] = Field(None, ge=30, le=55)
+    rsi_neutral_high: Optional[int] = Field(None, ge=45, le=70)
+    # Stochastic zones
+    stoch_overbought: Optional[int] = Field(None, ge=60, le=95)
+    stoch_oversold: Optional[int] = Field(None, ge=5, le=40)
+    # S/R level filtering
+    sr_min_distance_pct: Optional[float] = Field(None, ge=0.1, le=5.0)
+    sr_top_n_levels: Optional[int] = Field(None, ge=1, le=20)
+    # Alignment bonus thresholds
+    alignment_tech_threshold: Optional[int] = Field(None, ge=20, le=80)
+    alignment_sent_threshold: Optional[int] = Field(None, ge=20, le=80)
+    alignment_risk_threshold: Optional[int] = Field(None, ge=20, le=80)
+    alignment_bonus_all: Optional[int] = Field(None, ge=0, le=20)
+    alignment_bonus_tr: Optional[int] = Field(None, ge=0, le=15)
+    alignment_bonus_st: Optional[int] = Field(None, ge=0, le=15)
+    alignment_bonus_sr: Optional[int] = Field(None, ge=0, le=15)
+    # Setup quality thresholds
+    setup_stop_min_pct: Optional[float] = Field(None, ge=0.5, le=5.0)
+    setup_stop_max_pct: Optional[float] = Field(None, ge=2.0, le=15.0)
+    setup_target_min_pct: Optional[float] = Field(None, ge=1.0, le=10.0)
+    setup_stop_hard_max_pct: Optional[float] = Field(None, ge=5.0, le=20.0)
+    setup_target_hard_min_pct: Optional[float] = Field(None, ge=0.5, le=5.0)
+
+class AdvancedSignalParamsResponse(BaseModel):
+    rsi_overbought: int
+    rsi_oversold: int
+    rsi_neutral_low: int
+    rsi_neutral_high: int
+    stoch_overbought: int
+    stoch_oversold: int
+    sr_min_distance_pct: float
+    sr_top_n_levels: int
+    alignment_tech_threshold: int
+    alignment_sent_threshold: int
+    alignment_risk_threshold: int
+    alignment_bonus_all: int
+    alignment_bonus_tr: int
+    alignment_bonus_st: int
+    alignment_bonus_sr: int
+    setup_stop_min_pct: float
+    setup_stop_max_pct: float
+    setup_target_min_pct: float
+    setup_stop_hard_max_pct: float
+    setup_target_hard_min_pct: float
+
+@router.get("/advanced-signal", response_model=AdvancedSignalParamsResponse)
+async def get_advanced_signal_params():
+    try:
+        from src.config import get_config
+        c = get_config()
+        return AdvancedSignalParamsResponse(
+            rsi_overbought=c.rsi_overbought, rsi_oversold=c.rsi_oversold,
+            rsi_neutral_low=c.rsi_neutral_low, rsi_neutral_high=c.rsi_neutral_high,
+            stoch_overbought=c.stoch_overbought, stoch_oversold=c.stoch_oversold,
+            sr_min_distance_pct=c.sr_min_distance_pct, sr_top_n_levels=c.sr_top_n_levels,
+            alignment_tech_threshold=c.alignment_tech_threshold,
+            alignment_sent_threshold=c.alignment_sent_threshold,
+            alignment_risk_threshold=c.alignment_risk_threshold,
+            alignment_bonus_all=c.alignment_bonus_all, alignment_bonus_tr=c.alignment_bonus_tr,
+            alignment_bonus_st=c.alignment_bonus_st, alignment_bonus_sr=c.alignment_bonus_sr,
+            setup_stop_min_pct=c.setup_stop_min_pct, setup_stop_max_pct=c.setup_stop_max_pct,
+            setup_target_min_pct=c.setup_target_min_pct,
+            setup_stop_hard_max_pct=c.setup_stop_hard_max_pct,
+            setup_target_hard_min_pct=c.setup_target_hard_min_pct,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/advanced-signal", response_model=AdvancedSignalParamsResponse)
+async def update_advanced_signal_params(updates: AdvancedSignalParamsUpdate):
+    try:
+        from src.config import get_config, update_config_values
+        config_updates = {}
+        for field, key in [
+            ("rsi_overbought", "RSI_OVERBOUGHT"), ("rsi_oversold", "RSI_OVERSOLD"),
+            ("rsi_neutral_low", "RSI_NEUTRAL_LOW"), ("rsi_neutral_high", "RSI_NEUTRAL_HIGH"),
+            ("stoch_overbought", "STOCH_OVERBOUGHT"), ("stoch_oversold", "STOCH_OVERSOLD"),
+            ("sr_min_distance_pct", "SR_MIN_DISTANCE_PCT"), ("sr_top_n_levels", "SR_TOP_N_LEVELS"),
+            ("alignment_tech_threshold", "ALIGNMENT_TECH_THRESHOLD"),
+            ("alignment_sent_threshold", "ALIGNMENT_SENT_THRESHOLD"),
+            ("alignment_risk_threshold", "ALIGNMENT_RISK_THRESHOLD"),
+            ("alignment_bonus_all", "ALIGNMENT_BONUS_ALL"), ("alignment_bonus_tr", "ALIGNMENT_BONUS_TR"),
+            ("alignment_bonus_st", "ALIGNMENT_BONUS_ST"), ("alignment_bonus_sr", "ALIGNMENT_BONUS_SR"),
+            ("setup_stop_min_pct", "SETUP_STOP_MIN_PCT"), ("setup_stop_max_pct", "SETUP_STOP_MAX_PCT"),
+            ("setup_target_min_pct", "SETUP_TARGET_MIN_PCT"),
+            ("setup_stop_hard_max_pct", "SETUP_STOP_HARD_MAX_PCT"),
+            ("setup_target_hard_min_pct", "SETUP_TARGET_HARD_MIN_PCT"),
+        ]:
+            v = getattr(updates, field)
+            if v is not None:
+                config_updates[key] = v
+        if not config_updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+        update_config_values(get_config(), config_updates)
+        return await get_advanced_signal_params()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== ADVANCED RISK / SCORING PARAMETERS =====
+
+class AdvancedRiskScoringUpdate(BaseModel):
+    """ATR volatility scaling + ADX trend strength scaling"""
+    # ATR volatility scaling breakpoints
+    atr_vol_very_low: Optional[float] = Field(None, ge=0.5, le=3.0)
+    atr_vol_low: Optional[float] = Field(None, ge=1.0, le=4.0)
+    atr_vol_moderate: Optional[float] = Field(None, ge=2.0, le=6.0)
+    atr_vol_high: Optional[float] = Field(None, ge=3.0, le=10.0)
+    # ADX trend strength breakpoints
+    adx_very_strong: Optional[int] = Field(None, ge=30, le=60)
+    adx_strong: Optional[int] = Field(None, ge=20, le=50)
+    adx_moderate: Optional[int] = Field(None, ge=15, le=40)
+    adx_weak: Optional[int] = Field(None, ge=10, le=35)
+    adx_very_weak: Optional[int] = Field(None, ge=5, le=25)
+
+class AdvancedRiskScoringResponse(BaseModel):
+    atr_vol_very_low: float
+    atr_vol_low: float
+    atr_vol_moderate: float
+    atr_vol_high: float
+    adx_very_strong: int
+    adx_strong: int
+    adx_moderate: int
+    adx_weak: int
+    adx_very_weak: int
+
+@router.get("/advanced-risk-scoring", response_model=AdvancedRiskScoringResponse)
+async def get_advanced_risk_scoring():
+    try:
+        from src.config import get_config
+        c = get_config()
+        return AdvancedRiskScoringResponse(
+            atr_vol_very_low=c.atr_vol_very_low, atr_vol_low=c.atr_vol_low,
+            atr_vol_moderate=c.atr_vol_moderate, atr_vol_high=c.atr_vol_high,
+            adx_very_strong=c.adx_very_strong, adx_strong=c.adx_strong,
+            adx_moderate=c.adx_moderate, adx_weak=c.adx_weak, adx_very_weak=c.adx_very_weak,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/advanced-risk-scoring", response_model=AdvancedRiskScoringResponse)
+async def update_advanced_risk_scoring(updates: AdvancedRiskScoringUpdate):
+    try:
+        from src.config import get_config, update_config_values
+        config_updates = {}
+        for field, key in [
+            ("atr_vol_very_low", "ATR_VOL_VERY_LOW"), ("atr_vol_low", "ATR_VOL_LOW"),
+            ("atr_vol_moderate", "ATR_VOL_MODERATE"), ("atr_vol_high", "ATR_VOL_HIGH"),
+            ("adx_very_strong", "ADX_VERY_STRONG"), ("adx_strong", "ADX_STRONG"),
+            ("adx_moderate", "ADX_MODERATE"), ("adx_weak", "ADX_WEAK"),
+            ("adx_very_weak", "ADX_VERY_WEAK"),
+        ]:
+            v = getattr(updates, field)
+            if v is not None:
+                config_updates[key] = v
+        if not config_updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+        update_config_values(get_config(), config_updates)
+        return await get_advanced_risk_scoring()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== ADVANCED CONFIDENCE PARAMETERS =====
+
+class AdvancedConfidenceUpdate(BaseModel):
+    """Technical confidence calculation + Sentiment confidence parameters"""
+    # Technical confidence
+    tech_conf_rsi_bullish: Optional[int] = Field(None, ge=50, le=70)
+    tech_conf_rsi_bearish: Optional[int] = Field(None, ge=30, le=50)
+    tech_conf_adx_strong: Optional[int] = Field(None, ge=15, le=40)
+    tech_conf_adx_moderate: Optional[int] = Field(None, ge=10, le=30)
+    tech_conf_adx_strong_boost: Optional[float] = Field(None, ge=0.0, le=0.3)
+    tech_conf_adx_moderate_boost: Optional[float] = Field(None, ge=0.0, le=0.2)
+    tech_conf_base: Optional[float] = Field(None, ge=0.3, le=0.7)
+    tech_conf_alignment_weight: Optional[float] = Field(None, ge=0.1, le=0.5)
+    tech_conf_max: Optional[float] = Field(None, ge=0.7, le=1.0)
+    # Sentiment confidence
+    sentiment_conf_full_news_count: Optional[int] = Field(None, ge=3, le=30)
+    sentiment_conf_high_news_count: Optional[int] = Field(None, ge=2, le=20)
+    sentiment_conf_med_news_count: Optional[int] = Field(None, ge=1, le=10)
+    sentiment_conf_low_news_count: Optional[int] = Field(None, ge=1, le=5)
+    sentiment_positive_threshold: Optional[float] = Field(None, ge=0.05, le=0.5)
+    sentiment_negative_threshold: Optional[float] = Field(None, ge=-0.5, le=-0.05)
+
+class AdvancedConfidenceResponse(BaseModel):
+    tech_conf_rsi_bullish: int
+    tech_conf_rsi_bearish: int
+    tech_conf_adx_strong: int
+    tech_conf_adx_moderate: int
+    tech_conf_adx_strong_boost: float
+    tech_conf_adx_moderate_boost: float
+    tech_conf_base: float
+    tech_conf_alignment_weight: float
+    tech_conf_max: float
+    sentiment_conf_full_news_count: int
+    sentiment_conf_high_news_count: int
+    sentiment_conf_med_news_count: int
+    sentiment_conf_low_news_count: int
+    sentiment_positive_threshold: float
+    sentiment_negative_threshold: float
+
+@router.get("/advanced-confidence", response_model=AdvancedConfidenceResponse)
+async def get_advanced_confidence():
+    try:
+        from src.config import get_config
+        c = get_config()
+        return AdvancedConfidenceResponse(
+            tech_conf_rsi_bullish=c.tech_conf_rsi_bullish,
+            tech_conf_rsi_bearish=c.tech_conf_rsi_bearish,
+            tech_conf_adx_strong=c.tech_conf_adx_strong,
+            tech_conf_adx_moderate=c.tech_conf_adx_moderate,
+            tech_conf_adx_strong_boost=c.tech_conf_adx_strong_boost,
+            tech_conf_adx_moderate_boost=c.tech_conf_adx_moderate_boost,
+            tech_conf_base=c.tech_conf_base,
+            tech_conf_alignment_weight=c.tech_conf_alignment_weight,
+            tech_conf_max=c.tech_conf_max,
+            sentiment_conf_full_news_count=c.sentiment_conf_full_news_count,
+            sentiment_conf_high_news_count=c.sentiment_conf_high_news_count,
+            sentiment_conf_med_news_count=c.sentiment_conf_med_news_count,
+            sentiment_conf_low_news_count=c.sentiment_conf_low_news_count,
+            sentiment_positive_threshold=c.sentiment_positive_threshold,
+            sentiment_negative_threshold=c.sentiment_negative_threshold,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/advanced-confidence", response_model=AdvancedConfidenceResponse)
+async def update_advanced_confidence(updates: AdvancedConfidenceUpdate):
+    try:
+        from src.config import get_config, update_config_values
+        config_updates = {}
+        for field, key in [
+            ("tech_conf_rsi_bullish", "TECH_CONF_RSI_BULLISH"),
+            ("tech_conf_rsi_bearish", "TECH_CONF_RSI_BEARISH"),
+            ("tech_conf_adx_strong", "TECH_CONF_ADX_STRONG"),
+            ("tech_conf_adx_moderate", "TECH_CONF_ADX_MODERATE"),
+            ("tech_conf_adx_strong_boost", "TECH_CONF_ADX_STRONG_BOOST"),
+            ("tech_conf_adx_moderate_boost", "TECH_CONF_ADX_MODERATE_BOOST"),
+            ("tech_conf_base", "TECH_CONF_BASE"),
+            ("tech_conf_alignment_weight", "TECH_CONF_ALIGNMENT_WEIGHT"),
+            ("tech_conf_max", "TECH_CONF_MAX"),
+            ("sentiment_conf_full_news_count", "SENTIMENT_CONF_FULL_NEWS_COUNT"),
+            ("sentiment_conf_high_news_count", "SENTIMENT_CONF_HIGH_NEWS_COUNT"),
+            ("sentiment_conf_med_news_count", "SENTIMENT_CONF_MED_NEWS_COUNT"),
+            ("sentiment_conf_low_news_count", "SENTIMENT_CONF_LOW_NEWS_COUNT"),
+            ("sentiment_positive_threshold", "SENTIMENT_POSITIVE_THRESHOLD"),
+            ("sentiment_negative_threshold", "SENTIMENT_NEGATIVE_THRESHOLD"),
+        ]:
+            v = getattr(updates, field)
+            if v is not None:
+                config_updates[key] = v
+        if not config_updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+        update_config_values(get_config(), config_updates)
+        return await get_advanced_confidence()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

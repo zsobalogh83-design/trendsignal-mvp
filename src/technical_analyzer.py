@@ -234,15 +234,17 @@ def detect_support_resistance(
     resistances = cluster_levels(resistances, proximity_pct, min_samples)
     
     # BUILD RESULTS with distance information
-    # Minimum distance filter: S/R levels closer than 0.5% to current price are
-    # too tight for meaningful SL/TP placement and are discarded.
-    MIN_DISTANCE_PCT = 0.5
+    # Minimum distance filter: S/R levels too close to current price are discarded.
+    from src.config import get_config
+    _cfg = get_config()
+    min_distance_pct = _cfg.sr_min_distance_pct
+    top_n = _cfg.sr_top_n_levels
 
     support_levels = []
     for s in supports:
         if s < current_price:
             distance_pct = (current_price - s) / current_price * 100
-            if distance_pct >= MIN_DISTANCE_PCT:
+            if distance_pct >= min_distance_pct:
                 support_levels.append({
                     'price': round(s, 2),
                     'distance_pct': round(distance_pct, 2)
@@ -252,19 +254,19 @@ def detect_support_resistance(
     for r in resistances:
         if r > current_price:
             distance_pct = (r - current_price) / current_price * 100
-            if distance_pct >= MIN_DISTANCE_PCT:
+            if distance_pct >= min_distance_pct:
                 resistance_levels.append({
                     'price': round(r, 2),
                     'distance_pct': round(distance_pct, 2)
                 })
-    
+
     # Sort by proximity (nearest first)
     support_levels.sort(key=lambda x: x['distance_pct'])
     resistance_levels.sort(key=lambda x: x['distance_pct'])
-    
+
     return {
-        'support': support_levels[:5],  # Top 5 nearest
-        'resistance': resistance_levels[:5]
+        'support': support_levels[:top_n],
+        'resistance': resistance_levels[:top_n]
     }
 
 
