@@ -16,11 +16,8 @@ import json
 from datetime import datetime, timedelta
 
 # Database imports
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.database import get_db
-from src.models import Ticker, Signal, SignalCalculation, SimulatedTrade  # ✅ ADD SignalCalculation
+from src.models import Ticker, Signal, SignalCalculation, SimulatedTrade
 
 logger = logging.getLogger(__name__)
 
