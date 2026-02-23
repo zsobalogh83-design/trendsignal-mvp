@@ -206,16 +206,29 @@ class PriceService:
         except Exception as e:
             logger.warning(f"   DB error for {symbol}: {e}")
         
-        # STEP 2: Fallback to yfinance (ONLY if trading hours OR weekend-next-monday logic)
-        
+        # STEP 2: Fallback to yfinance (ONLY if trading hours AND already in the past)
+
+        # Skip if the candle is in the future – data doesn't exist yet
+        now_utc = datetime.utcnow()
+        if execution_time_utc > now_utc:
+            logger.debug(f"   {symbol}: Execution time {execution_time_utc} is in the future, skip yfinance")
+            raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
+
         # Skip if weekend (no point querying yfinance)
         if self._is_weekend(execution_time_utc):
             logger.debug(f"   {symbol}: Weekend UTC time, skip yfinance")
             raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
-        
+
         # Skip if outside trading hours (pre-market / after-hours)
         if not self._is_trading_hours(execution_time_utc, symbol):
             logger.debug(f"   {symbol}: Outside trading hours, skip yfinance")
+            raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
+
+        # Skip if the yfinance query window (execution_time - 2h) falls on a weekend –
+        # yfinance returns no data for weekend windows and logs misleading "delisted" errors
+        yf_window_start = execution_time_utc - timedelta(hours=2)
+        if self._is_weekend(yf_window_start):
+            logger.debug(f"   {symbol}: yfinance window start {yf_window_start} is on weekend, skip yfinance")
             raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
         
         # If here: trading hours, query yfinance

@@ -404,9 +404,17 @@ class TradeManager:
                 execution_time_market = trigger_utc
                 logger.warning(f"   No candle, using theoretical: ${exit_price:.2f}")
             else:
-                exit_price = candle['close']
+                # SL_HIT/TP_HIT: a tényleges exit ár a SL/TP szint, nem a gyertya close.
+                # A gyertya csak átment a szinten – a valódi megbízás az SL/TP áron teljesül.
+                # EOD/OPPOSING esetén a gyertya close a reális ár.
+                if exit_reason == 'SL_HIT':
+                    exit_price = trade.stop_loss_price
+                elif exit_reason == 'TP_HIT':
+                    exit_price = trade.take_profit_price
+                else:
+                    exit_price = candle['close']
                 execution_time_market = candle['timestamp']
-                logger.info(f"   Exit: ${exit_price:.2f} @ {execution_time_market}")
+                logger.info(f"   Exit: ${exit_price:.2f} @ {execution_time_market} ({exit_reason})")
 
         except InsufficientDataError:
             # Use theoretical prices
@@ -531,17 +539,48 @@ class TradeManager:
         return shares, position_value_huf, usd_huf_rate
     
     def _calculate_pnl(self, direction: str, entry: float, exit: float, shares: int, usd_huf: Optional[float]) -> tuple:
-        """Calculate P&L"""
+        """Calculate P&L after K&H Bronze package commissions.
+
+        K&H Bronz csomag kondíciók (2026-01-23):
+        - BÉT:  0.35% / megbízás, minimum 1.499 HUF
+        - USA:  0.35% / megbízás, minimum 9.99 USD
+        Minden trade-nél 2 megbízás van: entry + exit.
+        """
+        is_bet = usd_huf is None  # BÉT szimbólumok: nincs USD/HUF átváltás
+
         if direction == "LONG":
             pnl_percent = ((exit - entry) / entry) * 100
             pnl_per_share = exit - entry
         else:
             pnl_percent = ((entry - exit) / entry) * 100
             pnl_per_share = entry - exit
-        
+
         pnl_amount = pnl_per_share * shares
         pnl_amount_huf = pnl_amount * usd_huf if usd_huf else pnl_amount
-        
+
+        # K&H Bronz jutalék, minimum díj alulról cap-el, 2 megbízás: entry + exit
+        # LONG (normál):  BÉT 0.35% / min 1.499 HUF, USA 0.35% / min 9.99 USD
+        # SHORT (daytrade): BÉT 0.15% / min 1.499 HUF, USA 0.15% / min 9.99 USD
+        is_daytrade = (direction == "SHORT")
+        if is_bet:
+            COMMISSION_PCT   = 0.0015 if is_daytrade else 0.0035
+            MIN_COMMISSION   = 1499.0
+            entry_commission = max(entry * shares * COMMISSION_PCT, MIN_COMMISSION)
+            exit_commission  = max(exit  * shares * COMMISSION_PCT, MIN_COMMISSION)
+            total_commission_huf = entry_commission + exit_commission
+            entry_value_huf = entry * shares
+        else:
+            COMMISSION_PCT       = 0.0015 if is_daytrade else 0.0035
+            MIN_COMMISSION_USD   = 9.99
+            entry_commission_usd = max(entry * shares * COMMISSION_PCT, MIN_COMMISSION_USD)
+            exit_commission_usd  = max(exit  * shares * COMMISSION_PCT, MIN_COMMISSION_USD)
+            total_commission_huf = (entry_commission_usd + exit_commission_usd) * usd_huf
+            entry_value_huf = entry * shares * usd_huf
+
+        pnl_amount_huf -= total_commission_huf
+        commission_pct  = (total_commission_huf / entry_value_huf) * 100 if entry_value_huf else 0
+        pnl_percent    -= commission_pct
+
         return pnl_percent, pnl_amount_huf
     
     def _is_opposing_signal(self, trade: SimulatedTrade, new_signal: Signal) -> bool:
