@@ -1,18 +1,15 @@
 """
 TrendSignal Self-Tuning Engine - Fitness Function
 
-Evaluates how good a config vector is by:
-  1. Replaying all signals in the given subset with the config
-  2. Matching replayed BUY/SELL decisions to existing simulated trade outcomes
-  3. Computing win_rate × profit_factor as the fitness value
+Evaluates how good a config vector is based on full trade re-simulation:
+  1. Replays all signals with new config → new BUY/SELL/HOLD decisions
+  2. Computes new SL/TP for each active signal under the new config
+  3. Simulates each trade candle-by-candle against price_data
+  4. Computes fitness = win_rate × profit_factor on simulated P&L
 
-Design notes:
-  - Trade outcomes (entry/exit/P&L) are FIXED from simulated_trades table.
-    The optimizer only changes WHICH signals trigger trades (via new decisions
-    and score thresholds) and HOW those decisions change the win/loss profile.
-  - A signal is "active" if its replayed |score| >= ALERT_THRESHOLD (25).
-  - The fitness penalizes configs that generate too few trades (< MIN_TRADES).
-  - Higher fitness = better config.
+Key design change from v1:
+  - v1 looked up FIXED P&L from simulated_trades (fundamentally flawed)
+  - v2 derives P&L from fresh simulation → changing config truly changes outcomes
 
 Fitness formula:
     fitness = win_rate × profit_factor
@@ -23,46 +20,36 @@ Fitness formula:
     If total_trades < MIN_TRADES: fitness = 0.0 (penalty)
     If total_gross_loss == 0:     fitness = win_rate × 3.0 (cap)
 
-Version: 1.0
-Date: 2026-02-23
+Version: 2.0
+Date: 2026-02-24
 """
 
 from typing import Dict, List, Optional, Tuple
 
-from optimizer.backtester import ReplayResult, SignalRow
+from optimizer.trade_simulator import TradeSimResult
+from optimizer.signal_data import SignalSimRow
 
-# Threshold above which a replayed signal counts as an "active" trade trigger.
-# The backtest service opens trades at |score| >= 15 (SIGNAL_THRESHOLD),
-# not 25 (ALERT_THRESHOLD). We use 15 here to match trade generation logic.
-SIGNAL_THRESHOLD = 15.0
-
-# Keep ALERT_THRESHOLD for reference / future use
-ALERT_THRESHOLD = 25.0
-
-# Minimum trades required for a valid fitness score
+# Minimum trades for a valid fitness score
 MIN_TRADES = 20
 
 
+# ---------------------------------------------------------------------------
+# Primary fitness function — uses TradeSimResult from replay_and_simulate()
+# ---------------------------------------------------------------------------
+
 def compute_fitness(
-    replay_results: List[ReplayResult],
-    trade_outcomes: Dict[int, dict],
-    alert_threshold: float = SIGNAL_THRESHOLD,
+    sim_results: List[TradeSimResult],
     min_trades: int = MIN_TRADES,
 ) -> Tuple[float, dict]:
     """
-    Compute fitness for one config vector given the replayed signal scores
-    and pre-loaded trade outcomes.
+    Compute fitness from fully simulated trade results.
 
     Parameters
     ----------
-    replay_results : list of ReplayResult
-        Output of backtester.replay_all() for a given config.
-    trade_outcomes : dict {signal_id: {pnl_percent, direction, ...}}
-        Pre-loaded from simulated_trades (CLOSED trades only).
-    alert_threshold : float
-        Min |combined_score| to count as an active trade trigger.
+    sim_results : list of TradeSimResult
+        Output of backtester.replay_and_simulate() for one config.
     min_trades : int
-        Minimum trades needed for a non-zero fitness.
+        Minimum number of active trades for a non-zero fitness.
 
     Returns
     -------
@@ -76,37 +63,24 @@ def compute_fitness(
     wins         = 0
     losses       = 0
     total        = 0
-    skipped      = 0   # signals with no matching trade outcome
+    skipped      = 0   # HOLD or below-threshold signals
 
-    for result in replay_results:
-        outcome = trade_outcomes.get(result.signal_id)
-        if outcome is None:
-            # No closed trade for this signal — skip
+    exit_reasons: Dict[str, int] = {}
+
+    for result in sim_results:
+        if not result.trade_active:
             skipped += 1
             continue
 
-        pnl = outcome.get("pnl_percent", 0.0)
-        if pnl is None:
+        # NO_EXIT trades are counted as neutral (not won, not lost)
+        if result.exit_reason == "NO_EXIT":
             skipped += 1
             continue
 
-        # With the new config, does this signal still pass the alert threshold?
-        # If not, we treat the trade as "not triggered" — skip it.
-        if abs(result.new_combined_score) < alert_threshold:
-            skipped += 1
-            continue
-
-        # Direction alignment check:
-        # If the replayed decision contradicts the trade direction, skip.
-        trade_dir = outcome.get("direction", "")
-        if result.new_decision == "BUY" and trade_dir == "SHORT":
-            skipped += 1
-            continue
-        if result.new_decision == "SELL" and trade_dir == "LONG":
-            skipped += 1
-            continue
-
+        pnl = result.pnl_percent
         total += 1
+        exit_reasons[result.exit_reason] = exit_reasons.get(result.exit_reason, 0) + 1
+
         if pnl > 0:
             gross_profit += pnl
             wins += 1
@@ -114,12 +88,13 @@ def compute_fitness(
             gross_loss += abs(pnl)
             losses += 1
 
-    # Build stats
+    # Compute rates
     win_rate = wins / total if total > 0 else 0.0
+
     if gross_loss > 0:
         profit_factor = gross_profit / gross_loss
     elif gross_profit > 0:
-        profit_factor = 3.0  # all wins, cap at 3.0
+        profit_factor = 3.0     # all wins, cap at 3.0
     else:
         profit_factor = 0.0
 
@@ -138,79 +113,64 @@ def compute_fitness(
         "skipped":       skipped,
         "gross_profit":  round(gross_profit, 4),
         "gross_loss":    round(gross_loss, 4),
+        "exit_reasons":  exit_reasons,
     }
     return fitness, stats
 
 
+# ---------------------------------------------------------------------------
+# Convenience wrapper: replay + simulate + fitness in one call
+# ---------------------------------------------------------------------------
+
 def compute_fitness_for_subset(
-    rows: List[SignalRow],
-    trade_outcomes: Dict[int, dict],
+    rows: List[SignalSimRow],
+    score_timeline: dict,
     cfg: dict,
-    alert_threshold: float = SIGNAL_THRESHOLD,
     min_trades: int = MIN_TRADES,
 ) -> Tuple[float, dict]:
     """
-    Convenience wrapper: replay + fitness in one call.
+    Convenience wrapper: replay + simulate + fitness in one call.
     Used for train/val/test splits.
-    """
-    from optimizer.backtester import replay_all
-    results = replay_all(rows, cfg)
-    return compute_fitness(results, trade_outcomes, alert_threshold, min_trades)
 
+    Parameters
+    ----------
+    rows : List[SignalSimRow]
+        Signal rows for this split (with future_candles pre-loaded).
+    score_timeline : dict
+        {ticker: [(ts, score, sl, tp), ...]} for opposing signal detection.
+    cfg : dict
+        Decoded config dict from parameter_space.decode_vector().
+    min_trades : int
+        Minimum trades for non-zero fitness.
+    """
+    from optimizer.backtester import replay_and_simulate
+    sim_results = replay_and_simulate(rows, score_timeline, cfg)
+    return compute_fitness(sim_results, min_trades)
+
+
+# ---------------------------------------------------------------------------
+# Train / val / test split  (chronological, no trade_outcomes needed in v2)
+# ---------------------------------------------------------------------------
 
 def split_rows(
-    rows: List[SignalRow],
-    trade_outcomes: Optional[Dict[int, dict]] = None,
+    rows: List[SignalSimRow],
+    trade_outcomes=None,            # DEPRECATED: kept for backward compat only
     train_ratio: float = 0.60,
     val_ratio:   float = 0.20,
     min_trades_per_split: int = 20,
-) -> Tuple[List[SignalRow], List[SignalRow], List[SignalRow]]:
+) -> Tuple[List[SignalSimRow], List[SignalSimRow], List[SignalSimRow]]:
     """
     Split signal rows into train / validation / test sets.
-    Split is chronological (not random) to prevent data leakage.
+    Split is chronological to prevent data leakage.
 
-    If trade_outcomes is provided, adjusts split boundaries to ensure
-    each split has at least min_trades_per_split matching trades.
+    In v2, we split by signal count (not by trade count) because we no longer
+    need a pre-existing simulated_trades table — trades are generated on-the-fly.
 
     Default: 60% train / 20% val / 20% test by signal count.
     """
     n = len(rows)
-
-    if trade_outcomes is None:
-        # Simple ratio split
-        train_end = int(n * train_ratio)
-        val_end   = int(n * (train_ratio + val_ratio))
-        return rows[:train_end], rows[train_end:val_end], rows[val_end:]
-
-    # Trade-aware split: find boundaries where trade counts are balanced
-    # Count trades per row position
-    signal_ids = [r.signal_id for r in rows]
-    has_trade  = [1 if sid in trade_outcomes else 0 for sid in signal_ids]
-    cumulative = []
-    c = 0
-    for h in has_trade:
-        c += h
-        cumulative.append(c)
-    total_trades = c
-
-    if total_trades == 0:
-        # Fallback to ratio split
-        train_end = int(n * train_ratio)
-        val_end   = int(n * (train_ratio + val_ratio))
-        return rows[:train_end], rows[train_end:val_end], rows[val_end:]
-
-    # Find split points by trade count
-    train_trade_target = int(total_trades * train_ratio)
-    val_trade_target   = int(total_trades * (train_ratio + val_ratio))
-
-    train_end = next(
-        (i for i, c in enumerate(cumulative) if c >= train_trade_target),
-        int(n * train_ratio)
-    )
-    val_end = next(
-        (i for i, c in enumerate(cumulative) if c >= val_trade_target),
-        int(n * (train_ratio + val_ratio))
-    )
+    train_end = int(n * train_ratio)
+    val_end   = int(n * (train_ratio + val_ratio))
 
     # Ensure minimum sizes
     train_end = max(train_end, int(n * 0.40))
