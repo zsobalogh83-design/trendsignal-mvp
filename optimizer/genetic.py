@@ -1,19 +1,25 @@
 """
 TrendSignal Self-Tuning Engine - Genetic Algorithm
 
-Uses DEAP to evolve the 40-dimensional parameter vector.
+Uses DEAP to evolve the 46-dimensional parameter vector.
 Writes generation-level metrics to the DB for live progress polling.
 
-Algorithm parameters (from design doc v1.5):
+Algorithm parameters:
   Population:    80 individuals
   Generations:   100
   Crossover:     0.7 (two-point)
-  Mutation:      0.2 (Gaussian, sigma=0.1 of range)
+  Mutation:      0.2 (Gaussian, sigma=0.05 of range)
   Selection:     Tournament (k=3)
   Elitism:       Top 2 preserved each generation
 
-Version: 1.0
-Date: 2026-02-23
+v2 changes:
+  - Uses load_all_sim_data() instead of load_signal_rows() + load_trade_outcomes()
+  - Evaluates via replay_and_simulate() — full trade simulation per config
+  - compute_fitness_for_subset() now takes score_timeline instead of trade_outcomes
+  - 46-dim parameter space (added ATR SL/TP and SR blend params)
+
+Version: 2.0
+Date: 2026-02-24
 """
 
 import json
@@ -26,12 +32,12 @@ from typing import List, Optional, Tuple
 import numpy as np
 from deap import base, creator, tools, algorithms
 
-from optimizer.backtester import load_signal_rows, load_trade_outcomes, SignalRow
+from optimizer.signal_data import load_all_sim_data
+from optimizer.backtester import load_signal_rows, load_trade_outcomes, SignalRow  # backward compat
 from optimizer.fitness import (
     compute_fitness,
     compute_fitness_for_subset,
     split_rows,
-    SIGNAL_THRESHOLD,
     MIN_TRADES,
 )
 from optimizer.parameter_space import (
@@ -132,25 +138,24 @@ def run_optimizer(
     """
     t_start = time.time()
 
-    # --- Load data ---
+    # --- Load data (v2: single pass, includes price candles for full sim) ---
     print(f"[GA] Loading signal data for run_id={run_id}...")
-    all_rows = load_signal_rows(db_path)
-    trade_outcomes = load_trade_outcomes(db_path)
-    print(f"[GA] {len(all_rows)} signals, {len(trade_outcomes)} trade outcomes")
+    all_rows, score_timeline = load_all_sim_data(db_path)
+    print(f"[GA] {len(all_rows)} signals loaded with price data")
 
-    train, val, test = split_rows(all_rows, trade_outcomes)
+    train, val, test = split_rows(all_rows)
     print(f"[GA] Split: train={len(train)}, val={len(val)}, test={len(test)}")
 
     # Update run record with split info
-    _update_run_splits(run_id, train, val, test, trade_outcomes, db_path)
+    _update_run_splits(run_id, train, val, test, db_path)
 
     # --- Toolbox ---
     toolbox = _make_toolbox(LOWER_BOUNDS, UPPER_BOUNDS)
 
-    # Fitness evaluation function
+    # Fitness evaluation function (v2: uses score_timeline, no trade_outcomes)
     def evaluate(individual):
         cfg = decode_vector(individual)
-        fitness, _ = compute_fitness_for_subset(train, trade_outcomes, cfg)
+        fitness, _ = compute_fitness_for_subset(train, score_timeline, cfg)
         return (fitness,)
 
     toolbox.register("evaluate", evaluate)
@@ -236,7 +241,7 @@ def run_optimizer(
         # Validate best individual on validation set
         best_ind = tools.selBest(pop, 1)[0]
         cfg_best = decode_vector(best_ind)
-        val_fit, _ = compute_fitness_for_subset(val, trade_outcomes, cfg_best)
+        val_fit, _ = compute_fitness_for_subset(val, score_timeline, cfg_best)
 
         train_val_gap = (gen_best - val_fit) / gen_best if gen_best > 0 else 0.0
 
@@ -264,14 +269,14 @@ def run_optimizer(
     print(f"\n[GA] Evaluating top-3 candidates on test set...")
     proposals = []
     cfg_baseline = decode_vector(BASELINE_VECTOR)
-    baseline_fit, baseline_stats = compute_fitness_for_subset(test, trade_outcomes, cfg_baseline)
-    baseline_train_fit, _ = compute_fitness_for_subset(train, trade_outcomes, cfg_baseline)
+    baseline_fit, baseline_stats = compute_fitness_for_subset(test, score_timeline, cfg_baseline)
+    baseline_train_fit, _ = compute_fitness_for_subset(train, score_timeline, cfg_baseline)
 
     for rank, ind in enumerate(hof, start=1):
         cfg = decode_vector(ind)
-        train_fit, train_stats = compute_fitness_for_subset(train, trade_outcomes, cfg)
-        val_fit,   val_stats   = compute_fitness_for_subset(val,   trade_outcomes, cfg)
-        test_fit,  test_stats  = compute_fitness_for_subset(test,  trade_outcomes, cfg)
+        train_fit, train_stats = compute_fitness_for_subset(train, score_timeline, cfg)
+        val_fit,   val_stats   = compute_fitness_for_subset(val,   score_timeline, cfg)
+        test_fit,  test_stats  = compute_fitness_for_subset(test,  score_timeline, cfg)
 
         improvement_pct = (
             (test_fit - baseline_fit) / baseline_fit * 100
@@ -327,30 +332,32 @@ def run_optimizer(
 # DB helpers
 # ---------------------------------------------------------------------------
 
-def _update_run_splits(run_id, train, val, test, outcomes, db_path):
+def _update_run_splits(run_id, train, val, test, db_path):
     """Write split sizes to optimization_runs record."""
-    def count_trades(rows):
-        return sum(1 for r in rows if r.signal_id in outcomes)
-
+    # v2: trade counts are not known upfront (generated per-config)
+    # Store signal counts; trade_counts will be 0 until first evaluation
     conn = sqlite3.connect(str(db_path))
-    conn.execute("""
-        UPDATE optimization_runs SET
-            train_signal_count = ?,
-            val_signal_count   = ?,
-            test_signal_count  = ?,
-            total_signal_count = ?,
-            train_trade_count  = ?,
-            val_trade_count    = ?,
-            test_trade_count   = ?
-        WHERE id = ?
-    """, (
-        len(train), len(val), len(test),
-        len(train) + len(val) + len(test),
-        count_trades(train), count_trades(val), count_trades(test),
-        run_id,
-    ))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("""
+            UPDATE optimization_runs SET
+                train_signal_count = ?,
+                val_signal_count   = ?,
+                test_signal_count  = ?,
+                total_signal_count = ?,
+                train_trade_count  = 0,
+                val_trade_count    = 0,
+                test_trade_count   = 0
+            WHERE id = ?
+        """, (
+            len(train), len(val), len(test),
+            len(train) + len(val) + len(test),
+            run_id,
+        ))
+        conn.commit()
+    except Exception as e:
+        print(f"[GA] DB split update warning: {e}")
+    finally:
+        conn.close()
 
 
 def _write_generation(run_id, generation, best_train, avg_train, worst_train,

@@ -1,7 +1,7 @@
 """
 TrendSignal Self-Tuning Engine - Parameter Space Definition
 
-Defines the 40-dimensional parameter vector for the genetic optimizer.
+Defines the 46-dimensional parameter vector for the genetic optimizer.
 
 Dimension layout (0-indexed):
   [0-1]   Component weights (2 free; RISK_WEIGHT = 1 - S - T)
@@ -13,11 +13,15 @@ Dimension layout (0-indexed):
   [24-29] Alignment bonuses and thresholds (6)
   [30-35] RSI/Stochastic zone thresholds (6)
   [36-39] Sentiment confidence params (4)
+  [40-42] ATR Stop-Loss multipliers, confidence-adaptive (3)
+           Constraint: ATR_STOP_HIGH_CONF < ATR_STOP_DEFAULT < ATR_STOP_LOW_CONF
+  [43-44] ATR Take-Profit multipliers, volatility-adaptive (2)
+  [45]    S/R hard distance threshold for SL blending (1)
 
-Total: 40 dimensions
+Total: 46 dimensions
 
-Version: 1.0
-Date: 2026-02-23
+Version: 2.0
+Date: 2026-02-24
 """
 
 from dataclasses import dataclass
@@ -169,10 +173,44 @@ PARAM_DEFS: List[ParamDef] = [
     ParamDef(39, "sentiment_conf_high_news_count", "SENTIMENT_CONF_HIGH_NEWS_COUNT",
              2, 10, True,
              "News count for high confidence"),
+
+    # ------------------------------------------------------------------
+    # Group 10: ATR Stop-Loss Multipliers, confidence-adaptive  (dim 40-42)
+    # Constraint: ATR_STOP_HIGH_CONF <= ATR_STOP_DEFAULT <= ATR_STOP_LOW_CONF
+    # (enforced in decode_vector via sorted assignment)
+    # ------------------------------------------------------------------
+    ParamDef(40, "atr_stop_high_conf", "ATR_STOP_HIGH_CONF",
+             0.8, 2.5, False,
+             "ATR multiplier for SL when confidence >= 0.75 (tighter stop)"),
+    ParamDef(41, "atr_stop_default",   "ATR_STOP_DEFAULT",
+             1.2, 3.5, False,
+             "ATR multiplier for SL at moderate confidence"),
+    ParamDef(42, "atr_stop_low_conf",  "ATR_STOP_LOW_CONF",
+             1.5, 5.0, False,
+             "ATR multiplier for SL when confidence < 0.50 (wider stop)"),
+
+    # ------------------------------------------------------------------
+    # Group 11: ATR Take-Profit Multipliers, volatility-adaptive  (dim 43-44)
+    # Constraint: ATR_TP_LOW_VOL <= ATR_TP_HIGH_VOL  (enforced in decode_vector)
+    # ------------------------------------------------------------------
+    ParamDef(43, "atr_tp_low_vol",  "ATR_TP_LOW_VOL",
+             1.5, 4.0, False,
+             "ATR multiplier for TP in low-volatility regime (atr_pct < 2%)"),
+    ParamDef(44, "atr_tp_high_vol", "ATR_TP_HIGH_VOL",
+             2.5, 7.0, False,
+             "ATR multiplier for TP in high-volatility regime (atr_pct > 4%)"),
+
+    # ------------------------------------------------------------------
+    # Group 12: S/R Blend Hard Distance Threshold  (dim 45)
+    # Controls how far a S/R level can be before pure ATR is used for SL
+    # ------------------------------------------------------------------
+    ParamDef(45, "sr_support_hard_pct", "SR_SUPPORT_HARD_PCT",
+             2.0, 10.0, False,
+             "Max S/R distance (%) for SL blending; beyond this → pure ATR"),
 ]
 
 # Convenience: number of dimensions
-N_DIMS: int = len(PARAM_DEFS)  # 40
+N_DIMS: int = len(PARAM_DEFS)  # 46
 
 # Lower and upper bounds as numpy arrays (for DEAP initialisation)
 LOWER_BOUNDS: np.ndarray = np.array([p.low  for p in PARAM_DEFS], dtype=float)
@@ -233,6 +271,15 @@ BASELINE_VECTOR: List[float] = [
     -0.20,  # 37 SENTIMENT_NEGATIVE_THRESHOLD
     10.0,   # 38 SENTIMENT_CONF_FULL_NEWS_COUNT
     5.0,    # 39 SENTIMENT_CONF_HIGH_NEWS_COUNT
+    # Group 10: ATR SL multipliers (confidence-adaptive)
+    1.5,    # 40 ATR_STOP_HIGH_CONF  (confidence >= 0.75)
+    2.0,    # 41 ATR_STOP_DEFAULT    (0.50 <= conf < 0.75)
+    2.5,    # 42 ATR_STOP_LOW_CONF   (conf < 0.50)
+    # Group 11: ATR TP multipliers (volatility-adaptive)
+    2.5,    # 43 ATR_TP_LOW_VOL      (atr_pct < 2%)
+    4.0,    # 44 ATR_TP_HIGH_VOL     (atr_pct > 4%)
+    # Group 12: S/R hard distance threshold
+    4.0,    # 45 SR_SUPPORT_HARD_PCT
 ]
 
 assert len(BASELINE_VECTOR) == N_DIMS, \
@@ -328,6 +375,19 @@ def decode_vector(v: List[float]) -> dict:
     if v[35] >= v[34]:
         v[35] = v[34] - 20
 
+    # --- Group 10: ATR SL monotone constraint ---
+    # ATR_STOP_HIGH_CONF <= ATR_STOP_DEFAULT <= ATR_STOP_LOW_CONF
+    # (high confidence → tighter stop → smaller multiplier)
+    atr_stops = sorted([v[40], v[41], v[42]])
+    v[40] = atr_stops[0]   # smallest  → high confidence
+    v[41] = atr_stops[1]   # middle    → default
+    v[42] = atr_stops[2]   # largest   → low confidence
+
+    # --- Group 11: ATR TP monotone constraint ---
+    # ATR_TP_LOW_VOL <= ATR_TP_HIGH_VOL
+    if v[43] > v[44]:
+        v[43], v[44] = v[44], v[43]
+
     # --- Build result dict ---
     cfg = {}
     for p in PARAM_DEFS:
@@ -338,6 +398,15 @@ def decode_vector(v: List[float]) -> dict:
     cfg["TECH_VOLUME_WEIGHT"]       = round(tech_volume, 6)
     cfg["RISK_TREND_STRENGTH_WEIGHT"] = round(rt, 6)
     cfg["DECAY_0_2H"]               = 1.0   # always fixed
+
+    # S/R blend soft thresholds (fixed at half of the hard threshold)
+    # These are not free parameters — derived from SR_SUPPORT_HARD_PCT
+    cfg["SR_SUPPORT_SOFT_PCT"]     = round(cfg["SR_SUPPORT_HARD_PCT"] * 0.5, 4)
+    cfg["SR_RESISTANCE_SOFT_PCT"]  = round(cfg["SR_SUPPORT_HARD_PCT"] * 0.75, 4)
+    cfg["SR_RESISTANCE_HARD_PCT"]  = round(cfg["SR_SUPPORT_HARD_PCT"] * 1.625, 4)
+    cfg["SR_BUFFER_ATR_MULT"]      = 0.3    # fixed
+    cfg["VOL_LOW_THRESHOLD"]       = 2.0    # fixed (atr_pct % below = low vol)
+    cfg["VOL_HIGH_THRESHOLD"]      = 4.0    # fixed (atr_pct % above = high vol)
 
     # SELL thresholds are symmetric
     cfg["STRONG_SELL_SCORE"]        = -cfg["STRONG_BUY_SCORE"]
