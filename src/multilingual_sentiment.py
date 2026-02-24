@@ -8,6 +8,9 @@ Date: 2024-12-27
 
 from typing import Dict, Optional
 import re
+import threading
+
+_multilingual_finbert_lock = threading.Lock()
 
 
 # ==========================================
@@ -92,9 +95,10 @@ class MultilingualSentimentAnalyzer:
         if USE_FINBERT:
             try:
                 from finbert_analyzer import FinBERTAnalyzer
-                if not hasattr(MultilingualSentimentAnalyzer, '_finbert_instance'):
-                    print("🧠 Loading FinBERT for English sentiment...")
-                    MultilingualSentimentAnalyzer._finbert_instance = FinBERTAnalyzer()
+                with _multilingual_finbert_lock:
+                    if not hasattr(MultilingualSentimentAnalyzer, '_finbert_instance'):
+                        print("🧠 Loading FinBERT for English sentiment...")
+                        MultilingualSentimentAnalyzer._finbert_instance = FinBERTAnalyzer()
                 self.finbert = MultilingualSentimentAnalyzer._finbert_instance
                 self.finbert_available = True
                 print("   ✅ FinBERT ready for English news")

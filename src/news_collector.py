@@ -8,6 +8,7 @@ import pandas as pd
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, TYPE_CHECKING
 from sqlalchemy.orm import Session
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import sys
 import os
@@ -131,45 +132,39 @@ class NewsCollector:
         
         is_us_ticker = not ticker_symbol.endswith('.BD')
         
-        # ===== US TICKERS: Multi-source English news =====
+        # ===== US TICKERS: Multi-source English news (PARALLEL) =====
         if is_us_ticker:
             print(f"🔍 DEBUG: US ticker detected: {ticker_symbol}")
-            
-            # 1. Yahoo Finance RSS (unlimited, real-time) - PRIMARY
+
+            source_tasks = {}
             if self.yahoo_collector:
-                print(f"🔍 DEBUG: Yahoo collector exists, calling...")
-                yahoo_items = self._collect_from_yahoo(
-                    ticker_symbol, lookback_hours, sentiment_analyzer
-                )
-                all_news.extend(yahoo_items)
-                print(f"  📰 Yahoo Finance: {len(yahoo_items)} articles")
+                print(f"🔍 DEBUG: Yahoo collector exists, scheduling...")
+                source_tasks['yahoo'] = lambda: self._collect_from_yahoo(ticker_symbol, lookback_hours, sentiment_analyzer)
             else:
                 print(f"⚠️ DEBUG: Yahoo collector is None")
-            
-            # 2. Marketaux API (100 req/day, AI sentiment) - SECONDARY
-            print(f"🔍 DEBUG: Checking Marketaux collector...")
+
             print(f"🔍 DEBUG: self.marketaux_collector = {self.marketaux_collector}")
             if self.marketaux_collector:
-                print(f"🔍 DEBUG: Marketaux collector EXISTS, calling collect_news...")
-                marketaux_items = self._collect_from_marketaux(
-                    ticker_symbol, lookback_hours
-                )
-                all_news.extend(marketaux_items)
-                print(f"🔍 DEBUG: Marketaux returned {len(marketaux_items)} items")
-                if len(marketaux_items) > 0:
-                    print(f"  📰 Marketaux: {len(marketaux_items)} articles (AI sentiment)")
+                print(f"🔍 DEBUG: Marketaux collector EXISTS, scheduling...")
+                source_tasks['marketaux'] = lambda: self._collect_from_marketaux(ticker_symbol, lookback_hours)
             else:
                 print(f"⚠️ DEBUG: Marketaux collector is None - WHY?")
-                print(f"⚠️ DEBUG: HAS_MARKETAUX = {HAS_MARKETAUX if 'HAS_MARKETAUX' in dir() else 'UNDEFINED'}")
                 print(f"⚠️ DEBUG: config.marketaux_api_key = {bool(self.config.marketaux_api_key)}")
-            
-            # 3. Finnhub API (60 req/min) - TERTIARY
+
             if self.finnhub_collector:
-                finnhub_items = self._collect_from_finnhub(
-                    ticker_symbol, lookback_hours, sentiment_analyzer
-                )
-                all_news.extend(finnhub_items)
-                print(f"  📰 Finnhub: {len(finnhub_items)} articles")
+                source_tasks['finnhub'] = lambda: self._collect_from_finnhub(ticker_symbol, lookback_hours, sentiment_analyzer)
+
+            if source_tasks:
+                with ThreadPoolExecutor(max_workers=len(source_tasks)) as src_executor:
+                    src_futures = {src_executor.submit(fn): name for name, fn in source_tasks.items()}
+                    for future in as_completed(src_futures):
+                        source_name = src_futures[future]
+                        try:
+                            items = future.result()
+                            all_news.extend(items)
+                            print(f"  📰 {source_name.capitalize()}: {len(items)} articles")
+                        except Exception as e:
+                            print(f"  ⚠️ {source_name} failed: {e}")
         
         # ===== HUNGARIAN TICKERS: Only Hungarian sources =====
         # Skip English APIs - not relevant for BÉT stocks

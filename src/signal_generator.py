@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, asdict
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -177,11 +178,9 @@ class SignalGenerator:
         Returns:
             TradingSignal object
         """
-        # ===== CRITICAL: RELOAD CONFIG =====
+        # ===== CONFIG =====
         from src.config import get_config
         self.config = get_config()
-        if hasattr(self.config, 'reload'):
-            self.config.reload()
         
         # ===== EXTRACT COMPONENT SCORES =====
         sentiment_score = sentiment_data.get("weighted_avg", 0) * 100  # -100 to +100
@@ -640,11 +639,9 @@ class SignalGenerator:
         if decision == "HOLD" or current_price is None:
             return None, None, None, None, None, None
 
-        # ===== RELOAD CONFIG FOR DYNAMIC PARAMETERS =====
+        # ===== CONFIG =====
         from src.config import get_config
         config = get_config()
-        if hasattr(config, 'reload'):
-            config.reload()
 
         # ===== INPUT DATA =====
         atr = technical_data.get("atr", current_price * 0.02)
@@ -1154,26 +1151,36 @@ def generate_signals_for_tickers(
     sentiment_data_dict: Dict,
     technical_data_dict: Dict,
     config=None,
-    db=None  # Database session for saving indicators
+    db=None  # Database session (not used per-thread; each thread creates its own)
 ) -> List[TradingSignal]:
     """
-    Generate signals for multiple tickers with ROBUST error handling
+    Generate signals for multiple tickers in PARALLEL with ROBUST error handling.
+    Each ticker runs in its own thread with its own DB session and SignalGenerator instance.
     """
-    generator = SignalGenerator(config)
-    signals = []
-    
-    for ticker in tickers:
+    try:
+        from src.database import SessionLocal as _SL
+        _has_database = True
+    except Exception:
         try:
-            ticker_symbol = ticker['symbol']
-            ticker_name = ticker.get('name', ticker_symbol)
-            
+            from database import SessionLocal as _SL
+            _has_database = True
+        except Exception:
+            _SL = None
+            _has_database = False
+
+    def _process_one_ticker(ticker: Dict) -> Optional[TradingSignal]:
+        ticker_symbol = ticker['symbol']
+        ticker_name = ticker.get('name', ticker_symbol)
+
+        db_thread = _SL() if _has_database else None
+        try:
             print(f"\n{'='*60}")
             print(f"Generating signal for {ticker_symbol}...")
             print(f"{'='*60}")
-            
+
             # ===== SENTIMENT AGGREGATION =====
             sentiment_data_raw = sentiment_data_dict.get(ticker_symbol, [])
-            
+
             if isinstance(sentiment_data_raw, list) and len(sentiment_data_raw) > 0:
                 print(f"📰 [{ticker_symbol}] Aggregating {len(sentiment_data_raw)} news items...")
                 sentiment_data = aggregate_sentiment_from_news(sentiment_data_raw)
@@ -1182,19 +1189,19 @@ def generate_signals_for_tickers(
                 sentiment_data = sentiment_data_raw
             else:
                 sentiment_data = {"weighted_avg": 0, "confidence": 0.5, "key_news": [], "news_count": 0}
-            
+
             # ===== TECHNICAL CALCULATION =====
             technical_data_raw = technical_data_dict.get(ticker_symbol, {})
-            
-            # Handle multi-timeframe data (dict with 'intraday', 'trend', 'volatility', 'support_resistance', 'swing_sr')
+
+            # Handle multi-timeframe data
             if isinstance(technical_data_raw, dict) and 'intraday' in technical_data_raw:
                 df_5m = technical_data_raw['intraday']
                 df_1h = technical_data_raw.get('trend')
                 df_vol = technical_data_raw.get('volatility')
                 df_sr = technical_data_raw.get('support_resistance')
-                df_daily = technical_data_raw.get('daily')  # NEW: For ATR calculation
-                swing_sr = technical_data_raw.get('swing_sr')  # NEW: Extract swing S/R
-                
+                df_daily = technical_data_raw.get('daily')
+                swing_sr = technical_data_raw.get('swing_sr')
+
                 if df_5m is not None and len(df_5m) >= 50:
                     print(f"📊 [{ticker_symbol}] Calculating technical (multi-timeframe)...")
                     timeframe_info = []
@@ -1204,25 +1211,25 @@ def generate_signals_for_tickers(
                     if df_sr is not None: timeframe_info.append(f"15m: {len(df_sr)}")
                     if swing_sr is not None: timeframe_info.append(f"Swing S/R: ✅")
                     print(f"     {' | '.join(timeframe_info)}")
-                    
+
                     technical_data = calculate_technical_score(
-                        df=df_5m, 
-                        ticker_symbol=ticker_symbol, 
+                        df=df_5m,
+                        ticker_symbol=ticker_symbol,
                         df_trend=df_1h,
                         df_volatility=df_vol,
                         df_sr=df_sr,
-                        df_daily=df_daily,  # NEW: For ATR from daily data
-                        db=db  # Pass database session for saving indicators
+                        df_daily=df_daily,
+                        db=db_thread
                     )
                 else:
                     technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
                     swing_sr = None
                     print(f"  ⚠️ Insufficient intraday data")
-                    
+
             # Handle single DataFrame (backward compatibility)
             elif isinstance(technical_data_raw, pd.DataFrame) and len(technical_data_raw) > 50:
                 print(f"📊 [{ticker_symbol}] Calculating technical from {len(technical_data_raw)} candles...")
-                technical_data = calculate_technical_score(technical_data_raw, ticker_symbol, db=db)
+                technical_data = calculate_technical_score(technical_data_raw, ticker_symbol, db=db_thread)
                 swing_sr = None
             elif isinstance(technical_data_raw, dict) and 'score' in technical_data_raw:
                 technical_data = technical_data_raw
@@ -1231,19 +1238,17 @@ def generate_signals_for_tickers(
                 technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
                 swing_sr = None
                 print(f"  ⚠️ No technical data")
-            
+
             # ===== RISK CALCULATION =====
             if technical_data.get("current_price") and technical_data.get("atr_pct"):
-                # DEBUG: Show what ATR is being passed to risk calculation
                 print(f"  🔍 DEBUG: ATR passed to risk calc: {technical_data.get('atr_pct'):.2f}%")
-                
-                # NEW: Pass swing_sr to calculate_risk_score
                 risk_data = calculate_risk_score(technical_data, ticker_symbol, swing_sr=swing_sr)
             else:
                 risk_data = {"score": 0, "volatility": 2.0, "support": [], "resistance": []}
                 print(f"  ⚠️ No risk data")
-            
+
             # ===== GENERATE SIGNAL =====
+            generator = SignalGenerator(config)
             signal = generator.generate_signal(
                 ticker_symbol=ticker_symbol,
                 ticker_name=ticker_name,
@@ -1252,16 +1257,28 @@ def generate_signals_for_tickers(
                 risk_data=risk_data,
                 news_count=sentiment_data.get("news_count", 0)
             )
-            
-            signals.append(signal)
+
             print(f"✅ Signal: {signal.strength} {signal.decision}")
-            
+            return signal
+
         except Exception as e:
             logger.error(f"Error generating signal for {ticker_symbol}: {e}")
             import traceback
             traceback.print_exc()
-    
-    return signals
+            return None
+        finally:
+            if db_thread is not None:
+                db_thread.close()
+
+    MAX_WORKERS = min(9, len(tickers))
+    signals_ordered = [None] * len(tickers)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(_process_one_ticker, ticker): idx for idx, ticker in enumerate(tickers)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            signals_ordered[idx] = future.result()
+
+    return [s for s in signals_ordered if s is not None]
 
 
 # ==========================================
@@ -1688,9 +1705,7 @@ def calculate_technical_score(
         # ===== LOAD CONFIG FOR TECHNICAL WEIGHTS =====
         from src.config import get_config
         config = get_config()
-        if hasattr(config, 'reload'):
-            config.reload()
-        
+
         # ===== DETECT TREND DIRECTION =====
         sma_50_for_comparison = sma_50_value if pd.notna(sma_50_value) else current.get('sma_50')
         sma_trend_direction = 0
@@ -2114,9 +2129,10 @@ def calculate_technical_score(
                     db=db
                 )
                 
-                if tech_record and tech_record.id:
-                    result['technical_indicator_id'] = tech_record.id
-                    print(f"  💾 Technical indicators saved to DB (ID: {tech_record.id})")
+                # save_technical_indicators_to_db returns an int (record ID) or None
+                if tech_record is not None:
+                    result['technical_indicator_id'] = tech_record
+                    print(f"  💾 Technical indicators saved to DB (ID: {tech_record})")
                 
             except Exception as e:
                 print(f"  ⚠️ Could not save technical indicators to DB: {e}")
@@ -2168,8 +2184,6 @@ def calculate_risk_score(
         # Load config first so it's available throughout the function
         from src.config import get_config as _get_config
         config = _get_config()
-        if hasattr(config, 'reload'):
-            config.reload()
 
         atr_pct = technical_data.get("atr_pct", 2.0)
         current_price = technical_data["current_price"]
