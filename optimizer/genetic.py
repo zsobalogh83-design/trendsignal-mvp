@@ -18,14 +18,23 @@ v2 changes:
   - compute_fitness_for_subset() now takes score_timeline instead of trade_outcomes
   - 46-dim parameter space (added ATR SL/TP and SR blend params)
 
-Version: 2.0
+v2.1 changes (parallelisation):
+  - Fitness evaluation uses ProcessPoolExecutor with explicit 'spawn' context
+  - Spawn context avoids deadlock when launched as FastAPI subprocess (Windows)
+  - Worker processes receive shared data via pool initializer (Windows spawn-safe)
+  - Validation fitness computed every VAL_EVAL_EVERY generations (not every gen)
+
+Version: 2.1
 Date: 2026-02-24
 """
 
 import json
+import multiprocessing
+import os
 import random
 import sqlite3
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -53,6 +62,15 @@ from optimizer.parameter_space import (
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATABASE_PATH = BASE_DIR / "trendsignal.db"
 
+# How many CPU cores to use for parallel fitness evaluation.
+# Leave 1 core free for the OS / main process.
+# Override via environment variable OPTIMIZER_WORKERS if needed.
+_DEFAULT_WORKERS = max(1, os.cpu_count() - 1)
+
+# Validate fitness on the validation set every N generations.
+# Reduces validation overhead from 100× to 20× per run.
+VAL_EVAL_EVERY = 5
+
 # ---------------------------------------------------------------------------
 # DEAP setup — must be done once at module level
 # ---------------------------------------------------------------------------
@@ -62,6 +80,56 @@ if not hasattr(creator, "FitnessMax"):
     creator.create("FitnessMax", base.Fitness, weights=(1.0,))
 if not hasattr(creator, "Individual"):
     creator.create("Individual", list, fitness=creator.FitnessMax)
+
+
+# ---------------------------------------------------------------------------
+# Multiprocessing: worker-process globals + top-level evaluate function
+# ---------------------------------------------------------------------------
+
+# Module-level cache in each worker process.
+# Populated on first call via _ensure_worker_data(), then reused.
+# db_path is passed with each task (tiny string), data loaded once per worker.
+_worker_db_path: str = ""
+_worker_train_rows = None
+_worker_score_timeline = None
+
+
+def _ensure_worker_data(db_path_str: str):
+    """
+    Load train data into this worker's module-level globals on first call.
+    Subsequent calls are no-ops (data already loaded).
+    This avoids pickling the large dataset across the IPC pipe —
+    only the tiny db_path string travels with each task.
+    """
+    global _worker_db_path, _worker_train_rows, _worker_score_timeline
+    if _worker_train_rows is not None and _worker_db_path == db_path_str:
+        return  # already loaded in this worker
+    from pathlib import Path
+    from optimizer.signal_data import load_all_sim_data
+    from optimizer.fitness import split_rows
+    rows, timeline = load_all_sim_data(Path(db_path_str))
+    train, _, _ = split_rows(rows)
+    _worker_db_path      = db_path_str
+    _worker_train_rows   = train
+    _worker_score_timeline = timeline
+
+
+def _worker_evaluate(args):
+    """
+    Top-level (picklable) function run in worker processes.
+    args = (individual_list, db_path_str)
+    Loads data on first call (cached for subsequent calls in same worker).
+    Returns (fitness,) tuple as required by DEAP.
+    """
+    individual, db_path_str = args
+    _ensure_worker_data(db_path_str)
+    from optimizer.parameter_space import decode_vector
+    from optimizer.fitness import compute_fitness_for_subset
+    cfg = decode_vector(individual)
+    fitness, _ = compute_fitness_for_subset(
+        _worker_train_rows, _worker_score_timeline, cfg
+    )
+    return (fitness,)
 
 
 def _make_toolbox(
@@ -114,6 +182,7 @@ def run_optimizer(
     mutation_prob: float = 0.20,
     stop_flag_path: Optional[Path] = None,
     db_path: Path = DATABASE_PATH,
+    n_workers: Optional[int] = None,
 ) -> dict:
     """
     Run the genetic optimizer and return results.
@@ -130,6 +199,10 @@ def run_optimizer(
         If this file exists, the optimizer stops gracefully.
     db_path : Path
         SQLite database path.
+    n_workers : int, optional
+        Number of parallel worker processes for fitness evaluation.
+        Defaults to os.cpu_count() - 1 (all cores minus one).
+        Set to 1 to disable parallelism (useful for debugging).
 
     Returns
     -------
@@ -137,6 +210,10 @@ def run_optimizer(
                     generations_run, proposals (list of dicts)
     """
     t_start = time.time()
+
+    # Resolve worker count
+    n_workers = int(os.environ.get("OPTIMIZER_WORKERS", _DEFAULT_WORKERS)) \
+        if n_workers is None else max(1, n_workers)
 
     # --- Load data (v2: single pass, includes price candles for full sim) ---
     print(f"[GA] Loading signal data for run_id={run_id}...")
@@ -152,13 +229,13 @@ def run_optimizer(
     # --- Toolbox ---
     toolbox = _make_toolbox(LOWER_BOUNDS, UPPER_BOUNDS)
 
-    # Fitness evaluation function (v2: uses score_timeline, no trade_outcomes)
-    def evaluate(individual):
+    # Fallback single-process evaluate (used for baseline seed + val/test evals)
+    def evaluate_single(individual):
         cfg = decode_vector(individual)
         fitness, _ = compute_fitness_for_subset(train, score_timeline, cfg)
         return (fitness,)
 
-    toolbox.register("evaluate", evaluate)
+    toolbox.register("evaluate", evaluate_single)
 
     # --- Initialize population ---
     rng_seed = int(time.time()) % 100000
@@ -169,101 +246,129 @@ def run_optimizer(
 
     # Seed population with baseline vector (individual 0)
     pop[0][:] = list(BASELINE_VECTOR)
-    pop[0].fitness.values = evaluate(pop[0])
 
-    # Evaluate initial population
-    print(f"[GA] Evaluating initial population ({population_size} individuals)...")
-    fitnesses = list(map(toolbox.evaluate, pop[1:]))
-    for ind, fit in zip(pop[1:], fitnesses):
-        ind.fitness.values = fit
+    db_path_str = str(db_path)
+    print(f"[GA] Starting parallel fitness evaluation with {n_workers} worker(s)...")
 
-    # Hall of fame: top 3 individuals
-    hof = tools.HallOfFame(3)
-    hof.update(pop)
+    # --- Open the worker pool (stays open for the entire run) ---
+    # Explicit 'spawn' context avoids deadlock when this code runs inside a
+    # FastAPI subprocess on Windows (the default 'spawn' start method would
+    # re-import the whole module and could trigger infinite process creation
+    # without the explicit context manager approach used here).
+    spawn_ctx = multiprocessing.get_context("spawn")
+    executor = ProcessPoolExecutor(max_workers=n_workers, mp_context=spawn_ctx)
 
-    # Stats
-    stats = tools.Statistics(lambda ind: ind.fitness.values[0])
-    stats.register("best",  max)
-    stats.register("avg",   np.mean)
-    stats.register("worst", min)
+    def _par_map(individuals):
+        """Evaluate a list of individuals in parallel. Returns list of (fitness,) tuples."""
+        args = [(list(ind), db_path_str) for ind in individuals]
+        return list(executor.map(_worker_evaluate, args))
 
-    best_train_fitness = max(ind.fitness.values[0] for ind in pop)
-    best_val_fitness   = 0.0
-    generations_run    = 0
+    with executor:
 
-    print(f"[GA] Initial best fitness: {best_train_fitness:.4f}")
+        # Evaluate baseline individual in-process (no IPC overhead)
+        pop[0].fitness.values = evaluate_single(pop[0])
 
-    # --- Evolution loop ---
-    for gen in range(1, max_generations + 1):
-        generations_run = gen
-
-        # Check stop flag
-        if stop_flag_path and stop_flag_path.exists():
-            print(f"[GA] Stop flag detected at generation {gen}. Stopping.")
-            break
-
-        # Elitism: preserve top 2
-        elite = tools.selBest(pop, 2)
-        elite = [toolbox.clone(e) for e in elite]
-
-        # Select next generation
-        offspring = toolbox.select(pop, len(pop) - 2)
-        offspring = [toolbox.clone(o) for o in offspring]
-
-        # Crossover
-        for child1, child2 in zip(offspring[::2], offspring[1::2]):
-            if random.random() < crossover_prob:
-                toolbox.mate(child1, child2)
-                del child1.fitness.values
-                del child2.fitness.values
-
-        # Mutation
-        for mutant in offspring:
-            if random.random() < mutation_prob:
-                toolbox.mutate(mutant)
-                del mutant.fitness.values
-
-        # Evaluate offspring
-        invalid = [ind for ind in offspring if not ind.fitness.valid]
-        fitnesses = list(map(toolbox.evaluate, invalid))
-        for ind, fit in zip(invalid, fitnesses):
+        # Evaluate rest of initial population in parallel
+        print(f"[GA] Evaluating initial population ({population_size} individuals)...")
+        fitnesses = _par_map(pop[1:])
+        for ind, fit in zip(pop[1:], fitnesses):
             ind.fitness.values = fit
 
-        # Replace population (elitism)
-        pop[:] = elite + offspring
+        # Hall of fame: top 3 individuals
+        hof = tools.HallOfFame(3)
         hof.update(pop)
 
-        # Generation stats
-        gen_best  = max(ind.fitness.values[0] for ind in pop)
-        gen_avg   = np.mean([ind.fitness.values[0] for ind in pop])
-        gen_worst = min(ind.fitness.values[0] for ind in pop)
+        # Stats
+        stats = tools.Statistics(lambda ind: ind.fitness.values[0])
+        stats.register("best",  max)
+        stats.register("avg",   np.mean)
+        stats.register("worst", min)
 
-        # Validate best individual on validation set
-        best_ind = tools.selBest(pop, 1)[0]
-        cfg_best = decode_vector(best_ind)
-        val_fit, _ = compute_fitness_for_subset(val, score_timeline, cfg_best)
+        best_train_fitness = max(ind.fitness.values[0] for ind in pop)
+        best_val_fitness   = 0.0
+        generations_run    = 0
 
-        train_val_gap = (gen_best - val_fit) / gen_best if gen_best > 0 else 0.0
+        print(f"[GA] Initial best fitness: {best_train_fitness:.4f}")
 
-        best_train_fitness = gen_best
-        best_val_fitness   = val_fit
+        # --- Evolution loop ---
+        for gen in range(1, max_generations + 1):
+            generations_run = gen
 
-        # Write generation record to DB
-        _write_generation(
-            run_id=run_id,
-            generation=gen,
-            best_train=gen_best,
-            avg_train=gen_avg,
-            worst_train=gen_worst,
-            best_val=val_fit,
-            train_val_gap=train_val_gap,
-            db_path=db_path,
-        )
+            # Check stop flag
+            if stop_flag_path and stop_flag_path.exists():
+                print(f"[GA] Stop flag detected at generation {gen}. Stopping.")
+                break
 
-        if gen % 10 == 0 or gen <= 5:
-            print(f"[GA] Gen {gen:3d}/{max_generations}: "
-                  f"best={gen_best:.4f}  avg={gen_avg:.4f}  "
-                  f"val={val_fit:.4f}  gap={train_val_gap*100:.1f}%")
+            # Elitism: preserve top 2
+            elite = tools.selBest(pop, 2)
+            elite = [toolbox.clone(e) for e in elite]
+
+            # Select next generation
+            offspring = toolbox.select(pop, len(pop) - 2)
+            offspring = [toolbox.clone(o) for o in offspring]
+
+            # Crossover
+            for child1, child2 in zip(offspring[::2], offspring[1::2]):
+                if random.random() < crossover_prob:
+                    toolbox.mate(child1, child2)
+                    del child1.fitness.values
+                    del child2.fitness.values
+
+            # Mutation
+            for mutant in offspring:
+                if random.random() < mutation_prob:
+                    toolbox.mutate(mutant)
+                    del mutant.fitness.values
+
+            # Evaluate offspring in parallel
+            invalid = [ind for ind in offspring if not ind.fitness.valid]
+            if invalid:
+                fitnesses = _par_map(invalid)
+                for ind, fit in zip(invalid, fitnesses):
+                    ind.fitness.values = fit
+
+            # Replace population (elitism)
+            pop[:] = elite + offspring
+            hof.update(pop)
+
+            # Generation stats
+            gen_best  = max(ind.fitness.values[0] for ind in pop)
+            gen_avg   = np.mean([ind.fitness.values[0] for ind in pop])
+            gen_worst = min(ind.fitness.values[0] for ind in pop)
+
+            # Validate best individual on validation set every VAL_EVAL_EVERY gens.
+            # Between validation points, carry forward the last known val_fit.
+            if gen % VAL_EVAL_EVERY == 0 or gen == 1:
+                best_ind = tools.selBest(pop, 1)[0]
+                cfg_best = decode_vector(best_ind)
+                val_fit, _ = compute_fitness_for_subset(val, score_timeline, cfg_best)
+                best_val_fitness = val_fit
+
+            train_val_gap = (
+                (gen_best - best_val_fitness) / gen_best
+                if gen_best > 0 else 0.0
+            )
+
+            best_train_fitness = gen_best
+
+            # Write generation record to DB
+            _write_generation(
+                run_id=run_id,
+                generation=gen,
+                best_train=gen_best,
+                avg_train=gen_avg,
+                worst_train=gen_worst,
+                best_val=best_val_fitness,
+                train_val_gap=train_val_gap,
+                db_path=db_path,
+            )
+
+            if gen % 10 == 0 or gen <= 5:
+                val_marker = "" if gen % VAL_EVAL_EVERY == 0 or gen == 1 else " (cached)"
+                print(f"[GA] Gen {gen:3d}/{max_generations}: "
+                      f"best={gen_best:.4f}  avg={gen_avg:.4f}  "
+                      f"val={best_val_fitness:.4f}{val_marker}  "
+                      f"gap={train_val_gap*100:.1f}%")
 
     # --- Compute test fitness for top-3 individuals ---
     print(f"\n[GA] Evaluating top-3 candidates on test set...")
