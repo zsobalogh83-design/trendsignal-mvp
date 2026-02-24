@@ -11,8 +11,11 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
+import threading
 
 from src.config import TrendSignalConfig, get_config, USE_FINBERT
+
+_finbert_init_lock = threading.Lock()
 
 
 # ==========================================
@@ -50,9 +53,10 @@ class SentimentAnalyzer:
         
         # Use FinBERT if available and enabled
         if USE_FINBERT and _SentimentEngine is not None:
-            # Singleton pattern - share FinBERT instance across analyzers
-            if not hasattr(SentimentAnalyzer, '_finbert_instance'):
-                SentimentAnalyzer._finbert_instance = _SentimentEngine(config, ticker_symbol)
+            # Thread-safe singleton pattern - share FinBERT instance across analyzers
+            with _finbert_init_lock:
+                if not hasattr(SentimentAnalyzer, '_finbert_instance'):
+                    SentimentAnalyzer._finbert_instance = _SentimentEngine(config, ticker_symbol)
             self.engine = SentimentAnalyzer._finbert_instance
             self.use_finbert = True
         else:

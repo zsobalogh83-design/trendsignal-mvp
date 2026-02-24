@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, List, Dict
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add src to path
 src_path = Path(__file__).parent / 'src'
@@ -270,25 +271,41 @@ def run_batch_analysis(
         news_data = {}
         price_data = {}
         
-        print("📊 Collecting data for all tickers...")
-        for ticker in tickers:
+        print("📊 Collecting data for all tickers (parallel)...")
+
+        def _fetch_ticker_data(ticker: Dict) -> tuple:
             symbol = ticker['symbol']
             name = ticker['name']
-            
-            print(f"\n  Processing {symbol}...")
-            
-            # News (with DB persistence)
-            news_items = collector.collect_news(
-                symbol, 
-                name, 
-                lookback_hours=24,
-                save_to_db=(db is not None)
-            )
-            news_data[symbol] = news_items
-            
-            # Price - DUAL TIMEFRAME (with DB caching)
-            dual_data = fetch_dual_timeframe(symbol, db=db)
-            price_data[symbol] = dual_data
+            try:
+                from database import SessionLocal as _SL
+                db_thread = _SL()
+            except Exception:
+                db_thread = None
+            try:
+                collector_thread = NewsCollector(config, db=db_thread)
+                news_items = collector_thread.collect_news(
+                    symbol,
+                    name,
+                    lookback_hours=24,
+                    save_to_db=(db_thread is not None)
+                )
+                dual_data = fetch_dual_timeframe(symbol, db=db_thread)
+                return symbol, news_items, dual_data
+            except Exception as e:
+                print(f"  ⚠️ Error fetching {symbol}: {e}")
+                return symbol, [], {}
+            finally:
+                if db_thread is not None:
+                    db_thread.close()
+
+        MAX_FETCH_WORKERS = min(9, len(tickers))
+        with ThreadPoolExecutor(max_workers=MAX_FETCH_WORKERS) as executor:
+            fetch_futures = {executor.submit(_fetch_ticker_data, t): t for t in tickers}
+            for future in as_completed(fetch_futures):
+                symbol, news_items, dual_data = future.result()
+                news_data[symbol] = news_items
+                price_data[symbol] = dual_data
+                print(f"  ✓ {symbol} data collected")
         
         print("\n" + "=" * 70)
         print("🎯 Generating signals...")

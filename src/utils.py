@@ -215,8 +215,6 @@ def fetch_dual_timeframe(
             
             # Load config for DBSCAN parameters
             config = get_config()
-            if hasattr(config, 'reload'):
-                config.reload()
             
             print(f"🔍 DEBUG: Config loaded, DBSCAN params:")
             print(f"   - lookback: {getattr(config, 'sr_dbscan_lookback', 180)}")
