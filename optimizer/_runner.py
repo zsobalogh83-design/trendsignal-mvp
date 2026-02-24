@@ -207,16 +207,17 @@ def _validate_and_save_proposals(
     result: dict,
     run_id: int,
     all_rows,
-    trade_outcomes,
+    score_timeline: dict,
     test_rows,
     db_path: Path,
 ) -> int:
     """
     Run full validation pipeline on each proposal from the GA result,
     save to config_proposals table. Returns count of saved proposals.
+    Uses v2 SignalSimRow pipeline throughout.
     """
     cfg_baseline = decode_vector(BASELINE_VECTOR)
-    baseline_pnls_test = _get_active_pnls(test_rows, trade_outcomes, cfg_baseline)
+    baseline_pnls_test = _get_active_pnls(test_rows, score_timeline, cfg_baseline)
 
     saved = 0
     for proposal in result.get("proposals", []):
@@ -226,7 +227,7 @@ def _validate_and_save_proposals(
         prop_cfg    = decode_vector(prop_vector)
 
         # --- Bootstrap ---
-        prop_pnls = _get_active_pnls(test_rows, trade_outcomes, prop_cfg)
+        prop_pnls = _get_active_pnls(test_rows, score_timeline, prop_cfg)
         boot = bootstrap_test(baseline_pnls_test, prop_pnls, n_iterations=1000)
         print(f"  Bootstrap: p={boot['p_value']:.4f}  significant={boot['significant']}")
 
@@ -234,7 +235,7 @@ def _validate_and_save_proposals(
         wf = {}
         if len(all_rows) >= 100:
             wf = walk_forward_validation(
-                all_rows, trade_outcomes, prop_cfg, cfg_baseline, n_windows=5
+                all_rows, score_timeline, prop_cfg, cfg_baseline, n_windows=5
             )
             print(f"  Walk-forward: {wf['positive_count']}/{wf['window_count']} positive  "
                   f"status={wf.get('status', '?')}")
@@ -242,7 +243,7 @@ def _validate_and_save_proposals(
             print(f"  Walk-forward: SKIP (only {len(all_rows)} rows)")
 
         # --- Regime breakdown ---
-        regime = regime_breakdown(all_rows, trade_outcomes, prop_cfg)
+        regime = regime_breakdown(all_rows, score_timeline, prop_cfg)
         for rname, rdata in regime.items():
             print(f"  Regime {rname}: PF={rdata['profit_factor']}  "
                   f"trades={rdata['trade_count']}")
@@ -287,9 +288,29 @@ def _validate_and_save_proposals(
 # Main
 # ---------------------------------------------------------------------------
 
+def _create_run_record(db_path: Path, population: int, generations: int,
+                       crossover: float, mutation: float) -> int:
+    """
+    Insert a new RUNNING record into optimization_runs and return its id.
+    Used when _runner.py is launched manually (without --run-id).
+    """
+    conn = _db(db_path)
+    cur = conn.execute("""
+        INSERT INTO optimization_runs
+            (status, population_size, max_generations, dimensions,
+             crossover_prob, mutation_prob, tournament_size)
+        VALUES ('RUNNING', ?, ?, 46, ?, ?, 3)
+    """, (population, generations, crossover, mutation))
+    run_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return run_id
+
+
 def main():
     parser = argparse.ArgumentParser(description="TrendSignal Optimizer Runner")
-    parser.add_argument("--run-id",      type=int,   required=True)
+    parser.add_argument("--run-id",      type=int,   default=None,
+                        help="DB run id (auto-created if omitted — use for manual launch)")
     parser.add_argument("--population",  type=int,   default=80)
     parser.add_argument("--generations", type=int,   default=100)
     parser.add_argument("--crossover",   type=float, default=0.70)
@@ -298,9 +319,18 @@ def main():
     parser.add_argument("--db-path",     type=str,   default=str(DATABASE_PATH))
     args = parser.parse_args()
 
-    run_id    = args.run_id
     db_path   = Path(args.db_path)
     stop_flag = Path(args.stop_flag) if args.stop_flag else None
+
+    # Auto-create DB record when launched manually (no --run-id supplied)
+    if args.run_id is None:
+        run_id = _create_run_record(
+            db_path, args.population, args.generations,
+            args.crossover, args.mutation,
+        )
+        print(f"[Runner] Created new optimization_runs record: id={run_id}")
+    else:
+        run_id = args.run_id
 
     print("=" * 60)
     print(f"TrendSignal Optimizer - run_id={run_id}")
@@ -335,14 +365,14 @@ def main():
         print(f"  Generations run:    {result['generations_run']}")
         print(f"  Proposals to save:  {len(result['proposals'])}")
 
-        # Load split data for validation (reuse the same split)
-        all_rows      = load_signal_rows(db_path)
-        trade_outcomes = load_trade_outcomes(db_path)
-        _, _, test_rows = split_rows(all_rows, trade_outcomes)
+        # Load split data for validation (reuse the same split, v2 pipeline)
+        from optimizer.signal_data import load_all_sim_data
+        all_rows, score_timeline = load_all_sim_data(db_path)
+        _, _, test_rows = split_rows(all_rows)
 
         # Validate and save proposals
         saved = _validate_and_save_proposals(
-            result, run_id, all_rows, trade_outcomes, test_rows, db_path
+            result, run_id, all_rows, score_timeline, test_rows, db_path
         )
         print(f"\n[Runner] Saved {saved} proposal(s) to config_proposals.")
 
