@@ -31,12 +31,8 @@ SIGNAL_THRESHOLD = 15.0
 # Minimum |combined_score| for opposing signal to close a trade
 OPPOSING_SIGNAL_THRESHOLD = 25.0
 
-# SL cap: dynamic, ATR%-based (replaces flat 5% cap)
-# sl_max_pct = clamp(atr_pct * SL_CAP_ATR_MULT, SL_CAP_MIN, SL_CAP_MAX)
-# At ATR%=1% → cap=2.5%  |  ATR%=2% → cap=5%  |  ATR%=4% → cap=8%
-SL_CAP_ATR_MULT = 2.5      # multiplier applied to atr_pct
-SL_CAP_MIN      = 0.03     # floor: never tighter than 3%
-SL_CAP_MAX      = 0.08     # ceiling: never wider than 8%
+# SL cannot be wider than this % of entry price
+SL_MAX_PCT = 0.05          # 5%
 
 # Minimum risk:reward ratio (enforced by pushing TP, never tightening SL)
 MIN_RISK_REWARD = 1.5
@@ -90,6 +86,14 @@ class SimConfig:
     # ATR buffer added to S/R level for SL placement (mirrors config.stop_loss_sr_buffer)
     sr_buffer_atr_mult: float = 0.3
 
+    # SHORT daytrade SL/TP multipliers (külön a LONG swing multiplierektől)
+    short_atr_stop_high_conf: float = 0.5
+    short_atr_stop_default:   float = 0.7
+    short_atr_stop_low_conf:  float = 1.0
+    short_atr_tp_low_vol:     float = 1.0
+    short_atr_tp_high_vol:    float = 1.8
+    short_sl_max_pct:         float = 0.015
+
     @classmethod
     def from_cfg(cls, cfg: dict) -> "SimConfig":
         """Extract sim-relevant params from a decoded config dict."""
@@ -107,6 +111,12 @@ class SimConfig:
             sr_resistance_soft_pct  = cfg.get("SR_RESISTANCE_SOFT_PCT",  3.0),
             sr_resistance_hard_pct  = cfg.get("SR_RESISTANCE_HARD_PCT",  6.5),
             sr_buffer_atr_mult      = cfg.get("SR_BUFFER_ATR_MULT",      0.3),
+            short_atr_stop_high_conf = cfg.get("SHORT_ATR_STOP_HIGH_CONF", 0.5),
+            short_atr_stop_default   = cfg.get("SHORT_ATR_STOP_DEFAULT",   0.7),
+            short_atr_stop_low_conf  = cfg.get("SHORT_ATR_STOP_LOW_CONF",  1.0),
+            short_atr_tp_low_vol     = cfg.get("SHORT_ATR_TP_LOW_VOL",     1.0),
+            short_atr_tp_high_vol    = cfg.get("SHORT_ATR_TP_HIGH_VOL",    1.8),
+            short_sl_max_pct         = cfg.get("SHORT_SL_MAX_PCT",         0.015),
         )
 
 
@@ -172,29 +182,52 @@ def compute_sl_tp(
 
     Returns
     -------
-    (stop_loss, take_profit, sl_method, tp_method, rr_ratio)
-      rr_ratio: raw reward/risk before any penalty — used by replay_signal()
+    (stop_loss, take_profit, sl_method, tp_method)
     """
-    # --- Confidence-adaptive SL multiplier ---
-    if confidence >= 0.75:
-        atr_sl_mult = sim_cfg.atr_stop_high_conf
-    elif confidence < 0.50:
-        atr_sl_mult = sim_cfg.atr_stop_low_conf
-    else:
-        atr_sl_mult = sim_cfg.atr_stop_default
+    # SHORT (SELL) daytrade multiplierek — szűkebb SL/TP, napi range-en belül befutható.
+    # LONG (BUY) swing multiplierek — szélesebb, multi-day range.
+    if "BUY" in decision:
+        # --- Confidence-adaptive SL multiplier (LONG swing) ---
+        if confidence >= 0.75:
+            atr_sl_mult = sim_cfg.atr_stop_high_conf
+        elif confidence < 0.50:
+            atr_sl_mult = sim_cfg.atr_stop_low_conf
+        else:
+            atr_sl_mult = sim_cfg.atr_stop_default
 
-    # --- Volatility-adaptive TP multiplier ---
-    if atr_pct < sim_cfg.vol_low_threshold:
-        atr_tp_mult = sim_cfg.atr_tp_low_vol
-    elif atr_pct > sim_cfg.vol_high_threshold:
-        atr_tp_mult = sim_cfg.atr_tp_high_vol
+        # --- Volatility-adaptive TP multiplier (LONG swing) ---
+        if atr_pct < sim_cfg.vol_low_threshold:
+            atr_tp_mult = sim_cfg.atr_tp_low_vol
+        elif atr_pct > sim_cfg.vol_high_threshold:
+            atr_tp_mult = sim_cfg.atr_tp_high_vol
+        else:
+            t = (atr_pct - sim_cfg.vol_low_threshold) / (
+                sim_cfg.vol_high_threshold - sim_cfg.vol_low_threshold
+            )
+            atr_tp_mult = sim_cfg.atr_tp_low_vol + t * (
+                sim_cfg.atr_tp_high_vol - sim_cfg.atr_tp_low_vol
+            )
     else:
-        t = (atr_pct - sim_cfg.vol_low_threshold) / (
-            sim_cfg.vol_high_threshold - sim_cfg.vol_low_threshold
-        )
-        atr_tp_mult = sim_cfg.atr_tp_low_vol + t * (
-            sim_cfg.atr_tp_high_vol - sim_cfg.atr_tp_low_vol
-        )
+        # --- Confidence-adaptive SL multiplier (SHORT daytrade) ---
+        if confidence >= 0.75:
+            atr_sl_mult = sim_cfg.short_atr_stop_high_conf
+        elif confidence < 0.50:
+            atr_sl_mult = sim_cfg.short_atr_stop_low_conf
+        else:
+            atr_sl_mult = sim_cfg.short_atr_stop_default
+
+        # --- Volatility-adaptive TP multiplier (SHORT daytrade) ---
+        if atr_pct < sim_cfg.vol_low_threshold:
+            atr_tp_mult = sim_cfg.short_atr_tp_low_vol
+        elif atr_pct > sim_cfg.vol_high_threshold:
+            atr_tp_mult = sim_cfg.short_atr_tp_high_vol
+        else:
+            t = (atr_pct - sim_cfg.vol_low_threshold) / (
+                sim_cfg.vol_high_threshold - sim_cfg.vol_low_threshold
+            )
+            atr_tp_mult = sim_cfg.short_atr_tp_low_vol + t * (
+                sim_cfg.short_atr_tp_high_vol - sim_cfg.short_atr_tp_low_vol
+            )
 
     if "BUY" in decision:
         stop_loss, sl_method = _compute_buy_sl(
@@ -211,13 +244,15 @@ def compute_sl_tp(
             entry_price, atr, atr_tp_mult, nearest_support, sim_cfg
         )
 
-    # --- Boundary enforcement: dynamic SL cap + rr_ratio computation ---
-    stop_loss, take_profit, sl_method, tp_method, rr_ratio = _enforce_sl_tp_bounds(
-        decision, entry_price, stop_loss, take_profit, sl_method, tp_method,
-        atr, atr_pct
+    # --- Boundary enforcement (mirrors signal_generator.py lines 796–833) ---
+    # SHORT daytrade: szűkebb SL cap (1.5%), LONG swing: 5%
+    sl_max_pct = sim_cfg.short_sl_max_pct if "SELL" in decision else SL_MAX_PCT
+    stop_loss, take_profit, sl_method, tp_method = _enforce_sl_tp_bounds(
+        decision, entry_price, stop_loss, take_profit, sl_method, tp_method, atr,
+        sl_max_pct=sl_max_pct,
     )
 
-    return stop_loss, take_profit, sl_method, tp_method, rr_ratio
+    return stop_loss, take_profit, sl_method, tp_method
 
 
 def _blend(
@@ -327,28 +362,12 @@ def _enforce_sl_tp_bounds(
     sl_method: str,
     tp_method: str,
     atr: float,
-    atr_pct: float,
-) -> Tuple[float, float, str, str, float]:
-    """
-    Enforce dynamic SL cap and compute raw R:R ratio.
-
-    Changes vs original:
-      - SL cap is now ATR%-based (dynamic) instead of flat 5%
-        sl_max_pct = clamp(atr_pct% * SL_CAP_ATR_MULT, SL_CAP_MIN, SL_CAP_MAX)
-      - MIN_RISK_REWARD TP push is REMOVED — R:R penalty is now applied
-        in replay_signal() on the combined score instead (softer, continuous)
-      - Returns rr_ratio as 5th element so replay_signal() can apply penalty
-
-    Returns
-    -------
-    (stop_loss, take_profit, sl_method, tp_method, rr_ratio)
-    """
-    # Step 1: Dynamic SL cap (ATR%-based)
-    sl_max_pct  = float(
-        max(SL_CAP_MIN, min(SL_CAP_MAX, (atr_pct / 100.0) * SL_CAP_ATR_MULT))
-    )
+    sl_max_pct: float = SL_MAX_PCT,
+) -> Tuple[float, float, str, str]:
+    """Enforce SL max cap and minimum R:R. Mirrors signal_generator.py lines 796-833."""
+    # Step 1: SL max cap (SHORT daytrade: short_sl_max_pct, LONG swing: SL_MAX_PCT)
     sl_max_dist = entry * sl_max_pct
-    risk        = abs(entry - stop_loss)
+    risk = abs(entry - stop_loss)
 
     if risk > sl_max_dist:
         if "BUY" in decision:
@@ -367,11 +386,22 @@ def _enforce_sl_tp_bounds(
             stop_loss = entry + risk
         sl_method = "atr_fallback"
 
-    # Step 2: Compute raw R:R ratio (no TP push — penalty handled in score layer)
-    reward   = abs(take_profit - entry)
-    rr_ratio = reward / risk if risk > 0 else 0.0
+    # Step 2: Enforce minimum R:R by pushing TP further (never tighten SL)
+    reward = abs(take_profit - entry)
+    if reward < risk * MIN_RISK_REWARD:
+        target_reward = risk * MIN_RISK_REWARD
+        if "BUY" in decision:
+            candidate_tp = entry + target_reward
+            if candidate_tp > take_profit:
+                take_profit = candidate_tp
+                tp_method = "rr_target"
+        else:
+            candidate_tp = entry - target_reward
+            if candidate_tp < take_profit:
+                take_profit = candidate_tp
+                tp_method = "rr_target"
 
-    return stop_loss, take_profit, sl_method, tp_method, rr_ratio
+    return stop_loss, take_profit, sl_method, tp_method
 
 
 # ---------------------------------------------------------------------------

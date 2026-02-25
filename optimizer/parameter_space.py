@@ -17,9 +17,8 @@ Dimension layout (0-indexed):
            Constraint: ATR_STOP_HIGH_CONF < ATR_STOP_DEFAULT < ATR_STOP_LOW_CONF
   [43-44] ATR Take-Profit multipliers, volatility-adaptive (2)
   [45]    S/R hard distance threshold for SL blending (1)
-  [46]    R:R penalty exponent (1) — controls score penalty for weak R:R trades
 
-Total: 47 dimensions
+Total: 46 dimensions
 
 Version: 2.0
 Date: 2026-02-24
@@ -210,21 +209,33 @@ PARAM_DEFS: List[ParamDef] = [
              "Max S/R distance (%) for SL blending; beyond this → pure ATR"),
 
     # ------------------------------------------------------------------
-    # Group 13: R:R Penalty Exponent  (dim 46)
-    # Controls how aggressively weak R:R signals are penalised in score.
-    # penalty = clamp(rr_ratio / MIN_RR, 0, 1) ** exponent
-    #   exp=0.5 → very lenient (square-root, barely penalises)
-    #   exp=1.0 → linear (baseline, neutral)
-    #   exp=2.0 → quadratic (moderate penalty)
-    #   exp=4.0 → strong penalty (scores drop fast below MIN_RR)
+    # Group 13: SHORT Daytrade SL/TP Multipliers  (dim 46–51)
+    # Külön a LONG swing multiplierektől — intraday range-en belül befutható TP.
+    # Constraint: SHORT_ATR_STOP_HIGH_CONF <= DEFAULT <= LOW_CONF  (enforced in decode)
+    # Constraint: SHORT_ATR_TP_LOW_VOL <= SHORT_ATR_TP_HIGH_VOL    (enforced in decode)
     # ------------------------------------------------------------------
-    ParamDef(46, "rr_penalty_exponent", "RR_PENALTY_EXPONENT",
-             0.5, 4.0, False,
-             "Exponent for R:R score penalty (1.0=linear, >1 stronger penalty)"),
+    ParamDef(46, "short_atr_stop_high_conf", "SHORT_ATR_STOP_HIGH_CONF",
+             0.3, 1.5, False,
+             "SHORT daytrade: ATR SL multiplier for high-confidence signals (>= 0.75)"),
+    ParamDef(47, "short_atr_stop_default",   "SHORT_ATR_STOP_DEFAULT",
+             0.4, 2.0, False,
+             "SHORT daytrade: ATR SL multiplier at moderate confidence"),
+    ParamDef(48, "short_atr_stop_low_conf",  "SHORT_ATR_STOP_LOW_CONF",
+             0.5, 2.5, False,
+             "SHORT daytrade: ATR SL multiplier for low-confidence signals (< 0.50)"),
+    ParamDef(49, "short_atr_tp_low_vol",     "SHORT_ATR_TP_LOW_VOL",
+             0.5, 2.5, False,
+             "SHORT daytrade: ATR TP multiplier in low-volatility regime (atr_pct < 2%)"),
+    ParamDef(50, "short_atr_tp_high_vol",    "SHORT_ATR_TP_HIGH_VOL",
+             0.8, 3.5, False,
+             "SHORT daytrade: ATR TP multiplier in high-volatility regime (atr_pct > 4%)"),
+    ParamDef(51, "short_sl_max_pct",         "SHORT_SL_MAX_PCT",
+             0.005, 0.030, False,
+             "SHORT daytrade: maximum SL width as fraction of entry price"),
 ]
 
 # Convenience: number of dimensions
-N_DIMS: int = len(PARAM_DEFS)  # 46
+N_DIMS: int = len(PARAM_DEFS)  # 52
 
 # Lower and upper bounds as numpy arrays (for DEAP initialisation)
 LOWER_BOUNDS: np.ndarray = np.array([p.low  for p in PARAM_DEFS], dtype=float)
@@ -294,8 +305,13 @@ BASELINE_VECTOR: List[float] = [
     4.0,    # 44 ATR_TP_HIGH_VOL     (atr_pct > 4%)
     # Group 12: S/R hard distance threshold
     4.0,    # 45 SR_SUPPORT_HARD_PCT
-    # Group 13: R:R penalty exponent
-    1.0,    # 46 RR_PENALTY_EXPONENT (linear baseline — neutral, no bias)
+    # Group 13: SHORT daytrade SL/TP multipliers
+    0.5,    # 46 SHORT_ATR_STOP_HIGH_CONF
+    0.7,    # 47 SHORT_ATR_STOP_DEFAULT
+    1.0,    # 48 SHORT_ATR_STOP_LOW_CONF
+    1.0,    # 49 SHORT_ATR_TP_LOW_VOL
+    1.8,    # 50 SHORT_ATR_TP_HIGH_VOL
+    0.015,  # 51 SHORT_SL_MAX_PCT
 ]
 
 assert len(BASELINE_VECTOR) == N_DIMS, \
@@ -403,6 +419,17 @@ def decode_vector(v: List[float]) -> dict:
     # ATR_TP_LOW_VOL <= ATR_TP_HIGH_VOL
     if v[43] > v[44]:
         v[43], v[44] = v[44], v[43]
+
+    # --- Group 13: SHORT daytrade SL monotone constraint ---
+    # SHORT_ATR_STOP_HIGH_CONF <= SHORT_ATR_STOP_DEFAULT <= SHORT_ATR_STOP_LOW_CONF
+    short_stops = sorted([v[46], v[47], v[48]])
+    v[46] = short_stops[0]   # smallest → high confidence (tighter stop)
+    v[47] = short_stops[1]   # middle   → default
+    v[48] = short_stops[2]   # largest  → low confidence (wider stop)
+
+    # SHORT_ATR_TP_LOW_VOL <= SHORT_ATR_TP_HIGH_VOL
+    if v[49] > v[50]:
+        v[49], v[50] = v[50], v[49]
 
     # --- Build result dict ---
     cfg = {}
