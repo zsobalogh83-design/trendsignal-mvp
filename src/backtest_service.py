@@ -229,6 +229,12 @@ class BacktestService:
 
         price_service = self.trade_manager.price_service
 
+        # LONG max hold tracking (kereskedési napokban, belépés napja = nap 1)
+        from src.config import get_config as _get_config
+        _cfg = _get_config()
+        trading_days_held = 1
+        last_counted_date = trade.entry_execution_time.date()
+
         # Check every 15 minutes
         while check_time_utc <= now_utc:
             # Skip weekends entirely - jump directly to next market open
@@ -263,8 +269,29 @@ class BacktestService:
                         )
                         return True
                 else:
+                    # LONG EOD: napszámláló növelése
+                    eod_date = check_time_utc.date()
+                    if eod_date != last_counted_date:
+                        trading_days_held += 1
+                        last_counted_date = eod_date
+
+                    # Max hold kényszerzárás
+                    if trading_days_held > _cfg.long_max_hold_days:
+                        logger.debug(
+                            f"      Exit: {trade.symbol} MAX_HOLD_LIQUIDATION "
+                            f"@ {check_time_utc} UTC (nap {trading_days_held})"
+                        )
+                        self.trade_manager.close_position(
+                            trade,
+                            exit_reason='MAX_HOLD_LIQUIDATION',
+                            exit_signal=None,
+                            trigger_time_utc=check_time_utc
+                        )
+                        return True
+
                     # LONG: nap végén price-based trailing SL igazítás
-                    self._apply_eod_trailing_sl(trade, check_time_utc)
+                    # (tighten_factor alkalmazása késői napokon)
+                    self._apply_eod_trailing_sl(trade, check_time_utc, trading_days_held)
                 check_time_utc = price_service._next_market_open_utc(check_time_utc, trade.symbol)
                 continue
 
@@ -290,7 +317,12 @@ class BacktestService:
         # Still open
         return False
     
-    def _apply_eod_trailing_sl(self, trade: SimulatedTrade, eod_time_utc: datetime) -> None:
+    def _apply_eod_trailing_sl(
+        self,
+        trade: SimulatedTrade,
+        eod_time_utc: datetime,
+        trading_days_held: int = 1,
+    ) -> None:
         """
         Nap végi price-based trailing SL igazítás LONG trade-eknél.
 
@@ -306,6 +338,8 @@ class BacktestService:
           A záróár reálisabb: azt az árat tükrözi, amelyen a piac valóban bezárt.
         - Ha a záróár az entry fölé ment → kiszámítjuk az új trailing SL-t
         - Ha ez magasabb az aktuális SL-nél → felhúzzuk (csak felfelé mozog!)
+        - trading_days_held >= long_trailing_tighten_day esetén az sl_distance_pct
+          szűkül (tighten_factor szorzóval) → agresszívabb profit lock-in a tartás vége felé
 
         Ez biztosítja, hogy az árfolyam emelkedésével a veszteség csökken, és egy hosszabb
         uptrend esetén végül nyereséggel zárhatunk.
@@ -349,6 +383,12 @@ class BacktestService:
             return
 
         sl_distance_pct = (trade.entry_price - orig_sl) / trade.entry_price
+
+        # Késői napokban szűkebb trailing SL — profit lock-in agresszívabb
+        from src.config import get_config as _get_config_tsl
+        _cfg_tsl = _get_config_tsl()
+        if trading_days_held >= _cfg_tsl.long_trailing_tighten_day:
+            sl_distance_pct *= _cfg_tsl.long_trailing_tighten_factor
 
         # Trailing SL: day_close alapján számítva
         trailing_sl = day_close * (1.0 - sl_distance_pct)

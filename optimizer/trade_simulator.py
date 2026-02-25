@@ -94,6 +94,11 @@ class SimConfig:
     short_atr_tp_high_vol:    float = 1.8
     short_sl_max_pct:         float = 0.015
 
+    # LONG trade max holding period (kereskedési napokban)
+    long_max_hold_days:           int   = 5
+    long_trailing_tighten_day:    int   = 3
+    long_trailing_tighten_factor: float = 0.6
+
     @classmethod
     def from_cfg(cls, cfg: dict) -> "SimConfig":
         """Extract sim-relevant params from a decoded config dict."""
@@ -117,6 +122,9 @@ class SimConfig:
             short_atr_tp_low_vol     = cfg.get("SHORT_ATR_TP_LOW_VOL",     1.0),
             short_atr_tp_high_vol    = cfg.get("SHORT_ATR_TP_HIGH_VOL",    1.8),
             short_sl_max_pct         = cfg.get("SHORT_SL_MAX_PCT",         0.015),
+            long_max_hold_days           = int(cfg.get("LONG_MAX_HOLD_DAYS",           5)),
+            long_trailing_tighten_day    = int(cfg.get("LONG_TRAILING_TIGHTEN_DAY",    3)),
+            long_trailing_tighten_factor = cfg.get("LONG_TRAILING_TIGHTEN_FACTOR", 0.6),
         )
 
 
@@ -418,6 +426,7 @@ def simulate_trade(
     future_candles: List[PriceCandle],  # All 5m candles after entry (pre-loaded)
     score_timeline: List[Tuple[datetime, float, Optional[float], Optional[float]]],
     # ^ [(ts, combined_score, sl, tp)] for this ticker, all time
+    sim_cfg: Optional[SimConfig] = None,
 ) -> Tuple[str, float, float]:
     """
     Walk candles to find trade exit. Mirrors backtest_service.py logic.
@@ -427,13 +436,17 @@ def simulate_trade(
       2. TP_HIT  (checked on candle high/low)
       3. OPPOSING_SIGNAL (|score| >= 25, correct direction)
       4. EOD_AUTO_LIQUIDATION  (SHORT only, at market close)
-      5. EOD trailing SL update  (LONG only)
+      5. MAX_HOLD_LIQUIDATION  (LONG only, ha trading_days_held > long_max_hold_days)
+      6. EOD trailing SL update  (LONG only, tighten_factor a késői napokon)
 
     Returns
     -------
     (exit_reason, exit_price, pnl_percent)
-    exit_reason ∈ {SL_HIT, TP_HIT, OPPOSING_SIGNAL, EOD_LIQUIDATION, NO_EXIT}
+    exit_reason ∈ {SL_HIT, TP_HIT, OPPOSING_SIGNAL, EOD_LIQUIDATION, MAX_HOLD_LIQUIDATION, NO_EXIT}
     """
+    if sim_cfg is None:
+        sim_cfg = SimConfig()
+
     if not future_candles:
         return "NO_EXIT", entry_price, 0.0
 
@@ -454,6 +467,8 @@ def simulate_trade(
     ]
 
     prev_date = None
+    trading_days_held = 1          # belépés napja = nap 1
+    last_counted_date = entry_ts.date()
 
     for candle in future_candles:
         ts = candle.timestamp
@@ -464,14 +479,28 @@ def simulate_trade(
 
         candle_date = ts.date()
 
-        # --- EOD trailing SL (LONG only) — at market close ---
+        # --- EOD trailing SL + max hold (LONG only) — at market close ---
         if direction == "LONG" and prev_date is not None and candle_date != prev_date:
+            # Napszámláló: minden új kereskedési nap +1
+            if candle_date != last_counted_date:
+                trading_days_held += 1
+                last_counted_date = candle_date
+
+            # Max hold kényszerzárás — az előző nap close-án zárunk
+            if trading_days_held > sim_cfg.long_max_hold_days:
+                exit_price = _get_day_close(future_candles, prev_date) or entry_price
+                pnl = _pnl(direction, entry_price, exit_price)
+                return "MAX_HOLD_LIQUIDATION", exit_price, pnl
+
             # Start of a new day → apply trailing SL using previous day's close
             # (We already passed the last candle of the previous day)
             current_sl = _apply_trailing_sl(
                 current_sl, initial_sl, entry_price,
                 _get_day_close(future_candles, prev_date),
                 current_tp,
+                trading_days_held=trading_days_held,
+                tighten_day=sim_cfg.long_trailing_tighten_day,
+                tighten_factor=sim_cfg.long_trailing_tighten_factor,
             )
 
         prev_date = candle_date
@@ -572,10 +601,17 @@ def _apply_trailing_sl(
     entry_price: float,
     day_close: Optional[float],
     current_tp: float,
+    trading_days_held: int = 1,
+    tighten_day: int = 3,
+    tighten_factor: float = 0.6,
 ) -> float:
     """
     Apply EOD trailing SL for LONG trades.
     Mirrors backtest_service._apply_eod_trailing_sl().
+
+    trading_days_held >= tighten_day esetén a sl_distance_pct szűkül
+    (tighten_factor szorzóval), így az SL közelebb húzódik az árhoz —
+    agresszívabb profit lock-in a tartási idő végén.
     """
     if day_close is None or day_close <= entry_price:
         return current_sl
@@ -584,6 +620,11 @@ def _apply_trailing_sl(
         return current_sl
 
     sl_distance_pct = (entry_price - initial_sl) / entry_price
+
+    # Késői napokban szűkebb trailing SL — profit lock-in agresszívabb
+    if trading_days_held >= tighten_day:
+        sl_distance_pct *= tighten_factor
+
     trailing_sl = day_close * (1.0 - sl_distance_pct)
 
     if trailing_sl <= current_sl:
