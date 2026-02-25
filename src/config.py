@@ -244,6 +244,11 @@ SHORT_ATR_TP_LOW_VOL     = 1.0    # vs LONG: 2.5 — intraday TP in calm markets
 SHORT_ATR_TP_HIGH_VOL    = 1.8    # vs LONG: 4.0 — intraday TP in volatile markets
 SHORT_SL_MAX_PCT         = 0.015  # vs LONG: 5%  — max SL cap for daytrade shorts
 
+# LONG trade max holding period (kereskedési napokban, nem naptári napokban)
+LONG_MAX_HOLD_DAYS           = 5    # kényszerzárás ennyi kereskedési nap után
+LONG_TRAILING_TIGHTEN_DAY    = 3    # ettől a naptól szűkebb trailing SL
+LONG_TRAILING_TIGHTEN_FACTOR = 0.6  # sl_distance_pct szorzója a tighten naptól
+
 # S/R Distance Thresholds (for using S/R vs ATR fallback)
 SR_SUPPORT_MAX_DISTANCE_PCT = 5.0  # Max 5% distance to use support for stop-loss
 SR_RESISTANCE_MAX_DISTANCE_PCT = 8.0  # Max 8% distance to use resistance for take-profit
@@ -741,6 +746,9 @@ class TrendSignalConfig:
     short_atr_tp_low_vol: float = SHORT_ATR_TP_LOW_VOL
     short_atr_tp_high_vol: float = SHORT_ATR_TP_HIGH_VOL
     short_sl_max_pct: float = SHORT_SL_MAX_PCT
+    long_max_hold_days: int = LONG_MAX_HOLD_DAYS
+    long_trailing_tighten_day: int = LONG_TRAILING_TIGHTEN_DAY
+    long_trailing_tighten_factor: float = LONG_TRAILING_TIGHTEN_FACTOR
     sr_support_max_distance_pct: float = SR_SUPPORT_MAX_DISTANCE_PCT
     sr_resistance_max_distance_pct: float = SR_RESISTANCE_MAX_DISTANCE_PCT
     sr_support_soft_distance_pct: float = SR_SUPPORT_SOFT_DISTANCE_PCT
@@ -913,6 +921,9 @@ class TrendSignalConfig:
             self.short_atr_tp_low_vol = saved_config.get("SHORT_ATR_TP_LOW_VOL", SHORT_ATR_TP_LOW_VOL)
             self.short_atr_tp_high_vol = saved_config.get("SHORT_ATR_TP_HIGH_VOL", SHORT_ATR_TP_HIGH_VOL)
             self.short_sl_max_pct = saved_config.get("SHORT_SL_MAX_PCT", SHORT_SL_MAX_PCT)
+            self.long_max_hold_days = saved_config.get("LONG_MAX_HOLD_DAYS", LONG_MAX_HOLD_DAYS)
+            self.long_trailing_tighten_day = saved_config.get("LONG_TRAILING_TIGHTEN_DAY", LONG_TRAILING_TIGHTEN_DAY)
+            self.long_trailing_tighten_factor = saved_config.get("LONG_TRAILING_TIGHTEN_FACTOR", LONG_TRAILING_TIGHTEN_FACTOR)
             self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
             self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
             self.sr_support_soft_distance_pct = saved_config.get("SR_SUPPORT_SOFT_DISTANCE_PCT", SR_SUPPORT_SOFT_DISTANCE_PCT)
@@ -1169,6 +1180,9 @@ class TrendSignalConfig:
             self.short_atr_tp_low_vol = saved_config.get("SHORT_ATR_TP_LOW_VOL", SHORT_ATR_TP_LOW_VOL)
             self.short_atr_tp_high_vol = saved_config.get("SHORT_ATR_TP_HIGH_VOL", SHORT_ATR_TP_HIGH_VOL)
             self.short_sl_max_pct = saved_config.get("SHORT_SL_MAX_PCT", SHORT_SL_MAX_PCT)
+            self.long_max_hold_days = saved_config.get("LONG_MAX_HOLD_DAYS", LONG_MAX_HOLD_DAYS)
+            self.long_trailing_tighten_day = saved_config.get("LONG_TRAILING_TIGHTEN_DAY", LONG_TRAILING_TIGHTEN_DAY)
+            self.long_trailing_tighten_factor = saved_config.get("LONG_TRAILING_TIGHTEN_FACTOR", LONG_TRAILING_TIGHTEN_FACTOR)
             self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
             self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
             self.sr_support_soft_distance_pct = saved_config.get("SR_SUPPORT_SOFT_DISTANCE_PCT", SR_SUPPORT_SOFT_DISTANCE_PCT)

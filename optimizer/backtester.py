@@ -247,24 +247,6 @@ def replay_signal(row, cfg: dict) -> ReplayResult:
     """
     Recompute the combined score for one row using the provided config dict.
     Accepts both SignalRow and SignalSimRow.
-
-    R:R penalty (v2.1):
-      After computing the raw combined score, we compute the expected R:R
-      ratio using the ATR-based SL/TP values for this row's market data.
-      A continuous penalty is applied to the score:
-
-        penalty = clamp(rr_ratio / MIN_RISK_REWARD, 0.0, 1.0) ** exponent
-        penalised_score = combined * penalty
-
-      where exponent = cfg["RR_PENALTY_EXPONENT"] (optimizable, baseline=1.0).
-
-      This means:
-        - rr_ratio >= MIN_RISK_REWARD  → penalty=1.0, score unchanged
-        - rr_ratio = 0.5 * MIN_RR     → penalty=0.5^exp (partial reduction)
-        - rr_ratio → 0                → penalty→0, score→0 (→HOLD)
-
-      The penalty only applies when ATR data is available. If ATR is missing,
-      the score passes through unchanged (safe fallback).
     """
     sentiment_score = _replay_sentiment(row, cfg)
     technical_score = _replay_technical(row, cfg)
@@ -284,39 +266,7 @@ def replay_signal(row, cfg: dict) -> ReplayResult:
         sentiment_score, technical_score, risk_score, cfg
     )
 
-    combined = base_combined + alignment_bonus
-
-    # --- R:R penalty: apply before decision ---
-    atr     = getattr(row, "atr",     None)
-    atr_pct = getattr(row, "atr_pct", None)
-
-    if atr and atr_pct and atr > 0 and combined != 0:
-        from optimizer.trade_simulator import (
-            SimConfig, compute_sl_tp, MIN_RISK_REWARD
-        )
-        sim_cfg  = SimConfig.from_cfg(cfg)
-        # Determine tentative direction for SL/TP computation
-        decision_for_rr = "BUY" if combined > 0 else "SELL"
-        entry = getattr(row, "current_price", None)
-
-        if entry and entry > 0:
-            try:
-                _, _, _, _, rr_ratio = compute_sl_tp(
-                    decision    = decision_for_rr,
-                    entry_price = entry,
-                    atr         = atr,
-                    atr_pct     = atr_pct,
-                    confidence  = getattr(row, "confidence", 0.60) or 0.60,
-                    nearest_support    = getattr(row, "nearest_support",    None),
-                    nearest_resistance = getattr(row, "nearest_resistance", None),
-                    sim_cfg     = sim_cfg,
-                )
-                exponent = cfg.get("RR_PENALTY_EXPONENT", 1.0)
-                penalty  = min(1.0, rr_ratio / MIN_RISK_REWARD) ** exponent
-                combined = combined * penalty
-            except Exception:
-                pass  # If anything fails, leave score unchanged
-
+    combined  = base_combined + alignment_bonus
     hold_zone = cfg["HOLD_ZONE_THRESHOLD"]
 
     if combined >= hold_zone:
@@ -413,7 +363,7 @@ def replay_and_simulate(
         conf    = row.confidence or 0.60
 
         try:
-            sl, tp, sl_method, tp_method, _ = compute_sl_tp(
+            sl, tp, sl_method, tp_method = compute_sl_tp(
                 decision=replay.new_decision,
                 entry_price=entry_price,
                 atr=atr,
@@ -474,6 +424,7 @@ def replay_and_simulate(
                 ticker=row.ticker,
                 future_candles=row.future_candles,
                 score_timeline=ticker_timeline,
+                sim_cfg=sim_cfg,
             )
         except Exception:
             exit_reason, exit_price, pnl = "NO_EXIT", entry_price, 0.0
