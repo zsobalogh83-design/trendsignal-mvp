@@ -17,8 +17,9 @@ Dimension layout (0-indexed):
            Constraint: ATR_STOP_HIGH_CONF < ATR_STOP_DEFAULT < ATR_STOP_LOW_CONF
   [43-44] ATR Take-Profit multipliers, volatility-adaptive (2)
   [45]    S/R hard distance threshold for SL blending (1)
+  [46]    R:R penalty exponent (1) — controls score penalty for weak R:R trades
 
-Total: 46 dimensions
+Total: 47 dimensions
 
 Version: 2.0
 Date: 2026-02-24
@@ -207,6 +208,19 @@ PARAM_DEFS: List[ParamDef] = [
     ParamDef(45, "sr_support_hard_pct", "SR_SUPPORT_HARD_PCT",
              2.0, 10.0, False,
              "Max S/R distance (%) for SL blending; beyond this → pure ATR"),
+
+    # ------------------------------------------------------------------
+    # Group 13: R:R Penalty Exponent  (dim 46)
+    # Controls how aggressively weak R:R signals are penalised in score.
+    # penalty = clamp(rr_ratio / MIN_RR, 0, 1) ** exponent
+    #   exp=0.5 → very lenient (square-root, barely penalises)
+    #   exp=1.0 → linear (baseline, neutral)
+    #   exp=2.0 → quadratic (moderate penalty)
+    #   exp=4.0 → strong penalty (scores drop fast below MIN_RR)
+    # ------------------------------------------------------------------
+    ParamDef(46, "rr_penalty_exponent", "RR_PENALTY_EXPONENT",
+             0.5, 4.0, False,
+             "Exponent for R:R score penalty (1.0=linear, >1 stronger penalty)"),
 ]
 
 # Convenience: number of dimensions
@@ -280,6 +294,8 @@ BASELINE_VECTOR: List[float] = [
     4.0,    # 44 ATR_TP_HIGH_VOL     (atr_pct > 4%)
     # Group 12: S/R hard distance threshold
     4.0,    # 45 SR_SUPPORT_HARD_PCT
+    # Group 13: R:R penalty exponent
+    1.0,    # 46 RR_PENALTY_EXPONENT (linear baseline — neutral, no bias)
 ]
 
 assert len(BASELINE_VECTOR) == N_DIMS, \

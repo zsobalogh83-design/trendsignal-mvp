@@ -213,7 +213,68 @@ class SignalGenerator:
         
         # Final combined score with alignment bonus
         combined_score = base_combined_score + alignment_bonus
-        
+
+        # ===== R:R PENALTY (score layer) =====
+        # Continuously penalise the score for poor risk:reward setups.
+        # Uses the ATR-based SL/TP under the current config to estimate the
+        # expected R:R *before* the BUY/SELL/HOLD decision is made, so that
+        # weak R:R setups naturally fade toward HOLD rather than being hard-blocked.
+        #
+        #   penalty = clamp(rr_ratio / MIN_RISK_REWARD, 0.0, 1.0) ** exponent
+        #   combined_score = combined_score * penalty
+        #
+        # exponent is config.RR_PENALTY_EXPONENT (baseline 1.0 = linear).
+        # Falls back silently (score unchanged) if ATR data is unavailable.
+        try:
+            atr_val  = technical_data.get("atr")
+            atr_pct_val = technical_data.get("atr_pct", 2.5)
+            entry_for_rr = technical_data.get("current_price")
+            if atr_val and entry_for_rr and atr_val > 0 and combined_score != 0:
+                from optimizer.trade_simulator import SimConfig as _SimConfig, compute_sl_tp as _compute_sl_tp, MIN_RISK_REWARD as _MIN_RR
+                # Build cfg dict using the same key names that SimConfig.from_cfg() reads
+                _cfg_dict = {
+                    # SL ATR multipliers (keys used by SimConfig.from_cfg)
+                    "ATR_STOP_HIGH_CONF": self.config.stop_loss_atr_high_conf,
+                    "ATR_STOP_DEFAULT":   self.config.stop_loss_atr_mult,
+                    "ATR_STOP_LOW_CONF":  self.config.stop_loss_atr_low_conf,
+                    # TP ATR multipliers
+                    "ATR_TP_LOW_VOL":     self.config.take_profit_atr_low_vol,
+                    "ATR_TP_HIGH_VOL":    self.config.take_profit_atr_high_vol,
+                    # Volatility thresholds for TP multiplier selection
+                    "VOL_LOW_THRESHOLD":  self.config.take_profit_vol_low_threshold,
+                    "VOL_HIGH_THRESHOLD": self.config.take_profit_vol_high_threshold,
+                    # S/R blend thresholds (SL)
+                    "SR_SUPPORT_SOFT_PCT": self.config.sr_support_soft_distance_pct,
+                    "SR_SUPPORT_HARD_PCT": self.config.sr_support_max_distance_pct,
+                    # S/R blend thresholds (TP)
+                    "SR_RESISTANCE_SOFT_PCT": self.config.sr_resistance_soft_distance_pct,
+                    "SR_RESISTANCE_HARD_PCT": self.config.sr_resistance_max_distance_pct,
+                    # S/R ATR buffer multiplier for SL placement
+                    "SR_BUFFER_ATR_MULT": self.config.stop_loss_sr_buffer,
+                    # Signal threshold (used for HOLD_ZONE only, not for penalty)
+                    "HOLD_ZONE_THRESHOLD": self.config.hold_zone_threshold,
+                }
+                _sim_cfg = _SimConfig.from_cfg(_cfg_dict)
+                _dir_for_rr = "BUY" if combined_score > 0 else "SELL"
+                _conf_for_rr = technical_data.get("overall_confidence", 0.60) or 0.60
+                nearest_support_rr, nearest_resistance_rr = parse_support_resistance(risk_data)
+                _, _, _, _, _rr_ratio = _compute_sl_tp(
+                    decision=_dir_for_rr,
+                    entry_price=entry_for_rr,
+                    atr=atr_val,
+                    atr_pct=atr_pct_val,
+                    confidence=_conf_for_rr,
+                    nearest_support=nearest_support_rr,
+                    nearest_resistance=nearest_resistance_rr,
+                    sim_cfg=_sim_cfg,
+                )
+                _exponent = getattr(self.config, "rr_penalty_exponent", 1.0)
+                _penalty = min(1.0, _rr_ratio / _MIN_RR) ** _exponent
+                combined_score = combined_score * _penalty
+                print(f"[{ticker_symbol}] R:R PENALTY: rr={_rr_ratio:.2f} / min={_MIN_RR} → penalty={_penalty:.3f}^{_exponent} → score={combined_score:.2f}")
+        except Exception as _e:
+            pass  # ATR not available or import error — score unchanged
+
         # Logging
         print(f"[{ticker_symbol}] Using weights: S={sentiment_weight:.2f}, T={technical_weight:.2f}, R={risk_weight:.2f}")
         print(f"[{ticker_symbol}] Scores: S={sentiment_score:.1f}, T={technical_score:.1f}, R={risk_score:.1f}")
@@ -630,11 +691,14 @@ class SignalGenerator:
         1. Confidence-adaptive ATR multiplier for SL (high conf → tighter SL)
         2. TP placed 0.5% below resistance (realistic fill, not exactly at level)
         3. Soft blend zone: S/R → ATR transition is gradual, not cliff-edge
-        4. Minimum R:R enforcement (≥1.5): if SL too wide, tighten it to meet target
-        5. Hard minimum R:R guard (≥0.8): last resort ATR TP override
+        4. Dynamic SL cap: clamp(atr_pct × SL_CAP_ATR_MULT, SL_CAP_MIN, SL_CAP_MAX)
+           replaces the flat 5% SL_MAX_PCT — wider in volatile, tighter in calm markets
+        5. R:R enforcement via score penalty (applied upstream in generate_signal),
+           NOT by pushing TP — SL and TP remain anchored to S/R and ATR levels
+        6. Fee floor: TP must cover SL distance + round-trip fees at minimum
 
-        SL method tags: 'sr' | 'atr' | 'atr_conf' | 'blended' | 'tightened'
-        TP method tags: 'sr' | 'atr' | 'blended' | 'atr_override'
+        SL method tags: 'sr' | 'atr' | 'atr_conf' | 'blended' | 'capped'
+        TP method tags: 'sr' | 'atr' | 'blended' | 'fee_floor' | 'atr_override'
         """
         if decision == "HOLD" or current_price is None:
             return None, None, None, None, None, None
@@ -795,8 +859,12 @@ class SignalGenerator:
         reward = abs(take_profit - entry_price)
         rr_ratio = reward / risk if risk > 0 else 0
 
-        # Step 1: SL max cap — never wider than SL_MAX_PCT (default 5%) from entry
-        sl_max_distance = entry_price * config.sl_max_pct
+        # Step 1: Dynamic SL cap — ATR%-based, replaces flat SL_MAX_PCT=5%
+        # sl_max_pct = clamp(atr_pct * SL_CAP_ATR_MULT / 100, SL_CAP_MIN, SL_CAP_MAX)
+        # At ATR%=1% → cap=2.5% | ATR%=2% → cap=5% | ATR%=4% → cap=8% (ceiling)
+        _sl_cap_raw = (atr_pct / 100.0) * config.sl_cap_atr_mult
+        sl_max_pct = max(config.sl_cap_min, min(config.sl_cap_max, _sl_cap_raw))
+        sl_max_distance = entry_price * sl_max_pct
         if risk > sl_max_distance:
             if "BUY" in decision:
                 stop_loss = entry_price - sl_max_distance
@@ -805,30 +873,14 @@ class SignalGenerator:
             sl_method = "capped"
             risk = abs(entry_price - stop_loss)
             rr_ratio = reward / risk if risk > 0 else 0
-            print(f"  📌 SL capped at {config.sl_max_pct*100:.1f}% max: {stop_loss:.2f} → R:R={rr_ratio:.2f}")
+            print(f"  📌 SL capped at {sl_max_pct*100:.1f}% (ATR%={atr_pct:.2f}×{config.sl_cap_atr_mult}): {stop_loss:.2f} → R:R={rr_ratio:.2f}")
 
-        # Step 2: Try to reach minimum R:R (1.5) by pushing TP further — NEVER by tightening SL
-        # This is the preferred way: move TP, not SL
-        if rr_ratio < config.min_risk_reward and risk > 0:
-            target_tp_distance = risk * config.min_risk_reward
-            if "BUY" in decision:
-                target_tp = entry_price + target_tp_distance
-                if target_tp > take_profit:  # Only push TP further, never closer
-                    take_profit = target_tp
-                    tp_method = "rr_target"
-                    reward = abs(take_profit - entry_price)
-                    rr_ratio = reward / risk if risk > 0 else 0
-                    print(f"  🎯 TP pushed to meet R:R≥{config.min_risk_reward}: {take_profit:.2f} → R:R={rr_ratio:.2f}")
-            else:
-                target_tp = entry_price - target_tp_distance
-                if target_tp < take_profit:  # Only push TP further, never closer
-                    take_profit = target_tp
-                    tp_method = "rr_target"
-                    reward = abs(take_profit - entry_price)
-                    rr_ratio = reward / risk if risk > 0 else 0
-                    print(f"  🎯 TP pushed to meet R:R≥{config.min_risk_reward}: {take_profit:.2f} → R:R={rr_ratio:.2f}")
+        # NOTE: Step 2 (TP push to enforce MIN_RISK_REWARD) has been removed.
+        # Poor R:R is now handled at the score layer via RR_PENALTY_EXPONENT,
+        # applied to combined_score before the BUY/SELL/HOLD decision.
+        # This keeps SL and TP anchored to genuine S/R or ATR levels.
 
-        # Step 3: TP minimum floor — TP must cover at least the SL range + round-trip trade fee
+        # Step 2 (now Step 3): TP minimum floor — TP must cover at least the SL range + round-trip trade fee
         # Guarantees break-even expected value even if R:R target couldn't be reached
         # i.e. TP% >= SL% + 2*fee%  (fee applied on entry value both sides)
         min_tp_distance = risk + (entry_price * config.trade_fee_pct * 2)

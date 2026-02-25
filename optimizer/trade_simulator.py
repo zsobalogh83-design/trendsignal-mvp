@@ -31,8 +31,12 @@ SIGNAL_THRESHOLD = 15.0
 # Minimum |combined_score| for opposing signal to close a trade
 OPPOSING_SIGNAL_THRESHOLD = 25.0
 
-# SL cannot be wider than this % of entry price
-SL_MAX_PCT = 0.05          # 5%
+# SL cap: dynamic, ATR%-based (replaces flat 5% cap)
+# sl_max_pct = clamp(atr_pct * SL_CAP_ATR_MULT, SL_CAP_MIN, SL_CAP_MAX)
+# At ATR%=1% → cap=2.5%  |  ATR%=2% → cap=5%  |  ATR%=4% → cap=8%
+SL_CAP_ATR_MULT = 2.5      # multiplier applied to atr_pct
+SL_CAP_MIN      = 0.03     # floor: never tighter than 3%
+SL_CAP_MAX      = 0.08     # ceiling: never wider than 8%
 
 # Minimum risk:reward ratio (enforced by pushing TP, never tightening SL)
 MIN_RISK_REWARD = 1.5
@@ -168,7 +172,8 @@ def compute_sl_tp(
 
     Returns
     -------
-    (stop_loss, take_profit, sl_method, tp_method)
+    (stop_loss, take_profit, sl_method, tp_method, rr_ratio)
+      rr_ratio: raw reward/risk before any penalty — used by replay_signal()
     """
     # --- Confidence-adaptive SL multiplier ---
     if confidence >= 0.75:
@@ -206,12 +211,13 @@ def compute_sl_tp(
             entry_price, atr, atr_tp_mult, nearest_support, sim_cfg
         )
 
-    # --- Boundary enforcement (mirrors signal_generator.py lines 796–833) ---
-    stop_loss, take_profit, sl_method, tp_method = _enforce_sl_tp_bounds(
-        decision, entry_price, stop_loss, take_profit, sl_method, tp_method, atr
+    # --- Boundary enforcement: dynamic SL cap + rr_ratio computation ---
+    stop_loss, take_profit, sl_method, tp_method, rr_ratio = _enforce_sl_tp_bounds(
+        decision, entry_price, stop_loss, take_profit, sl_method, tp_method,
+        atr, atr_pct
     )
 
-    return stop_loss, take_profit, sl_method, tp_method
+    return stop_loss, take_profit, sl_method, tp_method, rr_ratio
 
 
 def _blend(
@@ -321,11 +327,28 @@ def _enforce_sl_tp_bounds(
     sl_method: str,
     tp_method: str,
     atr: float,
-) -> Tuple[float, float, str, str]:
-    """Enforce SL max cap and minimum R:R. Mirrors signal_generator.py lines 796-833."""
-    # Step 1: SL max cap (never wider than SL_MAX_PCT from entry)
-    sl_max_dist = entry * SL_MAX_PCT
-    risk = abs(entry - stop_loss)
+    atr_pct: float,
+) -> Tuple[float, float, str, str, float]:
+    """
+    Enforce dynamic SL cap and compute raw R:R ratio.
+
+    Changes vs original:
+      - SL cap is now ATR%-based (dynamic) instead of flat 5%
+        sl_max_pct = clamp(atr_pct% * SL_CAP_ATR_MULT, SL_CAP_MIN, SL_CAP_MAX)
+      - MIN_RISK_REWARD TP push is REMOVED — R:R penalty is now applied
+        in replay_signal() on the combined score instead (softer, continuous)
+      - Returns rr_ratio as 5th element so replay_signal() can apply penalty
+
+    Returns
+    -------
+    (stop_loss, take_profit, sl_method, tp_method, rr_ratio)
+    """
+    # Step 1: Dynamic SL cap (ATR%-based)
+    sl_max_pct  = float(
+        max(SL_CAP_MIN, min(SL_CAP_MAX, (atr_pct / 100.0) * SL_CAP_ATR_MULT))
+    )
+    sl_max_dist = entry * sl_max_pct
+    risk        = abs(entry - stop_loss)
 
     if risk > sl_max_dist:
         if "BUY" in decision:
@@ -344,22 +367,11 @@ def _enforce_sl_tp_bounds(
             stop_loss = entry + risk
         sl_method = "atr_fallback"
 
-    # Step 2: Enforce minimum R:R by pushing TP further (never tighten SL)
-    reward = abs(take_profit - entry)
-    if reward < risk * MIN_RISK_REWARD:
-        target_reward = risk * MIN_RISK_REWARD
-        if "BUY" in decision:
-            candidate_tp = entry + target_reward
-            if candidate_tp > take_profit:
-                take_profit = candidate_tp
-                tp_method = "rr_target"
-        else:
-            candidate_tp = entry - target_reward
-            if candidate_tp < take_profit:
-                take_profit = candidate_tp
-                tp_method = "rr_target"
+    # Step 2: Compute raw R:R ratio (no TP push — penalty handled in score layer)
+    reward   = abs(take_profit - entry)
+    rr_ratio = reward / risk if risk > 0 else 0.0
 
-    return stop_loss, take_profit, sl_method, tp_method
+    return stop_loss, take_profit, sl_method, tp_method, rr_ratio
 
 
 # ---------------------------------------------------------------------------
