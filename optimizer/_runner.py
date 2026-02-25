@@ -299,7 +299,7 @@ def _create_run_record(db_path: Path, population: int, generations: int,
         INSERT INTO optimization_runs
             (status, population_size, max_generations, dimensions,
              crossover_prob, mutation_prob, tournament_size)
-        VALUES ('RUNNING', ?, ?, 46, ?, ?, 3)
+        VALUES ('RUNNING', ?, ?, 47, ?, ?, 3)
     """, (population, generations, crossover, mutation))
     run_id = cur.lastrowid
     conn.commit()

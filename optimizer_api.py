@@ -115,7 +115,7 @@ async def start_optimizer(req: RunRequest):
         INSERT INTO optimization_runs
             (status, population_size, max_generations, dimensions,
              crossover_prob, mutation_prob, tournament_size)
-        VALUES ('RUNNING', ?, ?, 40, ?, ?, 3)
+        VALUES ('RUNNING', ?, ?, 47, ?, ?, 3)
     """, (req.population_size, req.max_generations, req.crossover_prob, req.mutation_prob))
     run_id = cur.lastrowid
     conn.commit()
