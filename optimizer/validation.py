@@ -18,10 +18,8 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from optimizer.backtester import SignalRow, replay_all
-from optimizer.fitness import compute_fitness, compute_fitness_for_subset, MIN_TRADES
-from optimizer.trade_simulator import SIGNAL_THRESHOLD
+from optimizer.fitness import compute_fitness, SIGNAL_THRESHOLD, MIN_TRADES
 from optimizer.parameter_space import decode_vector, BASELINE_VECTOR
-from optimizer.signal_data import SignalSimRow
 
 
 # ---------------------------------------------------------------------------
@@ -37,21 +35,34 @@ def _profit_factor(pnl_list: List[float]) -> float:
 
 
 def _get_active_pnls(
-    rows: List,
-    score_timeline: dict,
+    rows: List[SignalRow],
+    trade_outcomes: Dict[int, dict],
     cfg: dict,
+    threshold: float = SIGNAL_THRESHOLD,
 ) -> List[float]:
     """
     Return list of P&L values for trades activated by this config.
-    Uses the v2 replay_and_simulate pipeline (SignalSimRow).
+    A trade is "activated" if the replayed |score| >= threshold and
+    the direction matches.
     """
-    from optimizer.backtester import replay_and_simulate
-    sim_results = replay_and_simulate(rows, score_timeline, cfg)
-    return [
-        r.pnl_percent
-        for r in sim_results
-        if r.trade_active and r.exit_reason != "NO_EXIT"
-    ]
+    results = replay_all(rows, cfg)
+    pnls = []
+    for r in results:
+        if abs(r.new_combined_score) < threshold:
+            continue
+        outcome = trade_outcomes.get(r.signal_id)
+        if outcome is None:
+            continue
+        pnl = outcome.get("pnl_percent")
+        if pnl is None:
+            continue
+        trade_dir = outcome.get("direction", "")
+        if r.new_decision == "BUY" and trade_dir == "SHORT":
+            continue
+        if r.new_decision == "SELL" and trade_dir == "LONG":
+            continue
+        pnls.append(float(pnl))
+    return pnls
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +254,8 @@ def bootstrap_test(
 # ---------------------------------------------------------------------------
 
 def walk_forward_validation(
-    rows: List,
-    score_timeline: dict,
+    rows: List[SignalRow],
+    trade_outcomes: Dict[int, dict],
     proposal_cfg: dict,
     baseline_cfg: dict,
     n_windows: int = 5,
@@ -256,8 +267,6 @@ def walk_forward_validation(
     Divides the signal rows into n_windows overlapping windows.
     In each window, the last (1 - train_ratio) fraction is the test period.
     Computes PF delta (proposal - baseline) for each window's test period.
-
-    Accepts both SignalSimRow (v2) and SignalRow (v1, legacy).
 
     Returns
     -------
@@ -277,26 +286,30 @@ def walk_forward_validation(
 
         window_rows  = rows[start:end]
         test_start   = int(len(window_rows) * train_ratio)
-        test_rows_w  = window_rows[test_start:]
+        test_rows    = window_rows[test_start:]
 
-        if len(test_rows_w) < 10:
+        if len(test_rows) < 10:
             continue
 
-        prop_fit, prop_stats = compute_fitness_for_subset(
-            test_rows_w, score_timeline, proposal_cfg, min_trades=5
+        prop_fit, prop_stats = compute_fitness(
+            replay_all(test_rows, proposal_cfg),
+            trade_outcomes,
+            min_trades=5,
         )
-        base_fit, base_stats = compute_fitness_for_subset(
-            test_rows_w, score_timeline, baseline_cfg, min_trades=5
+        base_fit, base_stats = compute_fitness(
+            replay_all(test_rows, baseline_cfg),
+            trade_outcomes,
+            min_trades=5,
         )
 
-        prop_pf  = prop_stats["profit_factor"]
-        base_pf  = base_stats["profit_factor"]
+        prop_pf = prop_stats["profit_factor"]
+        base_pf = base_stats["profit_factor"]
         pf_delta = prop_pf - base_pf
 
         windows.append({
             "window":          i + 1,
             "signal_range":    f"{rows[start].calculated_at[:10]} to {rows[end-1].calculated_at[:10]}",
-            "test_signals":    len(test_rows_w),
+            "test_signals":    len(test_rows),
             "prop_fitness":    round(prop_fit, 4),
             "base_fitness":    round(base_fit, 4),
             "prop_pf":         round(prop_pf, 4),
@@ -331,22 +344,20 @@ ATR_HIGHVOL_MIN   = 3.5  # ATR% > 3.5 → high volatility
 
 
 def regime_breakdown(
-    rows: List,
-    score_timeline: dict,
+    rows: List[SignalRow],
+    trade_outcomes: Dict[int, dict],
     cfg: dict,
 ) -> dict:
     """
     Compute fitness/PF per market regime (Trending / Sideways / High Vol).
-    Uses the v2 replay_and_simulate pipeline (SignalSimRow).
 
-    Regime detection:
-      - ATR% > 3.5 → High Volatility
+    Regime detection (from design doc):
       - ADX > 30   → Trending
       - ADX < 20   → Sideways
-      - Else        → Trending (default)
+      - ATR% > 3.5 → High Volatility (can overlap with above)
+      - Else        → Mixed (excluded from regime-specific stats)
     """
-    from optimizer.backtester import replay_and_simulate
-    sim_results = replay_and_simulate(rows, score_timeline, cfg)
+    results = replay_all(rows, cfg)
 
     buckets: Dict[str, List[float]] = {
         "trending": [],
@@ -354,14 +365,20 @@ def regime_breakdown(
         "high_vol": [],
     }
 
-    for sim, row in zip(sim_results, rows):
-        if not sim.trade_active or sim.exit_reason == "NO_EXIT":
+    for r, row in zip(results, rows):
+        if abs(r.new_combined_score) < SIGNAL_THRESHOLD:
+            continue
+        outcome = trade_outcomes.get(r.signal_id)
+        if outcome is None:
+            continue
+        pnl = outcome.get("pnl_percent")
+        if pnl is None:
             continue
 
-        adx     = getattr(row, "adx", None)
-        atr_pct = getattr(row, "atr_pct", None) or getattr(row, "volatility", None)
-        pnl     = sim.pnl_percent
+        adx = row.adx
+        atr_pct = row.volatility  # stored as ATR%
 
+        # Classify regime
         if atr_pct is not None and atr_pct >= ATR_HIGHVOL_MIN:
             buckets["high_vol"].append(float(pnl))
         elif adx is not None and adx >= ADX_TRENDING_MIN:
@@ -369,7 +386,7 @@ def regime_breakdown(
         elif adx is not None and adx < ADX_SIDEWAYS_MAX:
             buckets["sideways"].append(float(pnl))
         else:
-            buckets["trending"].append(float(pnl))
+            buckets["trending"].append(float(pnl))  # default to trending
 
     result = {}
     for regime, pnls in buckets.items():
