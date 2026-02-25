@@ -19,8 +19,7 @@ v2 changes:
   - 46-dim parameter space (added ATR SL/TP and SR blend params)
 
 v2.1 changes (parallelisation):
-  - Fitness evaluation uses ProcessPoolExecutor with explicit 'spawn' context
-  - Spawn context avoids deadlock when launched as FastAPI subprocess (Windows)
+  - Fitness evaluation uses multiprocessing.Pool (process-parallel across CPU cores)
   - Worker processes receive shared data via pool initializer (Windows spawn-safe)
   - Validation fitness computed every VAL_EVAL_EVERY generations (not every gen)
 
@@ -34,7 +33,6 @@ import os
 import random
 import sqlite3
 import time
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -83,46 +81,33 @@ if not hasattr(creator, "Individual"):
 
 
 # ---------------------------------------------------------------------------
-# Multiprocessing: worker-process globals + top-level evaluate function
+# Multiprocessing: worker-process globals + initializer
 # ---------------------------------------------------------------------------
 
-# Module-level cache in each worker process.
-# Populated on first call via _ensure_worker_data(), then reused.
-# db_path is passed with each task (tiny string), data loaded once per worker.
-_worker_db_path: str = ""
+# These are set in each worker process by _worker_init().
+# Using module-level globals is the standard Windows-safe pattern for
+# sharing large read-only data with a multiprocessing.Pool.
 _worker_train_rows = None
 _worker_score_timeline = None
 
 
-def _ensure_worker_data(db_path_str: str):
+def _worker_init(train_rows, score_timeline):
     """
-    Load train data into this worker's module-level globals on first call.
-    Subsequent calls are no-ops (data already loaded).
-    This avoids pickling the large dataset across the IPC pipe —
-    only the tiny db_path string travels with each task.
+    Called once per worker process when the Pool is created.
+    Stores the shared data in module-level globals so that
+    _worker_evaluate() can access it without pickling per-call.
     """
-    global _worker_db_path, _worker_train_rows, _worker_score_timeline
-    if _worker_train_rows is not None and _worker_db_path == db_path_str:
-        return  # already loaded in this worker
-    from pathlib import Path
-    from optimizer.signal_data import load_all_sim_data
-    from optimizer.fitness import split_rows
-    rows, timeline = load_all_sim_data(Path(db_path_str))
-    train, _, _ = split_rows(rows)
-    _worker_db_path      = db_path_str
-    _worker_train_rows   = train
-    _worker_score_timeline = timeline
+    global _worker_train_rows, _worker_score_timeline
+    _worker_train_rows    = train_rows
+    _worker_score_timeline = score_timeline
 
 
-def _worker_evaluate(args):
+def _worker_evaluate(individual):
     """
-    Top-level (picklable) function run in worker processes.
-    args = (individual_list, db_path_str)
-    Loads data on first call (cached for subsequent calls in same worker).
+    Top-level (picklable) function evaluated in worker processes.
+    Uses module-level globals set by _worker_init().
     Returns (fitness,) tuple as required by DEAP.
     """
-    individual, db_path_str = args
-    _ensure_worker_data(db_path_str)
     from optimizer.parameter_space import decode_vector
     from optimizer.fitness import compute_fitness_for_subset
     cfg = decode_vector(individual)
@@ -247,30 +232,24 @@ def run_optimizer(
     # Seed population with baseline vector (individual 0)
     pop[0][:] = list(BASELINE_VECTOR)
 
-    db_path_str = str(db_path)
     print(f"[GA] Starting parallel fitness evaluation with {n_workers} worker(s)...")
 
     # --- Open the worker pool (stays open for the entire run) ---
-    # Explicit 'spawn' context avoids deadlock when this code runs inside a
-    # FastAPI subprocess on Windows (the default 'spawn' start method would
-    # re-import the whole module and could trigger infinite process creation
-    # without the explicit context manager approach used here).
-    spawn_ctx = multiprocessing.get_context("spawn")
-    executor = ProcessPoolExecutor(max_workers=n_workers, mp_context=spawn_ctx)
+    # Windows requires the pool to be created inside an if __name__ == '__main__'
+    # guard in scripts, but since this runs as a subprocess spawned by _runner.py
+    # (which has the guard), we are safe here.
+    with multiprocessing.Pool(
+        processes=n_workers,
+        initializer=_worker_init,
+        initargs=(train, score_timeline),
+    ) as pool:
 
-    def _par_map(individuals):
-        """Evaluate a list of individuals in parallel. Returns list of (fitness,) tuples."""
-        args = [(list(ind), db_path_str) for ind in individuals]
-        return list(executor.map(_worker_evaluate, args))
-
-    with executor:
-
-        # Evaluate baseline individual in-process (no IPC overhead)
+        # Evaluate baseline individual (in-process, avoids pickling overhead)
         pop[0].fitness.values = evaluate_single(pop[0])
 
         # Evaluate rest of initial population in parallel
         print(f"[GA] Evaluating initial population ({population_size} individuals)...")
-        fitnesses = _par_map(pop[1:])
+        fitnesses = pool.map(_worker_evaluate, pop[1:])
         for ind, fit in zip(pop[1:], fitnesses):
             ind.fitness.values = fit
 
@@ -323,7 +302,7 @@ def run_optimizer(
             # Evaluate offspring in parallel
             invalid = [ind for ind in offspring if not ind.fitness.valid]
             if invalid:
-                fitnesses = _par_map(invalid)
+                fitnesses = pool.map(_worker_evaluate, invalid)
                 for ind, fit in zip(invalid, fitnesses):
                     ind.fitness.values = fit
 
