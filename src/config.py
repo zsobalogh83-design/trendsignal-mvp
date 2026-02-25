@@ -228,24 +228,21 @@ TAKE_PROFIT_VOL_LOW_THRESHOLD = 2.0   # ATR% below this → low vol regime
 TAKE_PROFIT_VOL_HIGH_THRESHOLD = 4.0  # ATR% above this → high vol regime
 
 # Minimum R:R enforcement for swing trading
-MIN_RISK_REWARD = 1.5              # Minimum acceptable R:R — used by score-layer penalty
+MIN_RISK_REWARD = 1.5              # Minimum acceptable R:R — informational only, no longer tightens SL
 MIN_RISK_REWARD_HARD = 0.8        # Hard minimum — below this signal is still valid but weak
-
-# R:R score penalty exponent
-# penalty = clamp(rr_ratio / MIN_RISK_REWARD, 0.0, 1.0) ** RR_PENALTY_EXPONENT
-# 1.0 = linear (default/neutral), >1 = stronger penalisation, <1 = softer
-RR_PENALTY_EXPONENT = 1.0
 
 # Trade fee and SL/TP boundary constraints
 TRADE_FEE_PCT = 0.002              # Round-trip trade fee: 0.2% (0.1% open + 0.1% close)
+SL_MAX_PCT = 0.05                  # Maximum stop-loss distance from entry: 5% (LONG swing)
 
-# Dynamic SL cap (ATR%-based) — replaces flat SL_MAX_PCT=5%
-# sl_max_pct = clamp(atr_pct * SL_CAP_ATR_MULT / 100, SL_CAP_MIN, SL_CAP_MAX)
-# Examples: ATR%=1% → cap=2.5% | ATR%=2% → cap=5% | ATR%=4% → cap=8% (ceiling)
-SL_CAP_ATR_MULT = 2.5             # Multiplier on atr_pct
-SL_CAP_MIN      = 0.03            # Floor: never tighter than 3%
-SL_CAP_MAX      = 0.08            # Ceiling: never wider than 8%
-SL_MAX_PCT = 0.05                  # DEPRECATED — kept for backward compatibility only
+# SHORT daytrade SL/TP multipliers (intraday — szűkebb range, EOD zárás)
+# Ezek külön a LONG swing multiplierektől, hogy a napi range-en belül befutható legyen a TP.
+SHORT_ATR_STOP_HIGH_CONF = 0.5    # vs LONG: 1.5 — tight SL for high-confidence shorts
+SHORT_ATR_STOP_DEFAULT   = 0.7    # vs LONG: 2.0 — default SHORT SL width
+SHORT_ATR_STOP_LOW_CONF  = 1.0    # vs LONG: 2.5 — wider SL for weak signals
+SHORT_ATR_TP_LOW_VOL     = 1.0    # vs LONG: 2.5 — intraday TP in calm markets
+SHORT_ATR_TP_HIGH_VOL    = 1.8    # vs LONG: 4.0 — intraday TP in volatile markets
+SHORT_SL_MAX_PCT         = 0.015  # vs LONG: 5%  — max SL cap for daytrade shorts
 
 # S/R Distance Thresholds (for using S/R vs ATR fallback)
 SR_SUPPORT_MAX_DISTANCE_PCT = 5.0  # Max 5% distance to use support for stop-loss
@@ -496,10 +493,6 @@ def save_config_to_file(config_instance):
             "STOP_LOSS_SR_BUFFER": config_instance.stop_loss_sr_buffer,
             "STOP_LOSS_ATR_MULTIPLIER": config_instance.stop_loss_atr_mult,
             "TAKE_PROFIT_ATR_MULTIPLIER": config_instance.take_profit_atr_mult,
-            "SL_CAP_ATR_MULT": config_instance.sl_cap_atr_mult,
-            "SL_CAP_MIN": config_instance.sl_cap_min,
-            "SL_CAP_MAX": config_instance.sl_cap_max,
-            "RR_PENALTY_EXPONENT": config_instance.rr_penalty_exponent,
             "SR_SUPPORT_MAX_DISTANCE_PCT": config_instance.sr_support_max_distance_pct,
             "SR_RESISTANCE_MAX_DISTANCE_PCT": config_instance.sr_resistance_max_distance_pct,
             "SR_DBSCAN_EPS": config_instance.sr_dbscan_eps,
@@ -740,12 +733,14 @@ class TrendSignalConfig:
     take_profit_sr_discount: float = TAKE_PROFIT_SR_DISCOUNT
     min_risk_reward: float = MIN_RISK_REWARD
     min_risk_reward_hard: float = MIN_RISK_REWARD_HARD
-    rr_penalty_exponent: float = RR_PENALTY_EXPONENT  # optimizable by GA, baseline 1.0
     trade_fee_pct: float = TRADE_FEE_PCT
-    sl_max_pct: float = SL_MAX_PCT                 # deprecated
-    sl_cap_atr_mult: float = SL_CAP_ATR_MULT       # dynamic SL cap multiplier
-    sl_cap_min: float = SL_CAP_MIN                 # dynamic SL cap floor
-    sl_cap_max: float = SL_CAP_MAX                 # dynamic SL cap ceiling
+    sl_max_pct: float = SL_MAX_PCT
+    short_atr_stop_high_conf: float = SHORT_ATR_STOP_HIGH_CONF
+    short_atr_stop_default: float = SHORT_ATR_STOP_DEFAULT
+    short_atr_stop_low_conf: float = SHORT_ATR_STOP_LOW_CONF
+    short_atr_tp_low_vol: float = SHORT_ATR_TP_LOW_VOL
+    short_atr_tp_high_vol: float = SHORT_ATR_TP_HIGH_VOL
+    short_sl_max_pct: float = SHORT_SL_MAX_PCT
     sr_support_max_distance_pct: float = SR_SUPPORT_MAX_DISTANCE_PCT
     sr_resistance_max_distance_pct: float = SR_RESISTANCE_MAX_DISTANCE_PCT
     sr_support_soft_distance_pct: float = SR_SUPPORT_SOFT_DISTANCE_PCT
@@ -910,12 +905,14 @@ class TrendSignalConfig:
             self.take_profit_sr_discount = saved_config.get("TAKE_PROFIT_SR_DISCOUNT", TAKE_PROFIT_SR_DISCOUNT)
             self.min_risk_reward = saved_config.get("MIN_RISK_REWARD", MIN_RISK_REWARD)
             self.min_risk_reward_hard = saved_config.get("MIN_RISK_REWARD_HARD", MIN_RISK_REWARD_HARD)
-            self.rr_penalty_exponent = saved_config.get("RR_PENALTY_EXPONENT", RR_PENALTY_EXPONENT)
             self.trade_fee_pct = saved_config.get("TRADE_FEE_PCT", TRADE_FEE_PCT)
             self.sl_max_pct = saved_config.get("SL_MAX_PCT", SL_MAX_PCT)
-            self.sl_cap_atr_mult = saved_config.get("SL_CAP_ATR_MULT", SL_CAP_ATR_MULT)
-            self.sl_cap_min = saved_config.get("SL_CAP_MIN", SL_CAP_MIN)
-            self.sl_cap_max = saved_config.get("SL_CAP_MAX", SL_CAP_MAX)
+            self.short_atr_stop_high_conf = saved_config.get("SHORT_ATR_STOP_HIGH_CONF", SHORT_ATR_STOP_HIGH_CONF)
+            self.short_atr_stop_default = saved_config.get("SHORT_ATR_STOP_DEFAULT", SHORT_ATR_STOP_DEFAULT)
+            self.short_atr_stop_low_conf = saved_config.get("SHORT_ATR_STOP_LOW_CONF", SHORT_ATR_STOP_LOW_CONF)
+            self.short_atr_tp_low_vol = saved_config.get("SHORT_ATR_TP_LOW_VOL", SHORT_ATR_TP_LOW_VOL)
+            self.short_atr_tp_high_vol = saved_config.get("SHORT_ATR_TP_HIGH_VOL", SHORT_ATR_TP_HIGH_VOL)
+            self.short_sl_max_pct = saved_config.get("SHORT_SL_MAX_PCT", SHORT_SL_MAX_PCT)
             self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
             self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
             self.sr_support_soft_distance_pct = saved_config.get("SR_SUPPORT_SOFT_DISTANCE_PCT", SR_SUPPORT_SOFT_DISTANCE_PCT)
@@ -1164,12 +1161,14 @@ class TrendSignalConfig:
             self.take_profit_sr_discount = saved_config.get("TAKE_PROFIT_SR_DISCOUNT", TAKE_PROFIT_SR_DISCOUNT)
             self.min_risk_reward = saved_config.get("MIN_RISK_REWARD", MIN_RISK_REWARD)
             self.min_risk_reward_hard = saved_config.get("MIN_RISK_REWARD_HARD", MIN_RISK_REWARD_HARD)
-            self.rr_penalty_exponent = saved_config.get("RR_PENALTY_EXPONENT", RR_PENALTY_EXPONENT)
             self.trade_fee_pct = saved_config.get("TRADE_FEE_PCT", TRADE_FEE_PCT)
             self.sl_max_pct = saved_config.get("SL_MAX_PCT", SL_MAX_PCT)
-            self.sl_cap_atr_mult = saved_config.get("SL_CAP_ATR_MULT", SL_CAP_ATR_MULT)
-            self.sl_cap_min = saved_config.get("SL_CAP_MIN", SL_CAP_MIN)
-            self.sl_cap_max = saved_config.get("SL_CAP_MAX", SL_CAP_MAX)
+            self.short_atr_stop_high_conf = saved_config.get("SHORT_ATR_STOP_HIGH_CONF", SHORT_ATR_STOP_HIGH_CONF)
+            self.short_atr_stop_default = saved_config.get("SHORT_ATR_STOP_DEFAULT", SHORT_ATR_STOP_DEFAULT)
+            self.short_atr_stop_low_conf = saved_config.get("SHORT_ATR_STOP_LOW_CONF", SHORT_ATR_STOP_LOW_CONF)
+            self.short_atr_tp_low_vol = saved_config.get("SHORT_ATR_TP_LOW_VOL", SHORT_ATR_TP_LOW_VOL)
+            self.short_atr_tp_high_vol = saved_config.get("SHORT_ATR_TP_HIGH_VOL", SHORT_ATR_TP_HIGH_VOL)
+            self.short_sl_max_pct = saved_config.get("SHORT_SL_MAX_PCT", SHORT_SL_MAX_PCT)
             self.sr_support_max_distance_pct = saved_config.get("SR_SUPPORT_MAX_DISTANCE_PCT", SR_SUPPORT_MAX_DISTANCE_PCT)
             self.sr_resistance_max_distance_pct = saved_config.get("SR_RESISTANCE_MAX_DISTANCE_PCT", SR_RESISTANCE_MAX_DISTANCE_PCT)
             self.sr_support_soft_distance_pct = saved_config.get("SR_SUPPORT_SOFT_DISTANCE_PCT", SR_SUPPORT_SOFT_DISTANCE_PCT)
