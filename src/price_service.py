@@ -234,9 +234,13 @@ class PriceService:
         logger.info(f"   ⚠️  DB miss for {symbol}, querying yfinance...")
         
         try:
-            start_time = execution_time_utc - timedelta(hours=2)
-            end_time = execution_time_utc + timedelta(hours=1)
-            
+            # Localize to UTC so yfinance.history() gets correct Unix timestamps.
+            # Naive datetimes are interpreted as local time by Python's .timestamp(),
+            # which shifts the query by the server's UTC offset (e.g. +5h on EST),
+            # landing it after market close and causing "Data doesn't exist" errors.
+            start_time = pytz.utc.localize(execution_time_utc - timedelta(hours=2))
+            end_time = pytz.utc.localize(execution_time_utc + timedelta(hours=1))
+
             ticker = yf.Ticker(symbol)
             df = ticker.history(start=start_time, end=end_time, interval="5m")
             
