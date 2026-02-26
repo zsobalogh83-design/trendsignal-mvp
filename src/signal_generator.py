@@ -270,16 +270,40 @@ class SignalGenerator:
         print(f"   Stop-Loss: ${stop_loss if stop_loss else 'None'} ({((stop_loss/entry_price-1)*100) if (entry_price and stop_loss) else 0:+.2f}%)")
         print(f"   Take-Profit: ${take_profit if take_profit else 'None'} ({((take_profit/entry_price-1)*100) if (entry_price and take_profit) else 0:+.2f}%)")
         print(f"   R:R Ratio: {rr_ratio if rr_ratio else 'None'} | SL: {sl_method} | TP: {tp_method}")
-        
+
+        # ===== R:R SCORE CORRECTION =====
+        # Small penalty if TP was mechanically pushed to meet minimum R:R (weaker natural setup).
+        # Small reward for naturally excellent R:R (signal already active, no level recalculation).
+        # No correction for HOLD signals (rr_ratio is None).
+        rr_correction = 0
+        if preliminary_decision != "HOLD" and rr_ratio is not None:
+            if tp_method == "rr_target":
+                # TP had to be pushed outward to achieve the minimum 1.5 R:R → mediocre setup
+                rr_correction = -3
+            elif rr_ratio >= 3.0:
+                rr_correction = 3
+            elif rr_ratio >= 2.5:
+                rr_correction = 2
+            elif rr_ratio >= 2.0:
+                rr_correction = 1
+
+        if rr_correction != 0:
+            combined_score += rr_correction
+            rr_str = f"{rr_ratio:.2f}" if rr_ratio is not None else "N/A"
+            print(f"[{ticker_symbol}] R:R CORRECTION: {rr_correction:+d} (tp_method={tp_method}, rr={rr_str}) → SCORE: {combined_score:.2f}")
+
+            # If correction pushes score below HOLD threshold → force HOLD, discard levels
+            if abs(combined_score) < HOLD_ZONE_THRESHOLD:
+                preliminary_decision = "HOLD"
+                entry_price = stop_loss = take_profit = rr_ratio = None
+                sl_method = tp_method = None
+                print(f"[{ticker_symbol}] ⚠️ R:R correction → score {combined_score:.2f} below ±{HOLD_ZONE_THRESHOLD} → forced HOLD")
+
         # ===== DETERMINE FINAL DECISION & STRENGTH =====
-        # Now we can use entry/exit levels to assess setup quality
+        # Classification is based purely on the final combined_score and confidence.
         decision, strength = self._determine_decision(
-            combined_score, 
-            overall_confidence,
-            entry_price=entry_price,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            rr_ratio=rr_ratio
+            combined_score,
+            overall_confidence
         )
         
         print(f"[{ticker_symbol}] DECISION: {strength} {decision} (Conf: {overall_confidence:.0%})")
@@ -313,9 +337,10 @@ class SignalGenerator:
                 }
             },
             "alignment_bonus": alignment_bonus if alignment_bonus != 0 else None,
+            "rr_correction": rr_correction if rr_correction != 0 else None,
             "levels_meta": {
                 "sl_method": sl_method,   # 'sr' | 'atr' | 'atr_conf' | 'blended' | 'tightened'
-                "tp_method": tp_method,   # 'sr' | 'atr' | 'blended' | 'atr_override'
+                "tp_method": tp_method,   # 'sr' | 'atr' | 'blended' | 'atr_override' | 'rr_target'
             } if sl_method else None
         }
         
@@ -368,10 +393,12 @@ class SignalGenerator:
                     # ✅ ADD: Risk component breakdown for UI
                     "components": risk_data.get("components", {})
                 },
-                # ✅ NEW: Alignment bonus information
+                # ✅ NEW: Alignment bonus + R:R correction information
                 "alignment": {
                     "bonus": alignment_bonus,
                     "base_score": round(base_combined_score, 2),
+                    "score_after_alignment": round(base_combined_score + alignment_bonus, 2),
+                    "rr_correction": rr_correction,
                     "final_score": round(combined_score, 2)
                 }
             }
@@ -496,125 +523,60 @@ class SignalGenerator:
             return 0
     
     def _determine_decision(
-        self, 
-        combined_score: float, 
-        confidence: float,
-        entry_price: Optional[float] = None,
-        stop_loss: Optional[float] = None,
-        take_profit: Optional[float] = None,
-        rr_ratio: Optional[float] = None
+        self,
+        combined_score: float,
+        confidence: float
     ) -> Tuple[str, str]:
         """
-        Determine BUY/SELL/HOLD decision using DYNAMIC thresholds
-        AND swing trading setup quality assessment
-        
-        Strength levels consider:
-        1. Combined score (sentiment + technical + risk)
-        2. Confidence level
-        3. Setup quality (S/R distances, R:R ratio) ← NEW!
-        
+        Determine BUY/SELL/HOLD decision and strength using score + confidence thresholds.
+
+        Classification is based purely on the final combined_score (which already includes
+        alignment bonus and R:R correction) and the overall confidence level.
+
+        Thresholds (from config):
+          STRONG BUY:   score >= STRONG_BUY_SCORE  AND conf >= STRONG_BUY_CONFIDENCE
+          MODERATE BUY: score >= MODERATE_BUY_SCORE AND conf >= MODERATE_BUY_CONFIDENCE
+          WEAK BUY:     HOLD_ZONE <= score < MODERATE_BUY_SCORE
+          HOLD:         -HOLD_ZONE < score < HOLD_ZONE
+          WEAK SELL:    MODERATE_SELL_SCORE < score <= -HOLD_ZONE
+          MODERATE SELL:score <= MODERATE_SELL_SCORE AND conf >= MODERATE_SELL_CONFIDENCE
+          STRONG SELL:  score <= STRONG_SELL_SCORE  AND conf >= STRONG_SELL_CONFIDENCE
+
         Args:
-            combined_score: -100 to +100
+            combined_score: -100 to +100 (final, after all corrections)
             confidence: 0.0 to 1.0
-            entry_price, stop_loss, take_profit: Price levels (optional)
-            rr_ratio: Risk/Reward ratio (optional)
         """
         strong_buy_score = self.config.STRONG_BUY_SCORE
         strong_buy_conf = self.config.STRONG_BUY_CONFIDENCE
         moderate_buy_score = self.config.MODERATE_BUY_SCORE
         moderate_buy_conf = self.config.MODERATE_BUY_CONFIDENCE
-        
+
         strong_sell_score = self.config.STRONG_SELL_SCORE
         strong_sell_conf = self.config.STRONG_SELL_CONFIDENCE
         moderate_sell_score = self.config.MODERATE_SELL_SCORE
         moderate_sell_conf = self.config.MODERATE_SELL_CONFIDENCE
-        
-        # ===== SETUP QUALITY ASSESSMENT =====
-        setup_quality = "unknown"
-        
-        if entry_price and stop_loss and take_profit and rr_ratio:
-            # Calculate S/R distances
-            stop_dist_pct = abs((entry_price - stop_loss) / entry_price * 100)
-            target_dist_pct = abs((take_profit - entry_price) / entry_price * 100)
-            
-            # DEBUG: Log setup quality calculation
-            logger.info(f"Setup Quality: Stop={stop_dist_pct:.2f}%, Target={target_dist_pct:.2f}%, R:R={rr_ratio:.2f}")
-            
-            # Assess setup quality for swing trading
-            good_setup = (
-                self.config.setup_stop_min_pct <= stop_dist_pct <= self.config.setup_stop_max_pct and
-                target_dist_pct >= self.config.setup_target_min_pct and
-                rr_ratio >= self.config.min_risk_reward
-            )
 
-            poor_setup = (
-                stop_dist_pct > self.config.setup_stop_hard_max_pct or
-                target_dist_pct < self.config.setup_target_hard_min_pct or
-                rr_ratio < self.config.min_risk_reward_hard
-            )
+        HOLD_ZONE = self.config.hold_zone_threshold
 
-            if good_setup:
-                setup_quality = "good"
-                logger.info(f"✅ GOOD swing setup")
-            elif poor_setup:
-                setup_quality = "poor"
-                logger.info(f"⚠️ POOR swing setup (Stop>8% OR Target<2% OR R:R<{self.config.min_risk_reward_hard})")
-            else:
-                setup_quality = "neutral"
-                logger.info(f"⚪ NEUTRAL swing setup")
-        else:
-            logger.warning(f"⚠️ Cannot assess setup quality - missing levels (entry={entry_price}, stop={stop_loss}, target={take_profit}, rr={rr_ratio})")
-        
-        # ===== BASE DECISION (Score + Confidence) =====
-        base_decision = None
-        base_strength = None
-        
+        # ===== DECISION (Score + Confidence only) =====
         if combined_score >= strong_buy_score and confidence >= strong_buy_conf:
-            base_decision, base_strength = "BUY", "STRONG"
+            decision, strength = "BUY", "STRONG"
         elif combined_score >= moderate_buy_score and confidence >= moderate_buy_conf:
-            base_decision, base_strength = "BUY", "MODERATE"
+            decision, strength = "BUY", "MODERATE"
         elif combined_score <= strong_sell_score and confidence >= strong_sell_conf:
-            base_decision, base_strength = "SELL", "STRONG"
+            decision, strength = "SELL", "STRONG"
         elif combined_score <= moderate_sell_score and confidence >= moderate_sell_conf:
-            base_decision, base_strength = "SELL", "MODERATE"
+            decision, strength = "SELL", "MODERATE"
+        elif combined_score >= HOLD_ZONE:
+            decision, strength = "BUY", "WEAK"
+        elif combined_score <= -HOLD_ZONE:
+            decision, strength = "SELL", "WEAK"
         else:
-            # WEAK BUY/SELL or HOLD zone
-            HOLD_ZONE = self.config.hold_zone_threshold
-            
-            if combined_score >= HOLD_ZONE and combined_score < moderate_buy_score:
-                base_decision, base_strength = "BUY", "WEAK"
-            elif combined_score <= -HOLD_ZONE and combined_score > moderate_sell_score:
-                base_decision, base_strength = "SELL", "WEAK"
-            else:  # -15 < score < 15
-                base_decision, base_strength = "HOLD", "NEUTRAL"
-        
-        # ===== ADJUST STRENGTH BASED ON SETUP QUALITY =====
-        final_strength = base_strength
-        
-        logger.info(f"Base strength: {base_strength} (Score: {combined_score:.1f}, Conf: {confidence:.0%})")
-        
-        if setup_quality == "poor":
-            # Downgrade strength if setup is poor
-            if base_strength == "STRONG":
-                final_strength = "MODERATE"
-                logger.warning(f"⬇️ Downgraded STRONG → MODERATE (poor swing setup)")
-            elif base_strength == "MODERATE":
-                final_strength = "WEAK"
-                logger.warning(f"⬇️ Downgraded MODERATE → WEAK (poor swing setup)")
-            # WEAK stays WEAK
-        
-        elif setup_quality == "good" and base_strength == "MODERATE":
-            # Upgrade MODERATE → STRONG if setup is excellent AND score is strong enough
-            if combined_score >= strong_buy_score * 0.9:  # Within 10% of STRONG threshold
-                final_strength = "STRONG"
-                logger.info(f"⬆️ Upgraded MODERATE → STRONG (excellent swing setup)")
-        
-        if final_strength != base_strength:
-            logger.info(f"Final strength: {final_strength} (adjusted from {base_strength})")
-        else:
-            logger.info(f"Final strength: {final_strength} (no adjustment)")
-        
-        return base_decision, final_strength
+            decision, strength = "HOLD", "NEUTRAL"
+
+        logger.info(f"Decision: {strength} {decision} (Score: {combined_score:.1f}, Conf: {confidence:.0%})")
+
+        return decision, strength
     
     def _calculate_levels(
         self,
