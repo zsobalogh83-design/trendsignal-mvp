@@ -657,34 +657,58 @@ def _score_stochastic(stoch_k, stoch_d, is_bullish_trend, cfg: dict) -> float:
 # ---------------------------------------------------------------------------
 
 def _calculate_alignment_bonus(sentiment: float, technical: float, risk: float, cfg: dict) -> float:
+    """
+    Mirror of SignalGenerator._calculate_alignment_bonus() in src/signal_generator.py.
+
+    Pair thresholds (must match production exactly):
+      TR: |tech| > ALIGNMENT_TECH_THRESHOLD (60) AND |risk| > ALIGNMENT_RISK_THRESHOLD (40)
+      ST: |sent| > ALIGNMENT_SENT_THRESHOLD (40) AND |tech| > ALIGNMENT_SENT_THRESHOLD (40)
+          NOTE: ST uses sent_thr for the technical check, not tech_thr — see docstring.
+      SR: |sent| > ALIGNMENT_SENT_THRESHOLD (40) AND |risk| > ALIGNMENT_RISK_THRESHOLD (40)
+
+    Bonus is given only when exactly 1 or all 3 pairs are strong (count-based, not cascade).
+    Direction check: bonus is positive only if all three raw scores share the same sign.
+    """
     tech_thr  = cfg.get("ALIGNMENT_TECH_THRESHOLD", 60)
     sent_thr  = cfg.get("ALIGNMENT_SENT_THRESHOLD", 40)
+    risk_thr  = cfg.get("ALIGNMENT_RISK_THRESHOLD", 40)
     bonus_all = cfg.get("ALIGNMENT_BONUS_ALL", 8)
     bonus_tr  = cfg.get("ALIGNMENT_BONUS_TR",  5)
     bonus_st  = cfg.get("ALIGNMENT_BONUS_ST",  5)
     bonus_sr  = cfg.get("ALIGNMENT_BONUS_SR",  3)
 
-    tech_bull = technical >= tech_thr;  tech_bear = technical <= -tech_thr
-    sent_bull = sentiment >= sent_thr;  sent_bear = sentiment <= -sent_thr
-    risk_bull = risk >= 40;             risk_bear = risk <= -40
+    abs_sent = abs(sentiment)
+    abs_tech = abs(technical)
+    abs_risk = abs(risk)
 
-    if sent_bull and tech_bull and risk_bull:
-        return bonus_all
-    if tech_bull and risk_bull:
-        return bonus_tr
-    if sent_bull and tech_bull:
-        return bonus_st
-    if sent_bull and risk_bull:
-        return bonus_sr
-    if sent_bear and tech_bear and risk_bear:
-        return -bonus_all
-    if tech_bear and risk_bear:
-        return -bonus_tr
-    if sent_bear and tech_bear:
-        return -bonus_st
-    if sent_bear and risk_bear:
-        return -bonus_sr
-    return 0.0
+    # TR: tech > tech_thr (60) AND risk > risk_thr (40)
+    tr_strong = abs_tech > tech_thr and abs_risk > risk_thr
+    # ST: sent > sent_thr (40) AND tech > sent_thr (40)  ← ST uses sent_thr for tech!
+    st_strong = abs_sent > sent_thr and abs_tech > sent_thr
+    # SR: sent > sent_thr (40) AND risk > risk_thr (40)
+    sr_strong = abs_sent > sent_thr and abs_risk > risk_thr
+
+    strong_pairs = sum([tr_strong, st_strong, sr_strong])
+
+    if strong_pairs == 3:
+        bonus_magnitude = bonus_all
+    elif strong_pairs == 1:
+        if tr_strong:
+            bonus_magnitude = bonus_tr
+        elif st_strong:
+            bonus_magnitude = bonus_st
+        else:
+            bonus_magnitude = bonus_sr
+    else:
+        return 0.0  # 0 or 2 strong pairs → no bonus
+
+    # Apply direction: bonus only when all three raw scores share the same sign
+    if sentiment > 0 and technical > 0 and risk > 0:
+        return float(bonus_magnitude)
+    elif sentiment < 0 and technical < 0 and risk < 0:
+        return float(-bonus_magnitude)
+    else:
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
