@@ -275,17 +275,23 @@ class SignalGenerator:
         # Small penalty if TP was mechanically pushed to meet minimum R:R (weaker natural setup).
         # Small reward for naturally excellent R:R (signal already active, no level recalculation).
         # No correction for HOLD signals (rr_ratio is None).
+        #
+        # Direction-aware: correction always moves the score AWAY from zero for rewards
+        # and TOWARD zero for penalties, regardless of BUY (positive) or SELL (negative).
+        #   BUY  direction=+1: reward=+N, penalty=-N
+        #   SELL direction=-1: reward=-N, penalty=+N
         rr_correction = 0
         if preliminary_decision != "HOLD" and rr_ratio is not None:
+            direction = 1 if preliminary_decision == "BUY" else -1
             if tp_method == "rr_target":
                 # TP had to be pushed outward to achieve the minimum 1.5 R:R → mediocre setup
-                rr_correction = -3
+                rr_correction = -3 * direction
             elif rr_ratio >= 3.0:
-                rr_correction = 3
+                rr_correction = 3 * direction
             elif rr_ratio >= 2.5:
-                rr_correction = 2
+                rr_correction = 2 * direction
             elif rr_ratio >= 2.0:
-                rr_correction = 1
+                rr_correction = 1 * direction
 
         if rr_correction != 0:
             combined_score += rr_correction
