@@ -17,8 +17,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from optimizer.backtester import SignalRow, replay_all
-from optimizer.fitness import compute_fitness, SIGNAL_THRESHOLD, MIN_TRADES
+from optimizer.backtester import SignalSimRow, replay_and_simulate
+from optimizer.fitness import compute_fitness_for_subset, MIN_TRADES
 from optimizer.parameter_space import decode_vector, BASELINE_VECTOR
 
 
@@ -35,33 +35,20 @@ def _profit_factor(pnl_list: List[float]) -> float:
 
 
 def _get_active_pnls(
-    rows: List[SignalRow],
-    trade_outcomes: Dict[int, dict],
+    rows: List[SignalSimRow],
+    score_timeline: dict,
     cfg: dict,
-    threshold: float = SIGNAL_THRESHOLD,
 ) -> List[float]:
     """
     Return list of P&L values for trades activated by this config.
-    A trade is "activated" if the replayed |score| >= threshold and
-    the direction matches.
+    Uses full v2 trade simulation pipeline (replay_and_simulate).
     """
-    results = replay_all(rows, cfg)
+    sim_results = replay_and_simulate(rows, score_timeline, cfg)
     pnls = []
-    for r in results:
-        if abs(r.new_combined_score) < threshold:
+    for r in sim_results:
+        if not r.trade_active or r.exit_reason == "NO_EXIT":
             continue
-        outcome = trade_outcomes.get(r.signal_id)
-        if outcome is None:
-            continue
-        pnl = outcome.get("pnl_percent")
-        if pnl is None:
-            continue
-        trade_dir = outcome.get("direction", "")
-        if r.new_decision == "BUY" and trade_dir == "SHORT":
-            continue
-        if r.new_decision == "SELL" and trade_dir == "LONG":
-            continue
-        pnls.append(float(pnl))
+        pnls.append(float(r.pnl_percent))
     return pnls
 
 
@@ -254,8 +241,8 @@ def bootstrap_test(
 # ---------------------------------------------------------------------------
 
 def walk_forward_validation(
-    rows: List[SignalRow],
-    trade_outcomes: Dict[int, dict],
+    rows: List[SignalSimRow],
+    score_timeline: dict,
     proposal_cfg: dict,
     baseline_cfg: dict,
     n_windows: int = 5,
@@ -291,15 +278,11 @@ def walk_forward_validation(
         if len(test_rows) < 10:
             continue
 
-        prop_fit, prop_stats = compute_fitness(
-            replay_all(test_rows, proposal_cfg),
-            trade_outcomes,
-            min_trades=5,
+        prop_fit, prop_stats = compute_fitness_for_subset(
+            test_rows, score_timeline, proposal_cfg, min_trades=5
         )
-        base_fit, base_stats = compute_fitness(
-            replay_all(test_rows, baseline_cfg),
-            trade_outcomes,
-            min_trades=5,
+        base_fit, base_stats = compute_fitness_for_subset(
+            test_rows, score_timeline, baseline_cfg, min_trades=5
         )
 
         prop_pf = prop_stats["profit_factor"]
@@ -344,8 +327,8 @@ ATR_HIGHVOL_MIN   = 3.5  # ATR% > 3.5 → high volatility
 
 
 def regime_breakdown(
-    rows: List[SignalRow],
-    trade_outcomes: Dict[int, dict],
+    rows: List[SignalSimRow],
+    score_timeline: dict,
     cfg: dict,
 ) -> dict:
     """
@@ -357,7 +340,7 @@ def regime_breakdown(
       - ATR% > 3.5 → High Volatility (can overlap with above)
       - Else        → Mixed (excluded from regime-specific stats)
     """
-    results = replay_all(rows, cfg)
+    sim_results = replay_and_simulate(rows, score_timeline, cfg)
 
     buckets: Dict[str, List[float]] = {
         "trending": [],
@@ -365,15 +348,10 @@ def regime_breakdown(
         "high_vol": [],
     }
 
-    for r, row in zip(results, rows):
-        if abs(r.new_combined_score) < SIGNAL_THRESHOLD:
+    for r, row in zip(sim_results, rows):
+        if not r.trade_active or r.exit_reason == "NO_EXIT":
             continue
-        outcome = trade_outcomes.get(r.signal_id)
-        if outcome is None:
-            continue
-        pnl = outcome.get("pnl_percent")
-        if pnl is None:
-            continue
+        pnl = r.pnl_percent
 
         adx = row.adx
         atr_pct = row.volatility  # stored as ATR%
@@ -407,9 +385,9 @@ def regime_breakdown(
 
 def validate_proposal(
     proposal_vector: List[float],
-    rows: List[SignalRow],
-    trade_outcomes: Dict[int, dict],
-    test_rows: List[SignalRow],
+    rows: List[SignalSimRow],
+    score_timeline: dict,
+    test_rows: List[SignalSimRow],
     run_walk_forward: bool = True,
     bootstrap_iterations: int = 1000,
 ) -> dict:
@@ -423,8 +401,8 @@ def validate_proposal(
     baseline_cfg = decode_vector(BASELINE_VECTOR)
 
     # P&L lists for bootstrap
-    proposal_pnls = _get_active_pnls(test_rows, trade_outcomes, proposal_cfg)
-    baseline_pnls = _get_active_pnls(test_rows, trade_outcomes, baseline_cfg)
+    proposal_pnls = _get_active_pnls(test_rows, score_timeline, proposal_cfg)
+    baseline_pnls = _get_active_pnls(test_rows, score_timeline, baseline_cfg)
 
     # Bootstrap
     boot = bootstrap_test(baseline_pnls, proposal_pnls, bootstrap_iterations)
@@ -432,10 +410,10 @@ def validate_proposal(
     # Walk-forward
     wf = {}
     if run_walk_forward and len(rows) >= 100:
-        wf = walk_forward_validation(rows, trade_outcomes, proposal_cfg, baseline_cfg)
+        wf = walk_forward_validation(rows, score_timeline, proposal_cfg, baseline_cfg)
 
     # Regime breakdown (on full dataset for more data)
-    regime = regime_breakdown(rows, trade_outcomes, proposal_cfg)
+    regime = regime_breakdown(rows, score_timeline, proposal_cfg)
 
     return {
         "bootstrap":    boot,

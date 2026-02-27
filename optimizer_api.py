@@ -96,14 +96,47 @@ async def start_optimizer(req: RunRequest):
     """
     Start a genetic optimization run as an isolated subprocess.
     Only one run can be active at a time.
+    Stale RUNNING records (no progress for >30 min) are auto-cleared.
     """
-    # Check if already running
+    # Check if already running — auto-clear stale records
     existing = _running_run_id()
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Optimizer already running (run_id={existing}). Stop it first.",
-        )
+        conn = _db()
+        stale_row = conn.execute("""
+            SELECT id, generations_run, started_at FROM optimization_runs
+            WHERE id = ? AND status = 'RUNNING'
+        """, (existing,)).fetchone()
+        conn.close()
+
+        is_stale = False
+        if stale_row:
+            gens = stale_row["generations_run"] or 0
+            started_at_str = stale_row["started_at"]
+            try:
+                from datetime import datetime, timezone
+                started = datetime.fromisoformat(started_at_str)
+                age_minutes = (datetime.now() - started).total_seconds() / 60
+                # Stale: 0 generations after 30 min, or any run older than 8 hours
+                if (gens == 0 and age_minutes > 30) or age_minutes > 480:
+                    is_stale = True
+            except Exception:
+                is_stale = (gens == 0)  # no progress at all → stale
+
+        if is_stale:
+            conn = _db()
+            conn.execute("""
+                UPDATE optimization_runs
+                SET status = 'FAILED', completed_at = CURRENT_TIMESTAMP,
+                    error_message = 'Process crashed — auto-cleared by new run'
+                WHERE id = ?
+            """, (existing,))
+            conn.commit()
+            conn.close()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Optimizer already running (run_id={existing}). Stop it first.",
+            )
 
     # Remove stale stop flag
     if STOP_FLAG.exists():
