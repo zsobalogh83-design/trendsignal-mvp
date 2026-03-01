@@ -34,12 +34,17 @@ v2.3 changes (actual val in evolution — root-cause fix):
     mert a proxy-val ugyanabból az időperiódusból vesz mintát mint a train.
     Run 16: gen 1-ben val=0.38 (peak), gen 100-ra val=0.21-re CSÖKKENT —
     a GA aktívan rontott a val teljesítményen.
-  - Megoldás: az IGAZI val adatokat adjuk át a workereknek, és a
-    fitness = VAL_BLEND_WEIGHT × val_fit + (1 - VAL_BLEND_WEIGHT) × train_fit
-    (default: 0.5/0.5 blend). Így a GA nem tudja ignorálni a val periódust.
+  - Első kísérlet (v2.3.0): fitness = 0.5*train + 0.5*val → SIKERTELEN.
+    A GA val-overfitting-et produkált: val_fit=44.69 (2-3 degenerate trade),
+    train_fit=0.05 — a súlyozott átlag "kicserélhető": ha val nagyon magas,
+    akkor train ≈ 0 is elfogadható.
+  - Végleges megoldás (v2.3.1): fitness = min(train_fit, val_fit).
+    A minimum nem engedi trade-off-ot: mindkét halmazon jónak kell lenni.
+    Degenerate eset: val=44.69, train=0.05 → min=0.05 → nem lesz kiválasztva.
+    Normál eset: train=0.38, val=0.36 → min=0.36 → jó fitness, lesz kiválasztva.
   - A proxy-val regularizáció (PROXY_TRAIN_FRAC, REGULARIZATION_STRENGTH)
     eltávolítva — feleslegessé vált.
-  - VAL_BLEND_WEIGHT konstans (default 0.5) bevezetése.
+  - VAL_BLEND_WEIGHT konstans megtartva (dokumentációs célból, értéke irreleváns).
 
 Version: 2.3
 Date: 2026-03-01
@@ -89,13 +94,15 @@ _DEFAULT_WORKERS = max(1, os.cpu_count() - 1)
 # standalone val score (not the blended fitness used for selection).
 VAL_EVAL_EVERY = 5
 
-# Validation blend weight for the evolutionary fitness function (v2.3).
-# fitness_for_selection = VAL_BLEND_WEIGHT * val_fit + (1 - VAL_BLEND_WEIGHT) * train_fit
-# Értelmezés:
-#   0.0 → tisztán train (v2.1 viselkedés, erős overfitting)
-#   0.5 → egyenlő súly (ajánlott: a GA egyszerre optimalizál train-re és val-ra)
-#   1.0 → tisztán val (nem ajánlott, train irreleváns lenne)
-VAL_BLEND_WEIGHT: float = 0.5
+# v2.3.1: fitness = min(train_fit, val_fit)
+# A minimum függvény nem engedi a cross-exploitation-t:
+#   - Ha val nagyon magas de train alacsony → fitness alacsony (nem lesz kiválasztva)
+#   - Ha train nagyon magas de val alacsony → fitness alacsony (nem lesz kiválasztva)
+#   - Csak akkor magas a fitness, ha MINDKÉT halmazon jó a config
+# Összehasonlítás a súlyozott átlaggal (v2.3.0):
+#   0.5*train + 0.5*val esetén: train=0.05, val=44.69 → fitness=22.37 (kiválasztódik!)
+#   min(train, val) esetén:     train=0.05, val=44.69 → fitness=0.05  (nem lesz kiválasztva)
+VAL_BLEND_WEIGHT: float = 0.5  # nem használt v2.3.1-ben, csak dokumentációs célból
 
 # ---------------------------------------------------------------------------
 # DEAP setup — must be done once at module level
@@ -141,12 +148,17 @@ def _worker_evaluate(individual):
     Uses module-level globals set by _worker_init().
     Returns (fitness,) tuple as required by DEAP.
 
-    v2.3 blended fitness:
-        fitness = VAL_BLEND_WEIGHT * val_fit + (1 - VAL_BLEND_WEIGHT) * train_fit
+    v2.3.1 min-fitness:
+        fitness = min(train_fit, val_fit)
 
-    Ez biztosítja, hogy a GA az evolúció SORÁN is optimalizál a val-ra,
-    nem csak a train-re — megakadályozza, hogy a val fitness csökkenjen
-    miközben a train fitness nő (run 16-ban ez történt).
+    A minimum nem engedi cross-exploitation-t: mindkét halmazon jónak kell
+    lenni egyszerre. Nem lehet alacsony train-t "kompenzálni" magas val-lal
+    (v2.3.0 hiba) — mindkét irányban blokkol.
+
+    Példa degenerate konfig:
+        train_fit=0.05, val_fit=44.69  →  fitness=0.05  (nem kerül HoF-ba)
+    Példa kiegyensúlyozott konfig:
+        train_fit=0.38, val_fit=0.36   →  fitness=0.36  (lesz kiválasztva)
     """
     from optimizer.parameter_space import decode_vector
     from optimizer.fitness import compute_fitness_for_subset
@@ -159,7 +171,7 @@ def _worker_evaluate(individual):
         _worker_val_rows, _worker_score_timeline, cfg
     )
 
-    fitness = (1.0 - VAL_BLEND_WEIGHT) * train_fit + VAL_BLEND_WEIGHT * val_fit
+    fitness = min(train_fit, val_fit)
 
     return (fitness,)
 
@@ -261,13 +273,13 @@ def run_optimizer(
     # --- Toolbox ---
     toolbox = _make_toolbox(LOWER_BOUNDS, UPPER_BOUNDS)
 
-    # Single-process blended evaluate — same formula as _worker_evaluate.
+    # Single-process min-evaluate — same formula as _worker_evaluate (v2.3.1).
     # Used for the baseline seed individual (pop[0]) to stay consistent.
     def evaluate_single(individual):
         cfg = decode_vector(individual)
         train_fit, _ = compute_fitness_for_subset(train, score_timeline, cfg)
         val_fit,   _ = compute_fitness_for_subset(val,   score_timeline, cfg)
-        fitness = (1.0 - VAL_BLEND_WEIGHT) * train_fit + VAL_BLEND_WEIGHT * val_fit
+        fitness = min(train_fit, val_fit)
         return (fitness,)
 
     toolbox.register("evaluate", evaluate_single)
