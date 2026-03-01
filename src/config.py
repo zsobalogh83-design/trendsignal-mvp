@@ -17,8 +17,10 @@ from pathlib import Path
 # API KEYS (Environment Variables)
 # ==========================================
 
-NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
-ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")
+# DISABLED: Free tier = 1 hónapos késleltetés → kizárva a collect_news() flow-ból
+# Kulcs megmarad fizetős upgrade esetére (v2.0 stratégia)
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")  # DISABLED – free tier 24h+ delay
+ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")  # DISABLED – free tier több órás delay + 25 req/nap
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")  # GNews API (real-time, no delay)
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")  # Finnhub API (60 req/min)
 MARKETAUX_API_KEY = os.getenv("MARKETAUX_API_KEY", "")  # Marketaux API (100 req/day)
@@ -29,9 +31,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # Your Telegram chat ID
 
 # For development/testing (replace with your keys)
 if not NEWSAPI_KEY:
-    NEWSAPI_KEY = "c042824059404c8e9da37ef7cd4088b6"
+    NEWSAPI_KEY = "c042824059404c8e9da37ef7cd4088b6"  # DISABLED – csak megőrzés
 if not ALPHAVANTAGE_KEY:
-    ALPHAVANTAGE_KEY = "Q3R3ZCIBFDJI8BU9"
+    ALPHAVANTAGE_KEY = "Q3R3ZCIBFDJI8BU9"  # DISABLED – csak megőrzés
 if not GNEWS_API_KEY:
     GNEWS_API_KEY = "422e63bafec92ab1e705b47455a16ce5"
 if not FINNHUB_API_KEY:
@@ -55,6 +57,14 @@ USE_MULTILINGUAL = True  # Use multilingual model for non-English
 
 # FinBERT device
 FINBERT_DEVICE = None  # None = auto-detect (cuda if available, else cpu)
+
+
+# ==========================================
+# NEWS COLLECTION (Tier rendszer v2.0)
+# ==========================================
+
+# Minimum friss hírek száma az elmúlt 2 órában – ha kevesebb, Tier 3 (limit-korlátolt) forrás is aktivál
+MIN_FRESH_NEWS_COUNT = 3  # Ha < 3 cikk van az elmúlt 2 órában, Marketaux/GNews is bekapcsol
 
 
 # ==========================================
@@ -623,11 +633,14 @@ class TrendSignalConfig:
     """Complete configuration for TrendSignal MVP"""
     
     # API Keys
-    newsapi_key: str = NEWSAPI_KEY
-    alphavantage_key: str = ALPHAVANTAGE_KEY
+    newsapi_key: str = NEWSAPI_KEY          # DISABLED – free tier delay
+    alphavantage_key: str = ALPHAVANTAGE_KEY  # DISABLED – free tier delay
     gnews_api_key: str = GNEWS_API_KEY  # GNews API (real-time news, no 24h delay)
     finnhub_api_key: str = FINNHUB_API_KEY  # Finnhub API (60 req/min)
     marketaux_api_key: str = MARKETAUX_API_KEY  # Marketaux API (100 req/day, AI sentiment)
+
+    # News collection tier system (v2.0)
+    min_fresh_news_count: int = MIN_FRESH_NEWS_COUNT  # Tier 3 aktiválási küszöb
     
     # ✅ NEW: Telegram Bot Configuration
     telegram_bot_token: str = TELEGRAM_BOT_TOKEN
