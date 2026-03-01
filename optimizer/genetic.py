@@ -29,7 +29,19 @@ v2.2 changes (overfitting regularization):
   - PROXY_TRAIN_FRAC (default 0.75): a train utolsó 25%-a proxy-val-ként
   - split_rows: 60/20/20 → 50/30/20 (nagyobb, megbízhatóbb val szett)
 
-Version: 2.2
+v2.3 changes (actual val in evolution — root-cause fix):
+  - Diagnózis: proxy-val regularizáció nem véd az igazi overfitting ellen,
+    mert a proxy-val ugyanabból az időperiódusból vesz mintát mint a train.
+    Run 16: gen 1-ben val=0.38 (peak), gen 100-ra val=0.21-re CSÖKKENT —
+    a GA aktívan rontott a val teljesítményen.
+  - Megoldás: az IGAZI val adatokat adjuk át a workereknek, és a
+    fitness = VAL_BLEND_WEIGHT × val_fit + (1 - VAL_BLEND_WEIGHT) × train_fit
+    (default: 0.5/0.5 blend). Így a GA nem tudja ignorálni a val periódust.
+  - A proxy-val regularizáció (PROXY_TRAIN_FRAC, REGULARIZATION_STRENGTH)
+    eltávolítva — feleslegessé vált.
+  - VAL_BLEND_WEIGHT konstans (default 0.5) bevezetése.
+
+Version: 2.3
 Date: 2026-03-01
 """
 
@@ -72,19 +84,18 @@ DATABASE_PATH = BASE_DIR / "trendsignal.db"
 _DEFAULT_WORKERS = max(1, os.cpu_count() - 1)
 
 # Validate fitness on the validation set every N generations.
-# Reduces validation overhead from 100× to 20× per run.
+# In v2.3 val is evaluated for EVERY individual (part of fitness),
+# so VAL_EVAL_EVERY only controls DB/display logging of the best individual's
+# standalone val score (not the blended fitness used for selection).
 VAL_EVAL_EVERY = 5
 
-# Regularization strength (0.0 = kikapcsolt, 0.4 = ajánlott).
-# Az evolúciós szelekció során az egyedek fitness-ét csökkenti,
-# ha a train és a proxy-val közötti gap magas.
-# formula: fitness = train_fit * (1 - STRENGTH * gap)
-# gap=0% → nincs büntetés; gap=77% → ~31% büntetés (0.4 * 0.77)
-REGULARIZATION_STRENGTH: float = 0.4
-
-# A train adatok mekkora hányadát használjuk proxy-val-ként a workerekben.
-# Az utolsó (1 - PROXY_TRAIN_FRAC) * 100% lesz a proxy val.
-PROXY_TRAIN_FRAC: float = 0.75   # → 75% sub-train, 25% proxy-val
+# Validation blend weight for the evolutionary fitness function (v2.3).
+# fitness_for_selection = VAL_BLEND_WEIGHT * val_fit + (1 - VAL_BLEND_WEIGHT) * train_fit
+# Értelmezés:
+#   0.0 → tisztán train (v2.1 viselkedés, erős overfitting)
+#   0.5 → egyenlő súly (ajánlott: a GA egyszerre optimalizál train-re és val-ra)
+#   1.0 → tisztán val (nem ajánlott, train irreleváns lenne)
+VAL_BLEND_WEIGHT: float = 0.5
 
 # ---------------------------------------------------------------------------
 # DEAP setup — must be done once at module level
@@ -105,25 +116,23 @@ if not hasattr(creator, "Individual"):
 # Using module-level globals is the standard Windows-safe pattern for
 # sharing large read-only data with a multiprocessing.Pool.
 _worker_train_rows = None
+_worker_val_rows   = None   # v2.3: igazi val, nem proxy — ez kerül a fitness-be
 _worker_score_timeline = None
-_worker_proxy_val = None    # utolsó (1-PROXY_TRAIN_FRAC)*100% a train-ből, regularizációhoz
 
 
-def _worker_init(train_rows, score_timeline):
+def _worker_init(train_rows, val_rows, score_timeline):
     """
     Called once per worker process when the Pool is created.
     Stores the shared data in module-level globals so that
     _worker_evaluate() can access it without pickling per-call.
 
-    A train_rows-t felosztja proxy-train és proxy-val részre a
-    regularizációs fitness számításhoz.
+    v2.3: val_rows az igazi validációs szett (nem proxy-val a train-ből).
+    Mindkét szett bekerül a fitness számításba.
     """
-    global _worker_train_rows, _worker_score_timeline, _worker_proxy_val
+    global _worker_train_rows, _worker_val_rows, _worker_score_timeline
     _worker_train_rows     = train_rows
+    _worker_val_rows       = val_rows
     _worker_score_timeline = score_timeline
-    # Proxy-val: a train adatok utolsó (1-PROXY_TRAIN_FRAC) hányada
-    split_at = int(len(train_rows) * PROXY_TRAIN_FRAC)
-    _worker_proxy_val = train_rows[split_at:]
 
 
 def _worker_evaluate(individual):
@@ -132,34 +141,25 @@ def _worker_evaluate(individual):
     Uses module-level globals set by _worker_init().
     Returns (fitness,) tuple as required by DEAP.
 
-    Ha REGULARIZATION_STRENGTH > 0, a fitness-t csökkenti az overfitting
-    mértékével: fitness = train_fit * (1 - STRENGTH * gap)
-    ahol gap = (train_fit - proxy_val_fit) / train_fit  [0..1]
+    v2.3 blended fitness:
+        fitness = VAL_BLEND_WEIGHT * val_fit + (1 - VAL_BLEND_WEIGHT) * train_fit
 
-    A proxy val a train adatok utolsó ~25%-a — ez nem azonos a
-    tényleges val szetttel (csak az evolúció közbeni büntetéshez).
+    Ez biztosítja, hogy a GA az evolúció SORÁN is optimalizál a val-ra,
+    nem csak a train-re — megakadályozza, hogy a val fitness csökkenjen
+    miközben a train fitness nő (run 16-ban ez történt).
     """
     from optimizer.parameter_space import decode_vector
     from optimizer.fitness import compute_fitness_for_subset
     cfg = decode_vector(individual)
 
-    # Teljes train fitness (ez a "nyers" teljesítmény)
     train_fit, _ = compute_fitness_for_subset(
         _worker_train_rows, _worker_score_timeline, cfg
     )
+    val_fit, _ = compute_fitness_for_subset(
+        _worker_val_rows, _worker_score_timeline, cfg
+    )
 
-    # Regularizáció: proxy-val segítségével bünteti az overfittinget
-    if REGULARIZATION_STRENGTH > 0.0 and _worker_proxy_val:
-        val_fit, _ = compute_fitness_for_subset(
-            _worker_proxy_val, _worker_score_timeline, cfg
-        )
-        if train_fit > 0.0:
-            gap = max(0.0, (train_fit - val_fit) / train_fit)
-            fitness = train_fit * (1.0 - REGULARIZATION_STRENGTH * gap)
-        else:
-            fitness = 0.0
-    else:
-        fitness = train_fit
+    fitness = (1.0 - VAL_BLEND_WEIGHT) * train_fit + VAL_BLEND_WEIGHT * val_fit
 
     return (fitness,)
 
@@ -261,10 +261,13 @@ def run_optimizer(
     # --- Toolbox ---
     toolbox = _make_toolbox(LOWER_BOUNDS, UPPER_BOUNDS)
 
-    # Fallback single-process evaluate (used for baseline seed + val/test evals)
+    # Single-process blended evaluate — same formula as _worker_evaluate.
+    # Used for the baseline seed individual (pop[0]) to stay consistent.
     def evaluate_single(individual):
         cfg = decode_vector(individual)
-        fitness, _ = compute_fitness_for_subset(train, score_timeline, cfg)
+        train_fit, _ = compute_fitness_for_subset(train, score_timeline, cfg)
+        val_fit,   _ = compute_fitness_for_subset(val,   score_timeline, cfg)
+        fitness = (1.0 - VAL_BLEND_WEIGHT) * train_fit + VAL_BLEND_WEIGHT * val_fit
         return (fitness,)
 
     toolbox.register("evaluate", evaluate_single)
@@ -288,7 +291,7 @@ def run_optimizer(
     with multiprocessing.Pool(
         processes=n_workers,
         initializer=_worker_init,
-        initargs=(train, score_timeline),
+        initargs=(train, val, score_timeline),
     ) as pool:
 
         # Evaluate baseline individual (in-process, avoids pickling overhead)
