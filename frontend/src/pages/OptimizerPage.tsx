@@ -509,11 +509,13 @@ function RunningPanel({
   runId,
   onStop,
   stopping,
+  stopSignalSent,
 }: {
   progress: OptimizerProgress;
   runId: number;
   onStop: () => void;
   stopping: boolean;
+  stopSignalSent: boolean;
 }) {
   const gens = progress.recent_generations ?? [];
   // gens are sorted DESC from API → reverse for chart
@@ -542,13 +544,17 @@ function RunningPanel({
           </div>
           <button
             onClick={onStop}
-            disabled={stopping}
+            disabled={stopping || stopSignalSent}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-900/40
                        hover:bg-red-900/70 text-red-400 text-xs font-medium border border-red-800
                        transition-colors disabled:opacity-50"
           >
             <FiSquare className="w-3.5 h-3.5" />
-            {stopping ? 'Leállítás...' : 'Leállítás'}
+            {stopping
+              ? 'Jelzés küldése...'
+              : stopSignalSent
+                ? 'Leállítás folyamatban...'
+                : 'Leállítás'}
           </button>
         </div>
 
@@ -833,12 +839,32 @@ export function OptimizerPage() {
   // Track which proposal is being approved/rejected
   const [actingOn, setActingOn] = useState<number | null>(null);
 
+  // ---- forceIdle: visszavisz az IDLE (paraméter-konfiguráció) nézetre ----
+  const [forceIdle, setForceIdle] = useState(false);
+
+  // ---- Stop gomb: jelzés elküldve, várakozás a subprocess leállására ----
+  const [stopSignalSent, setStopSignalSent] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+
+  // Ha a futás befejeződött, reseteljük a stop state-et
+  useEffect(() => {
+    if (!isRunning) {
+      setStopSignalSent(false);
+      setStopError(null);
+    }
+  }, [isRunning]);
+
+  // Ha fut a optimizer, az IDLE-t felülírja
+  useEffect(() => {
+    if (isRunning) setForceIdle(false);
+  }, [isRunning]);
+
   // ---- View mode ----
   type ViewMode = 'IDLE' | 'RUNNING' | 'RESULT' | 'NO_PROPOSAL';
 
   const viewMode: ViewMode = (() => {
     if (isRunning) return 'RUNNING';
-    if (!lastCompletedRunId) return 'IDLE';
+    if (!lastCompletedRunId || forceIdle) return 'IDLE';
     if (!proposals || proposals.length === 0) return 'NO_PROPOSAL';
     const allRejected = proposals.every(p => p.verdict === 'REJECTED');
     if (allRejected) return 'NO_PROPOSAL';
@@ -847,11 +873,22 @@ export function OptimizerPage() {
 
   // ---- Handlers ----
   const handleStart = useCallback((pop: number, gen: number) => {
+    setForceIdle(false);
     startMut.mutate({ population_size: pop, max_generations: gen });
   }, [startMut]);
 
   const handleStop = useCallback(() => {
-    if (activeRunId) stopMut.mutate(activeRunId);
+    if (!activeRunId) return;
+    setStopError(null);
+    stopMut.mutate(activeRunId, {
+      onSuccess: () => {
+        setStopSignalSent(true);
+      },
+      onError: (err: unknown) => {
+        const msg = err instanceof Error ? err.message : 'Ismeretlen hiba';
+        setStopError(`Leállítás sikertelen: ${msg}`);
+      },
+    });
   }, [activeRunId, stopMut]);
 
   const handleApprove = useCallback((proposalId: number) => {
@@ -929,6 +966,7 @@ export function OptimizerPage() {
             runId={activeRunId!}
             onStop={handleStop}
             stopping={stopMut.isPending}
+            stopSignalSent={stopSignalSent}
           />
         ) : viewMode === 'RUNNING' ? (
           /* progress not yet loaded */
@@ -948,13 +986,12 @@ export function OptimizerPage() {
                 </p>
               </div>
               <button
-                onClick={() => handleStart(80, 100)}
-                disabled={startMut.isPending}
+                onClick={() => setForceIdle(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs
                            bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700
-                           transition-colors disabled:opacity-50"
+                           transition-colors"
               >
-                <FiPlay className="w-3.5 h-3.5" /> Új futás
+                <FiPlay className="w-3.5 h-3.5" /> Új futás beállítása
               </button>
             </div>
 
@@ -973,7 +1010,7 @@ export function OptimizerPage() {
         ) : (
           <NoProposalPanel
             proposals={proposals ?? []}
-            onRestart={() => handleStart(80, 100)}
+            onRestart={() => setForceIdle(true)}
           />
         )}
 
@@ -986,6 +1023,15 @@ export function OptimizerPage() {
         {approveMut.error && (
           <div className="fixed bottom-6 right-6 bg-red-900 border border-red-700 text-red-200 text-sm px-4 py-3 rounded-xl shadow-lg max-w-xs">
             <strong>Jóváhagyás sikertelen:</strong> {(approveMut.error as Error).message}
+          </div>
+        )}
+        {stopError && (
+          <div
+            className="fixed bottom-6 right-6 bg-red-900 border border-red-700 text-red-200 text-sm px-4 py-3 rounded-xl shadow-lg max-w-xs cursor-pointer"
+            onClick={() => setStopError(null)}
+          >
+            <strong>⚠ {stopError}</strong>
+            <p className="text-xs text-red-300 mt-1">Kattints a bezáráshoz</p>
           </div>
         )}
       </div>
