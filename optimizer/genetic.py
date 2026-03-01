@@ -23,8 +23,14 @@ v2.1 changes (parallelisation):
   - Worker processes receive shared data via pool initializer (Windows spawn-safe)
   - Validation fitness computed every VAL_EVAL_EVERY generations (not every gen)
 
-Version: 2.1
-Date: 2026-02-24
+v2.2 changes (overfitting regularization):
+  - REGULARIZATION_STRENGTH (default 0.4): evolúciós fitness büntetés a
+    train/proxy-val gap alapján → fitness = train * (1 - 0.4 * gap)
+  - PROXY_TRAIN_FRAC (default 0.75): a train utolsó 25%-a proxy-val-ként
+  - split_rows: 60/20/20 → 50/30/20 (nagyobb, megbízhatóbb val szett)
+
+Version: 2.2
+Date: 2026-03-01
 """
 
 import json
@@ -69,6 +75,17 @@ _DEFAULT_WORKERS = max(1, os.cpu_count() - 1)
 # Reduces validation overhead from 100× to 20× per run.
 VAL_EVAL_EVERY = 5
 
+# Regularization strength (0.0 = kikapcsolt, 0.4 = ajánlott).
+# Az evolúciós szelekció során az egyedek fitness-ét csökkenti,
+# ha a train és a proxy-val közötti gap magas.
+# formula: fitness = train_fit * (1 - STRENGTH * gap)
+# gap=0% → nincs büntetés; gap=77% → ~31% büntetés (0.4 * 0.77)
+REGULARIZATION_STRENGTH: float = 0.4
+
+# A train adatok mekkora hányadát használjuk proxy-val-ként a workerekben.
+# Az utolsó (1 - PROXY_TRAIN_FRAC) * 100% lesz a proxy val.
+PROXY_TRAIN_FRAC: float = 0.75   # → 75% sub-train, 25% proxy-val
+
 # ---------------------------------------------------------------------------
 # DEAP setup — must be done once at module level
 # ---------------------------------------------------------------------------
@@ -89,6 +106,7 @@ if not hasattr(creator, "Individual"):
 # sharing large read-only data with a multiprocessing.Pool.
 _worker_train_rows = None
 _worker_score_timeline = None
+_worker_proxy_val = None    # utolsó (1-PROXY_TRAIN_FRAC)*100% a train-ből, regularizációhoz
 
 
 def _worker_init(train_rows, score_timeline):
@@ -96,10 +114,16 @@ def _worker_init(train_rows, score_timeline):
     Called once per worker process when the Pool is created.
     Stores the shared data in module-level globals so that
     _worker_evaluate() can access it without pickling per-call.
+
+    A train_rows-t felosztja proxy-train és proxy-val részre a
+    regularizációs fitness számításhoz.
     """
-    global _worker_train_rows, _worker_score_timeline
-    _worker_train_rows    = train_rows
+    global _worker_train_rows, _worker_score_timeline, _worker_proxy_val
+    _worker_train_rows     = train_rows
     _worker_score_timeline = score_timeline
+    # Proxy-val: a train adatok utolsó (1-PROXY_TRAIN_FRAC) hányada
+    split_at = int(len(train_rows) * PROXY_TRAIN_FRAC)
+    _worker_proxy_val = train_rows[split_at:]
 
 
 def _worker_evaluate(individual):
@@ -107,13 +131,36 @@ def _worker_evaluate(individual):
     Top-level (picklable) function evaluated in worker processes.
     Uses module-level globals set by _worker_init().
     Returns (fitness,) tuple as required by DEAP.
+
+    Ha REGULARIZATION_STRENGTH > 0, a fitness-t csökkenti az overfitting
+    mértékével: fitness = train_fit * (1 - STRENGTH * gap)
+    ahol gap = (train_fit - proxy_val_fit) / train_fit  [0..1]
+
+    A proxy val a train adatok utolsó ~25%-a — ez nem azonos a
+    tényleges val szetttel (csak az evolúció közbeni büntetéshez).
     """
     from optimizer.parameter_space import decode_vector
     from optimizer.fitness import compute_fitness_for_subset
     cfg = decode_vector(individual)
-    fitness, _ = compute_fitness_for_subset(
+
+    # Teljes train fitness (ez a "nyers" teljesítmény)
+    train_fit, _ = compute_fitness_for_subset(
         _worker_train_rows, _worker_score_timeline, cfg
     )
+
+    # Regularizáció: proxy-val segítségével bünteti az overfittinget
+    if REGULARIZATION_STRENGTH > 0.0 and _worker_proxy_val:
+        val_fit, _ = compute_fitness_for_subset(
+            _worker_proxy_val, _worker_score_timeline, cfg
+        )
+        if train_fit > 0.0:
+            gap = max(0.0, (train_fit - val_fit) / train_fit)
+            fitness = train_fit * (1.0 - REGULARIZATION_STRENGTH * gap)
+        else:
+            fitness = 0.0
+    else:
+        fitness = train_fit
+
     return (fitness,)
 
 
