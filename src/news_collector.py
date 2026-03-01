@@ -1,6 +1,30 @@
 """
-TrendSignal MVP - Enhanced News Collector with Database Integration
-English + Hungarian news with timezone-aware datetime handling and DB persistence
+TrendSignal MVP – News Collector v3.0
+Tier-vezérelt, valós idejű, kvóta-tudatos hírgyűjtés.
+
+Stratégia (v2.0 – TrendSignal_Hir_Strategia.docx):
+  TIER 1 – Korlátlan, mindig fut:
+    - SEC EDGAR RSS  (US 8-K, credibility 0.95)
+    - Nasdaq News RSS (US ticker-specifikus, credibility 0.90)
+    - BÉT RSS        (HU tőzsdei közlemények, credibility 0.95)
+    - Seeking Alpha  (US elemzések, credibility 0.82)
+    - Yahoo Finance  (US fallback, credibility 0.90)
+    - Magyar RSS     (HU portfolio/telex/hvg, credibility 0.85)
+
+  TIER 2 – Rate-limited (60/perc), de bőséges:
+    - Finnhub
+
+  TIER 3 – Napi limit, csak ha Tier 1-2 nem elég:
+    - Marketaux (batch mód: 1-2 req/ciklus, 100/nap)
+    - GNews     (100/nap)
+
+Kizárva (free tier delay):
+  - NewsAPI    (akár 1 hónapos késleltetés)
+  - AlphaVantage (több órás-napos + 25 req/nap)
+
+Deduplikáció: URL + Jaccard title-similarity (≥0.80, 30 perc ablak)
+
+Verzió: 3.0 | 2026-02-25
 """
 
 import requests
@@ -49,196 +73,352 @@ except ImportError:
     HAS_MARKETAUX = False
     print("⚠️ Marketaux module not available")
 
+# Import GNews collector
+try:
+    from src.gnews_collector import GNewsCollector
+    HAS_GNEWS = True
+except ImportError:
+    HAS_GNEWS = False
+    print("⚠️ GNews module not available")
+
+# Import RSS collectors (Tier 1)
+try:
+    from src.rss_collector import (
+        SecEdgarCollector,
+        NasdaqRssCollector,
+        BetRssCollector,
+        SeekingAlphaRssCollector,
+    )
+    HAS_RSS = True
+except ImportError:
+    HAS_RSS = False
+    print("⚠️ RSS collector module not available")
+
+# Import QuotaManager
+try:
+    from src.quota_manager import QuotaManager
+    HAS_QUOTA_MANAGER = True
+except ImportError:
+    HAS_QUOTA_MANAGER = False
+    print("⚠️ QuotaManager not available")
+
+# Import BatchNewsCache
+try:
+    from src.batch_news_cache import BatchNewsCache
+    HAS_BATCH_CACHE = True
+except ImportError:
+    HAS_BATCH_CACHE = False
+    print("⚠️ BatchNewsCache not available")
+
 if TYPE_CHECKING:
     from src.multilingual_sentiment import MultilingualSentimentAnalyzer
 
+# Jaccard deduplikáció paraméterei
+_JACCARD_THRESHOLD = 0.80   # 80%-os hasonlóság
+_JACCARD_TIME_WINDOW = 1800  # 30 perc (másodperc)
+
 
 class NewsCollector:
-    """Enhanced collector with Hungarian support, timezone-aware datetimes, and DB persistence"""
-    
-    def __init__(self, config: Optional[TrendSignalConfig] = None, db: Optional[Session] = None):
+    """
+    Tier-vezérelt, kvóta-tudatos hírgyűjtő.
+
+    TIER 1 (korlátlan) → TIER 2 (rate-limited) → TIER 3 (csak ha szükséges)
+    Jaccard title-similarity deduplikáció (URL + szöveg alapján).
+    """
+
+    def __init__(
+        self,
+        config: Optional[TrendSignalConfig] = None,
+        db: Optional[Session] = None,
+        quota_manager: Optional['QuotaManager'] = None,
+        batch_cache: Optional['BatchNewsCache'] = None,
+    ):
         self.config = config or get_config()
-        self.db = db  # Optional database session
-        
-        # Initialize Yahoo Finance collector (always available, no API key needed)
+        self.db = db
+
+        # QuotaManager – ha nincs megadva, in-memory módban hozzuk létre
+        if quota_manager is not None:
+            self.quota_manager = quota_manager
+        elif HAS_QUOTA_MANAGER:
+            self.quota_manager = QuotaManager(db)
+        else:
+            self.quota_manager = None
+
+        # BatchNewsCache – shared instance (külső scheduler injektálhatja)
+        if batch_cache is not None:
+            self.batch_cache = batch_cache
+        elif HAS_BATCH_CACHE:
+            self.batch_cache = BatchNewsCache()
+        else:
+            self.batch_cache = None
+
+        # ── TIER 1 kollektorok ──────────────────────────────────────
+        self.yahoo_collector = None
         if HAS_YAHOO:
             try:
                 self.yahoo_collector = YahooFinanceCollector()
             except Exception as e:
-                self.yahoo_collector = None
                 print(f"⚠️ Yahoo collector init failed: {e}")
-        else:
-            self.yahoo_collector = None
-        
-        # Initialize Finnhub collector
-        if HAS_FINNHUB and self.config.finnhub_api_key:
+
+        self.sec_edgar_collector = None
+        self.nasdaq_rss_collector = None
+        self.bet_rss_collector = None
+        self.seeking_alpha_collector = None
+        if HAS_RSS:
             try:
-                self.finnhub_collector = FinnhubCollector(self.config.finnhub_api_key)
+                self.sec_edgar_collector = SecEdgarCollector()
+                self.nasdaq_rss_collector = NasdaqRssCollector()
+                self.bet_rss_collector = BetRssCollector()
+                self.seeking_alpha_collector = SeekingAlphaRssCollector()
             except Exception as e:
-                self.finnhub_collector = None
-                print(f"⚠️ Finnhub collector init failed: {e}")
-        else:
-            self.finnhub_collector = None
-        
-        # Initialize Marketaux collector
-        if HAS_MARKETAUX and self.config.marketaux_api_key:
-            try:
-                self.marketaux_collector = MarketauxCollector(self.config.marketaux_api_key)
-            except Exception as e:
-                self.marketaux_collector = None
-                print(f"⚠️ Marketaux collector init failed: {e}")
-        else:
-            self.marketaux_collector = None
-        
-        # Initialize Hungarian collector
+                print(f"⚠️ RSS collector init failed: {e}")
+
+        self.hungarian_collector = None
         if HAS_HUNGARIAN:
             try:
                 self.hungarian_collector = HungarianNewsCollector(config, db=self.db)
             except Exception as e:
-                self.hungarian_collector = None
                 print(f"⚠️ Hungarian collector init failed: {e}")
-        else:
-            self.hungarian_collector = None
-    
+
+        # ── TIER 2 kollektorok ──────────────────────────────────────
+        self.finnhub_collector = None
+        if HAS_FINNHUB and self.config.finnhub_api_key:
+            try:
+                self.finnhub_collector = FinnhubCollector(self.config.finnhub_api_key)
+            except Exception as e:
+                print(f"⚠️ Finnhub collector init failed: {e}")
+
+        # ── TIER 3 kollektorok ──────────────────────────────────────
+        self.marketaux_collector = None
+        if HAS_MARKETAUX and self.config.marketaux_api_key:
+            try:
+                self.marketaux_collector = MarketauxCollector(
+                    self.config.marketaux_api_key,
+                    quota_manager=self.quota_manager,
+                )
+            except Exception as e:
+                print(f"⚠️ Marketaux collector init failed: {e}")
+
+        self.gnews_collector = None
+        if HAS_GNEWS and self.config.gnews_api_key:
+            try:
+                self.gnews_collector = GNewsCollector(self.config.gnews_api_key)
+            except Exception as e:
+                print(f"⚠️ GNews collector init failed: {e}")
+
+    # ------------------------------------------------------------------
+    # PUBLIC: collect_news()
+    # ------------------------------------------------------------------
+
     def collect_news(
         self,
         ticker_symbol: str,
         company_name: str,
-        lookback_hours: int = 72,  # Increased to 72h for better coverage
-        save_to_db: bool = True
+        lookback_hours: int = 72,
+        save_to_db: bool = True,
     ) -> List[NewsItem]:
         """
-        Collect news from all sources (English + Hungarian if applicable)
-        All datetimes are timezone-aware (UTC)
-        Optionally saves to database
-        
+        Tier-vezérelt hírgyűjtés egyetlen tickerhez.
+
+        1. TIER 1 (korlátlan) – párhuzamosan
+        2. TIER 2 (Finnhub, rate-limited) – ha van kvótája
+        3. TIER 3 (Marketaux/GNews) – csak ha Tier1+2 nem adott elég friss hírt
+
         Args:
-            ticker_symbol: Stock ticker
-            company_name: Company name
-            lookback_hours: Hours to look back (default: 72h for stable coverage)
-            save_to_db: If True and db session available, save to database
-        
+            ticker_symbol: Tőzsdei jelölő (pl. AAPL, MOL.BD)
+            company_name:  Cég neve (keresési kulcsszóhoz)
+            lookback_hours: Visszatekintési ablak
+            save_to_db:    Mentés DB-be (ha van session)
+
         Returns:
-            List of NewsItem objects
+            List[NewsItem] – deduplikált, dátum szerint csökkentő sorrendben
         """
         from src.multilingual_sentiment import MultilingualSentimentAnalyzer
-        
-        all_news = []
         sentiment_analyzer = MultilingualSentimentAnalyzer(self.config, ticker_symbol)
-        
-        # ===== MULTI-SOURCE STRATEGY =====
-        # US tickers: Yahoo + Marketaux + Finnhub (comprehensive English coverage)
-        # Hungarian tickers: Only Hungarian RSS feeds (magyar specific sources)
-        
+
         is_us_ticker = not ticker_symbol.endswith('.BD')
-        
-        # ===== US TICKERS: Multi-source English news (PARALLEL) =====
+        all_news: List[NewsItem] = []
+
+        # ════════════════════════════════════════════════════════════
+        # TIER 1 – Korlátlan, mindig fut
+        # ════════════════════════════════════════════════════════════
+        tier1_tasks: Dict[str, callable] = {}
+
         if is_us_ticker:
-            print(f"🔍 DEBUG: US ticker detected: {ticker_symbol}")
-
-            source_tasks = {}
+            if self.sec_edgar_collector:
+                # SEC EDGAR globális (1 req / összes ticker) – egyszerűsített hívás 1 tickerrel
+                tier1_tasks['sec_edgar'] = lambda: self._collect_from_sec_edgar(
+                    ticker_symbol, lookback_hours, sentiment_analyzer
+                )
+            if self.nasdaq_rss_collector:
+                tier1_tasks['nasdaq_rss'] = lambda: self.nasdaq_rss_collector.collect_for_ticker(
+                    ticker_symbol, lookback_hours, sentiment_analyzer
+                )
+            if self.seeking_alpha_collector:
+                tier1_tasks['seeking_alpha'] = lambda: self.seeking_alpha_collector.collect_for_ticker(
+                    ticker_symbol, lookback_hours, sentiment_analyzer
+                )
             if self.yahoo_collector:
-                print(f"🔍 DEBUG: Yahoo collector exists, scheduling...")
-                source_tasks['yahoo'] = lambda: self._collect_from_yahoo(ticker_symbol, lookback_hours, sentiment_analyzer)
-            else:
-                print(f"⚠️ DEBUG: Yahoo collector is None")
+                tier1_tasks['yahoo'] = lambda: self._collect_from_yahoo(
+                    ticker_symbol, lookback_hours, sentiment_analyzer
+                )
+        else:
+            # BÉT
+            if self.bet_rss_collector:
+                tier1_tasks['bet_rss'] = lambda: self._collect_from_bet(
+                    ticker_symbol, lookback_hours, sentiment_analyzer
+                )
+            if self.hungarian_collector:
+                tier1_tasks['hungarian'] = lambda: self.hungarian_collector.collect_news(
+                    ticker_symbol=ticker_symbol,
+                    company_name=company_name,
+                    lookback_hours=lookback_hours,
+                )
 
-            print(f"🔍 DEBUG: self.marketaux_collector = {self.marketaux_collector}")
-            if self.marketaux_collector:
-                print(f"🔍 DEBUG: Marketaux collector EXISTS, scheduling...")
-                source_tasks['marketaux'] = lambda: self._collect_from_marketaux(ticker_symbol, lookback_hours)
-            else:
-                print(f"⚠️ DEBUG: Marketaux collector is None - WHY?")
-                print(f"⚠️ DEBUG: config.marketaux_api_key = {bool(self.config.marketaux_api_key)}")
+        if tier1_tasks:
+            with ThreadPoolExecutor(max_workers=len(tier1_tasks)) as executor:
+                futures = {executor.submit(fn): name for name, fn in tier1_tasks.items()}
+                for future in as_completed(futures):
+                    source_name = futures[future]
+                    try:
+                        items = future.result()
+                        all_news.extend(items)
+                        print(f"  📰 {source_name}: {len(items)} cikk")
+                    except Exception as e:
+                        print(f"  ⚠️ {source_name} hiba: {e}")
 
-            if self.finnhub_collector:
-                source_tasks['finnhub'] = lambda: self._collect_from_finnhub(ticker_symbol, lookback_hours, sentiment_analyzer)
+        # ════════════════════════════════════════════════════════════
+        # TIER 2 – Finnhub (rate-limited, 60/perc)
+        # ════════════════════════════════════════════════════════════
+        if is_us_ticker and self.finnhub_collector:
+            can_use_finnhub = True
+            if self.quota_manager:
+                can_use_finnhub = self.quota_manager.can_use("finnhub")
+                if can_use_finnhub:
+                    self.quota_manager.record_use("finnhub")
+            if can_use_finnhub:
+                try:
+                    finnhub_items = self._collect_from_finnhub(
+                        ticker_symbol, lookback_hours, sentiment_analyzer
+                    )
+                    all_news.extend(finnhub_items)
+                    print(f"  📰 finnhub: {len(finnhub_items)} cikk")
+                except Exception as e:
+                    print(f"  ⚠️ finnhub hiba: {e}")
 
-            if source_tasks:
-                with ThreadPoolExecutor(max_workers=len(source_tasks)) as src_executor:
-                    src_futures = {src_executor.submit(fn): name for name, fn in source_tasks.items()}
-                    for future in as_completed(src_futures):
-                        source_name = src_futures[future]
+        # ════════════════════════════════════════════════════════════
+        # TIER 3 – Marketaux / GNews (csak ha kevés friss hír van)
+        # ════════════════════════════════════════════════════════════
+        if is_us_ticker:
+            min_fresh = getattr(self.config, 'min_fresh_news_count', 3)
+            fresh_count = self._count_fresh_news(all_news, hours=2)
+
+            if fresh_count < min_fresh:
+                print(f"  ℹ️ Tier 3 aktiválás: {fresh_count} friss hír < {min_fresh} küszöb")
+
+                # Marketaux batch cache ellenőrzés
+                if self.marketaux_collector and self.batch_cache:
+                    cached = self.batch_cache.get_for_ticker(ticker_symbol)
+                    if cached:
+                        all_news.extend(cached)
+                        print(f"  📰 marketaux_cache: {len(cached)} cikk")
+                    elif self.quota_manager is None or self.quota_manager.can_use("marketaux"):
+                        marketaux_items = self._collect_from_marketaux(ticker_symbol, lookback_hours)
+                        all_news.extend(marketaux_items)
+                        print(f"  📰 marketaux: {len(marketaux_items)} cikk")
+                elif self.marketaux_collector:
+                    marketaux_items = self._collect_from_marketaux(ticker_symbol, lookback_hours)
+                    all_news.extend(marketaux_items)
+                    print(f"  📰 marketaux: {len(marketaux_items)} cikk")
+
+                # GNews fallback
+                elif self.gnews_collector:
+                    can_use_gnews = True
+                    if self.quota_manager:
+                        can_use_gnews = self.quota_manager.can_use("gnews")
+                        if can_use_gnews:
+                            self.quota_manager.record_use("gnews")
+                    if can_use_gnews:
                         try:
-                            items = future.result()
-                            all_news.extend(items)
-                            print(f"  📰 {source_name.capitalize()}: {len(items)} articles")
+                            gnews_items = self._collect_from_gnews(
+                                ticker_symbol, sentiment_analyzer
+                            )
+                            all_news.extend(gnews_items)
+                            print(f"  📰 gnews: {len(gnews_items)} cikk")
                         except Exception as e:
-                            print(f"  ⚠️ {source_name} failed: {e}")
-        
-        # ===== HUNGARIAN TICKERS: Only Hungarian sources =====
-        # Skip English APIs - not relevant for BÉT stocks
-        
-        # Collect Hungarian news for BÉT tickers
-        if self.hungarian_collector and ticker_symbol.endswith('.BD'):
-            print(f"🇭🇺 Collecting Hungarian news for {ticker_symbol}...")
-            hungarian_items = self.hungarian_collector.collect_news(
-                ticker_symbol=ticker_symbol,
-                company_name=company_name,
-                lookback_hours=lookback_hours
-            )
-            all_news.extend(hungarian_items)
-            print(f"✅ Added {len(hungarian_items)} Hungarian news items")
-        
-        # Deduplicate
+                            print(f"  ⚠️ gnews hiba: {e}")
+
+        # ════════════════════════════════════════════════════════════
+        # POST-PROCESS
+        # ════════════════════════════════════════════════════════════
         all_news = self._deduplicate_news(all_news)
-        
-        # Sort by date
         all_news.sort(key=lambda x: x.published_at, reverse=True)
-        
-        # Save to database if enabled
-        if save_to_db and self.db and len(all_news) > 0:
+
+        if save_to_db and self.db and all_news:
             self._save_news_to_db(all_news, ticker_symbol)
-        
+
         return all_news
-    
-    def _save_news_to_db(self, news_items: List[NewsItem], ticker_symbol: str):
-        """Save news items to database"""
+
+    # ------------------------------------------------------------------
+    # TIER 1 helpers
+    # ------------------------------------------------------------------
+
+    def _collect_from_sec_edgar(
+        self,
+        ticker_symbol: str,
+        lookback_hours: int,
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer',
+    ) -> List[NewsItem]:
+        """SEC EDGAR – egyetlen ticker wrapper (globális feed 1 kérésből)."""
         try:
-            from src.db_helpers import save_news_item_to_db
-            
-            saved_count = 0
-            for item in news_items:
-                if save_news_item_to_db(item, ticker_symbol, self.db):
-                    saved_count += 1
-            
-            if saved_count > 0:
-                print(f"💾 Saved {saved_count} news items to database")
-                
+            result = self.sec_edgar_collector.collect(
+                tickers=[ticker_symbol],
+                lookback_hours=lookback_hours,
+                sentiment_analyzer=sentiment_analyzer,
+            )
+            return result.get(ticker_symbol, [])
         except Exception as e:
-            print(f"⚠️ Could not save news to DB: {e}")
-    
+            print(f"  ❌ SEC EDGAR hiba ({ticker_symbol}): {e}")
+            return []
+
+    def _collect_from_bet(
+        self,
+        ticker_symbol: str,
+        lookback_hours: int,
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer',
+    ) -> List[NewsItem]:
+        """BÉT RSS – egyetlen ticker wrapper."""
+        try:
+            result = self.bet_rss_collector.collect(
+                tickers=[ticker_symbol],
+                lookback_hours=lookback_hours,
+                sentiment_analyzer=sentiment_analyzer,
+            )
+            return result.get(ticker_symbol, [])
+        except Exception as e:
+            print(f"  ❌ BÉT RSS hiba ({ticker_symbol}): {e}")
+            return []
+
     def _collect_from_yahoo(
         self,
         ticker_symbol: str,
         lookback_hours: int,
-        sentiment_analyzer: 'MultilingualSentimentAnalyzer'
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer',
     ) -> List[NewsItem]:
-        """
-        Collect from Yahoo Finance RSS (unlimited, real-time)
-        
-        Primary source for US blue chip tickers
-        """
+        """Yahoo Finance RSS (korlátlan, Tier 1 fallback)."""
         try:
             news_items = self.yahoo_collector.collect_news(
                 ticker_symbol=ticker_symbol,
-                max_articles=20
+                max_articles=20,
             )
-            
-            # Convert to NewsItem format with sentiment analysis
             analyzed_items = []
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-            
             for item in news_items:
-                # Filter by time
                 if item['published_at'] < cutoff_time:
                     continue
-                
-                # Analyze sentiment
                 text = f"{item['title']}. {item.get('description', '')}"
                 sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
-                
-                news_item = NewsItem(
+                analyzed_items.append(NewsItem(
                     title=item['title'],
                     description=item.get('description', ''),
                     url=item['url'],
@@ -247,51 +427,39 @@ class NewsCollector:
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
                     sentiment_label=sentiment['label'],
-                    credibility=0.90  # Yahoo Finance high credibility
-                )
-                analyzed_items.append(news_item)
-            
+                    credibility=0.90,
+                ))
             return analyzed_items
-            
         except Exception as e:
-            print(f"  ❌ Yahoo Finance collection error: {e}")
+            print(f"  ❌ Yahoo Finance hiba: {e}")
             return []
-    
+
+    # ------------------------------------------------------------------
+    # TIER 2 helpers
+    # ------------------------------------------------------------------
+
     def _collect_from_finnhub(
         self,
         ticker_symbol: str,
         lookback_hours: int,
-        sentiment_analyzer: 'MultilingualSentimentAnalyzer'
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer',
     ) -> List[NewsItem]:
-        """
-        Collect from Finnhub API (60 req/min)
-        
-        Secondary source for US blue chip tickers
-        """
+        """Finnhub API (60 req/perc)."""
         try:
-            # Convert hours to days (Finnhub uses days)
             lookback_days = max(1, lookback_hours // 24)
-            
             news_items = self.finnhub_collector.collect_news(
                 ticker_symbol=ticker_symbol,
                 lookback_days=lookback_days,
-                max_articles=20
+                max_articles=20,
             )
-            
-            # Convert to NewsItem format with sentiment analysis
             analyzed_items = []
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-            
             for item in news_items:
-                # Filter by time
                 if item['published_at'] < cutoff_time:
                     continue
-                
-                # Analyze sentiment
                 text = f"{item['title']}. {item.get('description', '')}"
                 sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
-                
-                news_item = NewsItem(
+                analyzed_items.append(NewsItem(
                     title=item['title'],
                     description=item.get('description', ''),
                     url=item['url'],
@@ -300,119 +468,140 @@ class NewsCollector:
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
                     sentiment_label=sentiment['label'],
-                    credibility=0.85  # Finnhub high credibility
-                )
-                analyzed_items.append(news_item)
-            
+                    credibility=0.85,
+                ))
             return analyzed_items
-            
         except Exception as e:
-            print(f"  ❌ Finnhub collection error: {e}")
+            print(f"  ❌ Finnhub hiba: {e}")
             return []
-    
+
+    # ------------------------------------------------------------------
+    # TIER 3 helpers
+    # ------------------------------------------------------------------
+
     def _collect_from_marketaux(
         self,
         ticker_symbol: str,
-        lookback_hours: int
+        lookback_hours: int,
     ) -> List[NewsItem]:
-        """
-        Collect from Marketaux API with BUILT-IN AI sentiment
-        
-        Advantage: No need for FinBERT analysis, sentiment already provided!
-        """
+        """Marketaux API (100 req/nap, beépített AI sentiment)."""
         try:
             lookback_days = max(1, lookback_hours // 24)
-            
             news_items = self.marketaux_collector.collect_news(
                 ticker_symbol=ticker_symbol,
                 lookback_days=lookback_days,
-                max_articles=20
+                max_articles=20,
             )
-            
-            # Convert to NewsItem format - sentiment ALREADY analyzed!
             analyzed_items = []
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-            
             for item in news_items:
-                # Filter by time
                 if item['published_at'] < cutoff_time:
                     continue
-                
-                # ✅ Use Marketaux's AI sentiment (no FinBERT needed!)
                 sentiment_score = item.get('sentiment_score', 0.0)
-                
-                # Convert -1 to +1 score to label
                 if sentiment_score > 0.3:
-                    sentiment_label = 'positive'
-                    confidence = min(abs(sentiment_score), 1.0)
+                    label, conf = 'positive', min(abs(sentiment_score), 1.0)
                 elif sentiment_score < -0.3:
-                    sentiment_label = 'negative'
-                    confidence = min(abs(sentiment_score), 1.0)
+                    label, conf = 'negative', min(abs(sentiment_score), 1.0)
                 else:
-                    sentiment_label = 'neutral'
-                    confidence = 0.5
-                
-                news_item = NewsItem(
+                    label, conf = 'neutral', 0.5
+                analyzed_items.append(NewsItem(
                     title=item['title'],
                     description=item.get('description', ''),
                     url=item['url'],
                     published_at=item['published_at'],
                     source=f"Marketaux-{item['source']}",
-                    sentiment_score=sentiment_score,  # ✅ AI-powered
-                    sentiment_confidence=confidence,
-                    sentiment_label=sentiment_label,
-                    credibility=item.get('credibility', 0.88)
-                )
-                analyzed_items.append(news_item)
-            
+                    sentiment_score=sentiment_score,
+                    sentiment_confidence=conf,
+                    sentiment_label=label,
+                    credibility=item.get('credibility', 0.88),
+                ))
             return analyzed_items
-            
         except Exception as e:
-            print(f"  ❌ Marketaux collection error: {e}")
+            print(f"  ❌ Marketaux hiba: {e}")
             return []
-    
+
+    def _collect_from_gnews(
+        self,
+        ticker_symbol: str,
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer',
+    ) -> List[NewsItem]:
+        """GNews API (100 req/nap)."""
+        try:
+            news_items = self.gnews_collector.collect_news(
+                ticker_symbol=ticker_symbol,
+                max_articles=10,
+            )
+            analyzed_items = []
+            for item in news_items:
+                text = f"{item.get('title', '')}. {item.get('description', '')}"
+                sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
+                published_str = item.get('published_at', '')
+                if isinstance(published_str, str):
+                    try:
+                        published_at = datetime.fromisoformat(
+                            published_str.replace('Z', '+00:00')
+                        )
+                    except Exception:
+                        published_at = datetime.now(timezone.utc)
+                else:
+                    published_at = published_str or datetime.now(timezone.utc)
+
+                analyzed_items.append(NewsItem(
+                    title=item.get('title', ''),
+                    description=item.get('description', ''),
+                    url=item.get('url', ''),
+                    published_at=published_at,
+                    source="GNews",
+                    sentiment_score=sentiment['score'],
+                    sentiment_confidence=sentiment['confidence'],
+                    sentiment_label=sentiment['label'],
+                    credibility=0.75,
+                ))
+            return analyzed_items
+        except Exception as e:
+            print(f"  ❌ GNews hiba: {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # DISABLED (fizetős upgrade esetére megőrizve)
+    # ------------------------------------------------------------------
+
     def _collect_from_alphavantage(
         self,
         ticker_symbol: str,
         lookback_hours: int,
-        sentiment_analyzer: 'MultilingualSentimentAnalyzer'
+        sentiment_analyzer: 'MultilingualSentimentAnalyzer',
     ) -> List[NewsItem]:
-        """Collect from Alpha Vantage with timezone-aware datetimes"""
+        """
+        DISABLED – Alpha Vantage free tier: több órás-napos késleltetés + 25 req/nap limit.
+        Kód megmarad fizetős upgrade esetére (v2.0 stratégia, Fázis 1).
+        NEM hívódik a collect_news() flow-ból.
+        """
         url = "https://www.alphavantage.co/query"
-        
         params = {
             'function': 'NEWS_SENTIMENT',
             'tickers': ticker_symbol,
             'apikey': self.config.alphavantage_key,
-            'limit': 50
+            'limit': 50,
         }
-        
         try:
             response = requests.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-            
             news_items = []
-            # FIXED: Timezone-aware cutoff
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-            
             for item in data.get('feed', []):
-                # FIXED: Parse and make timezone-aware
                 time_str = item.get('time_published', '')
                 if time_str:
                     time_published = datetime.strptime(time_str, '%Y%m%dT%H%M%S')
                     time_published = time_published.replace(tzinfo=timezone.utc)
                 else:
                     time_published = datetime.now(timezone.utc)
-                
-                # FIXED: Both datetimes now timezone-aware
                 if time_published < cutoff_time:
                     continue
-                
                 text = f"{item.get('title', '')}. {item.get('summary', '')}"
                 sentiment = sentiment_analyzer.analyze_text(text, ticker_symbol)
-                
-                news_item = NewsItem(
+                news_items.append(NewsItem(
                     title=item.get('title', ''),
                     description=item.get('summary', ''),
                     url=item.get('url', ''),
@@ -421,46 +610,109 @@ class NewsCollector:
                     sentiment_score=sentiment['score'],
                     sentiment_confidence=sentiment['confidence'],
                     sentiment_label=sentiment['label'],
-                    credibility=0.80
-                )
-                news_items.append(news_item)
-            
-            print(f"✅ Alpha Vantage: Collected {len(news_items)} news items")
+                    credibility=0.80,
+                ))
             return news_items
-            
         except Exception as e:
             print(f"❌ Alpha Vantage error: {e}")
             return []
-    
+
+    # ------------------------------------------------------------------
+    # Deduplikáció (URL + Jaccard title-similarity)
+    # ------------------------------------------------------------------
+
     def _deduplicate_news(self, news_items: List[NewsItem]) -> List[NewsItem]:
-        """Remove duplicates"""
-        seen_urls = set()
-        seen_titles = set()
-        unique_items = []
-        
+        """
+        Duplikáció szűrés két szinten:
+        1. Pontos URL egyezés
+        2. Jaccard title-similarity ≥ 0.80 AND ≤ 30 perces időablak
+           → magasabb credibility-jű marad meg
+        """
+        # 1. URL-alapú szűrés
+        seen_urls: set = set()
+        url_unique: List[NewsItem] = []
         for item in news_items:
-            if item.url in seen_urls:
-                continue
-            
-            title_lower = item.title.lower()
-            if title_lower in seen_titles:
-                continue
-            
-            seen_urls.add(item.url)
-            seen_titles.add(title_lower)
-            unique_items.append(item)
-        
-        removed = len(news_items) - len(unique_items)
+            if item.url and item.url not in seen_urls:
+                seen_urls.add(item.url)
+                url_unique.append(item)
+
+        # 2. Jaccard title-similarity szűrés
+        final: List[NewsItem] = []
+        for candidate in url_unique:
+            is_dup = False
+            for existing in final:
+                if self._is_jaccard_duplicate(candidate, existing):
+                    # A magasabb credibility-jűt tartjuk meg
+                    if candidate.credibility > existing.credibility:
+                        final.remove(existing)
+                        # nem breakelünk, hátha több duplikátumal is egyezik
+                    else:
+                        is_dup = True
+                    break
+            if not is_dup:
+                final.append(candidate)
+
+        removed = len(news_items) - len(final)
         if removed > 0:
-            print(f"🔄 Removed {removed} duplicates")
-        
-        return unique_items
+            print(f"🔄 Deduplikáció: {removed} duplikátum eltávolítva (URL+Jaccard)")
+        return final
+
+    @staticmethod
+    def _is_jaccard_duplicate(
+        item1: NewsItem,
+        item2: NewsItem,
+        threshold: float = _JACCARD_THRESHOLD,
+        time_window_sec: int = _JACCARD_TIME_WINDOW,
+    ) -> bool:
+        """
+        True ha a két cikk valószínűleg ugyanaz a tartalom.
+
+        Feltételek (mindkettő teljesüljön):
+        - Jaccard(title1, title2) ≥ threshold
+        - |published_at1 - published_at2| ≤ time_window_sec
+        """
+        words1 = set(item1.title.lower().split())
+        words2 = set(item2.title.lower().split())
+        union = words1 | words2
+        if not union:
+            return False
+        jaccard = len(words1 & words2) / len(union)
+        if jaccard < threshold:
+            return False
+        # Időablak ellenőrzés
+        try:
+            time_diff = abs((item1.published_at - item2.published_at).total_seconds())
+            return time_diff <= time_window_sec
+        except Exception:
+            return False
+
+    # ------------------------------------------------------------------
+    # Segédfüggvények
+    # ------------------------------------------------------------------
+
+    def _count_fresh_news(self, news_items: List[NewsItem], hours: int = 2) -> int:
+        """Az elmúlt `hours` órában megjelent cikkek száma."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        return sum(1 for item in news_items if item.published_at >= cutoff)
+
+    def _save_news_to_db(self, news_items: List[NewsItem], ticker_symbol: str):
+        """Hírek mentése az adatbázisba."""
+        try:
+            from src.db_helpers import save_news_item_to_db
+            saved_count = sum(
+                1 for item in news_items
+                if save_news_item_to_db(item, ticker_symbol, self.db)
+            )
+            if saved_count > 0:
+                print(f"💾 Mentve: {saved_count} hír az adatbázisba")
+        except Exception as e:
+            print(f"⚠️ DB mentés sikertelen: {e}")
 
 
 if __name__ == "__main__":
-    print("✅ Enhanced News Collector v2.2 - Optimized for US/Hungarian split")
-    print("🇺🇸 US Tickers: Yahoo (∞) + Marketaux (100/day) + Finnhub (60/min)")
-    print("🇭🇺 Hungarian: Portfolio.hu + RSS feeds only")
-    print("📊 Quota usage: ~8 US tickers × 64 refreshes = ~512 Marketaux + ~512 Finnhub per day")
-    print("⚠️ Marketaux quota will exhaust mid-day, falls back to Yahoo + Finnhub")
-    print("💾 Database persistence support")
+    print("✅ TrendSignal News Collector v3.0 – Tier-vezérelt stratégia")
+    print("📊 TIER 1: SEC EDGAR + Nasdaq RSS + BÉT RSS + Seeking Alpha + Yahoo (korlátlan)")
+    print("📊 TIER 2: Finnhub (60/perc)")
+    print("📊 TIER 3: Marketaux batch (100/nap) + GNews (100/nap) – csak ha szükséges")
+    print("🚫 KIZÁRVA: NewsAPI (1 hónapos delay) + AlphaVantage (napos delay + 25 req/nap)")
+    print("🔄 Deduplikáció: URL + Jaccard ≥0.80, 30 perces ablak")

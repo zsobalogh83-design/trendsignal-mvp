@@ -6,7 +6,7 @@ This prevents SQLAlchemy registry conflicts
 Version: 2.1 - Added SimulatedTrade model
 Date: 2026-02-17
 """
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, BigInteger
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, BigInteger, Date
 from sqlalchemy.sql import func
 from src.database import Base
 
@@ -313,6 +313,21 @@ class SignalCalculation(Base):
     entry_exit_details = Column(Text)
     
     calculation_duration_ms = Column(Integer)
+
+
+# ===== QUOTA TRACKING =====
+
+class ApiQuota(Base):
+    """Centrális API quota tracking – napi limitek SQLite perzisztenciával"""
+    __tablename__ = "api_quotas"
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(50), nullable=False, index=True)   # pl. "marketaux", "gnews"
+    date = Column(Date, nullable=False, index=True)            # UTC dátum
+    daily_count = Column(Integer, nullable=False, default=0)
+    last_reset_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 # ===== TRACKBACK SYSTEM =====
