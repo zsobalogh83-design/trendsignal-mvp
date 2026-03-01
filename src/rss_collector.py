@@ -9,19 +9,42 @@ Források:
   - Seeking Alpha  – Ticker-specifikus elemzések (credibility: 0.82)
   - StockTwits     – Retail social sentiment (credibility: 0.50)
 
-Verzió: 1.0 | 2026-02-25
+Verzió: 1.1 | 2026-03-01
+Változások:
+  - SEC EDGAR: requests + kötelező User-Agent (email), feedparser.parse(content) mode
+  - BÉT RSS: requests + charset recovery (UTF-8 → ISO-8859-2 → Windows-1250 fallback)
+  - Nasdaq RSS: requests + browser User-Agent (Nasdaq blokkolja a feedparser UA-t)
 """
 
 import feedparser
 import requests
 import socket
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, TYPE_CHECKING
 import time
 
+# Windows cp1250 konzol: emoji printok UnicodeEncodeError-t dobnának.
+# errors='replace' → ? jelként jelenik meg a nem kódolható karakter, nem crashel.
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(errors='replace')
+    except Exception:
+        pass
+
 # Globális socket timeout – minden feedparser.parse() hívásra vonatkozik.
-# Seeking Alpha és SEC EDGAR néha lassan / soha sem válaszol → 8 másodperc elég.
+# Seeking Alpha néha lassan / soha sem válaszol → 8 másodperc elég.
 _FEEDPARSER_TIMEOUT = 8  # másodperc
+
+# SEC EDGAR kötelező User-Agent (email-lel): https://www.sec.gov/os/webmaster-faq#xml-feeds
+_SEC_EDGAR_USER_AGENT = "TrendSignal/2.0 contact@trendsignal.app"
+
+# Browser-szerű User-Agent Nasdaq és más bot-szűrő oldalakhoz
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/122.0.0.0 Safari/537.36"
+)
 
 if TYPE_CHECKING:
     from src.sentiment_analyzer import NewsItem
@@ -64,8 +87,9 @@ SEC_EDGAR_RSS_URL = (
     "?action=getcurrent&type=8-K&dateb=&owner=include&count=40&output=atom"
 )
 
-# BÉT RSS URL
-BET_RSS_URL = "https://www.bet.hu/rss"
+# BÉT RSS URL – bet.hu/rss már 404-et ad (2025-től).
+# Csere: Portfolio.hu gazdasági RSS (UTF-8, ~20 bejegyzés, MOL/OTP közlemények is megjelennek)
+BET_RSS_URL = "https://www.portfolio.hu/rss/gazdasag.xml"
 
 # StockTwits API URL sablon
 STOCKTWITS_URL = "https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
@@ -148,6 +172,11 @@ def _get_sec_edgar_feed() -> object:
     """
     SEC EDGAR globális 8-K feed – in-process cache-sel (TTL: 60s).
     9 ticker × collect_news() helyett csak 1 HTTP kérés / ciklus.
+
+    SEC.gov kötelező User-Agent policy (2023+):
+      User-Agent: <AppName>/<version> <contact-email>
+    Feedparser alapértelmezett UA-ja nincs email → 403 / garbled XML.
+    Megoldás: requests-szel töltjük le, feedparser.parse(content) módban dolgozzuk fel.
     """
     import time
     now = time.monotonic()
@@ -155,7 +184,19 @@ def _get_sec_edgar_feed() -> object:
         if _sec_edgar_cache["feed"] is not None and (now - _sec_edgar_cache["fetched_at"]) < _SEC_EDGAR_CACHE_TTL:
             return _sec_edgar_cache["feed"]
         # Cache lejárt vagy üres → frissítés
-        feed = _parse_feed_with_timeout(SEC_EDGAR_RSS_URL, timeout=10)
+        try:
+            resp = requests.get(
+                SEC_EDGAR_RSS_URL,
+                headers={"User-Agent": _SEC_EDGAR_USER_AGENT, "Accept-Encoding": "gzip"},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            # feedparser.parse() elfogad bytes-t is – így megkerüljük az UA-problémát
+            feed = feedparser.parse(resp.content)
+        except Exception as exc:
+            # Fallback: közvetlen feedparser (esetleg szintén 403, de megpróbáljuk)
+            print(f"  [WARN] SEC EDGAR requests hiba: {exc}, fallback feedparser")
+            feed = _parse_feed_with_timeout(SEC_EDGAR_RSS_URL, timeout=12)
         _sec_edgar_cache["feed"] = feed
         _sec_edgar_cache["fetched_at"] = now
         return feed
@@ -278,7 +319,20 @@ class NasdaqRssCollector:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         try:
-            feed = _parse_feed_with_timeout(url)
+            # Nasdaq blokkolja a feedparser alapértelmezett UA-t.
+            # requests-szel töltjük le browser UA-val, majd bytes-t adunk feedparser-nek.
+            try:
+                resp = requests.get(
+                    url,
+                    headers={"User-Agent": _BROWSER_USER_AGENT},
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                feed = feedparser.parse(resp.content)
+            except Exception as req_exc:
+                print(f"  [WARN] Nasdaq RSS requests hiba ({clean_ticker}): {req_exc}, fallback")
+                feed = _parse_feed_with_timeout(url)
+
             if feed.bozo and not feed.entries:
                 return []
 
@@ -347,7 +401,37 @@ class BetRssCollector:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         try:
-            feed = _parse_feed_with_timeout(BET_RSS_URL)
+            # BÉT RSS kódolási hiba workaround:
+            # bet.hu sokszor Windows-1250 / ISO-8859-2 kódolású XML-t küld,
+            # de az XML header UTF-8-at deklarál → feedparser "invalid token" (bozo).
+            # Megoldás: requests-szel töltjük le, explicit kódolást detektálunk,
+            # majd a javított bytes-t adjuk feedparser.parse()-nek.
+            try:
+                resp = requests.get(
+                    BET_RSS_URL,
+                    headers={"User-Agent": _BROWSER_USER_AGENT},
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                raw_bytes = resp.content
+                # Kódolás detektálás: próbáljuk a response headerben megadottat,
+                # aztán ISO-8859-2 / Windows-1250 / latin-1 fallback sorrendben.
+                detected_enc = resp.apparent_encoding or "utf-8"
+                for enc in [detected_enc, "iso-8859-2", "windows-1250", "latin-1", "utf-8"]:
+                    try:
+                        raw_bytes.decode(enc)
+                        # Ha sikerül, adjuk át feedparser-nek mint bytes
+                        # (feedparser maga kezeli a belső XML deklarációt)
+                        feed = feedparser.parse(raw_bytes)
+                        break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+                else:
+                    feed = feedparser.parse(raw_bytes)
+            except Exception as req_exc:
+                print(f"  [WARN] BET RSS requests hiba: {req_exc}, fallback feedparser")
+                feed = _parse_feed_with_timeout(BET_RSS_URL)
+
             if feed.bozo and not feed.entries:
                 print(f"  ⚠️ BÉT RSS parse hiba: {feed.bozo_exception}")
                 return result

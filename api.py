@@ -73,8 +73,17 @@ async def lifespan(app: FastAPI):
     
     # STARTUP
     logger.info("🚀 TrendSignal API starting up...")
+
+    # Ensure all tables exist (idempotent: skips already existing tables)
+    try:
+        from src.database import init_db
+        init_db()
+        logger.info("✅ Database tables verified/created")
+    except Exception as e:
+        logger.warning(f"⚠️ init_db failed: {e}")
+
     logger.info("📊 Database connection established")
-    
+
     config = get_config()
     
     # Initialize NewsCollector
