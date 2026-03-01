@@ -125,12 +125,13 @@ export function useDeleteTicker() {
 // OPTIMIZER HOOKS
 // ==========================================
 
-/** Optimizer status (idle panel data). Refetch every 30s when not running. */
+/** Optimizer status (idle panel data). Futás közben 5s, egyébként 30s. */
 export function useOptimizerStatus() {
   return useQuery({
     queryKey: ['optimizer-status'],
     queryFn: () => apiClient.getOptimizerStatus(),
-    refetchInterval: 30_000,
+    refetchInterval: (query) =>
+      (query.state.data as any)?.optimizer_running ? 5_000 : 30_000,
   });
 }
 

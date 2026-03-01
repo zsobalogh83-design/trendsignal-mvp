@@ -34,6 +34,9 @@ BASE_DIR   = Path(__file__).resolve().parent
 DB_PATH    = BASE_DIR / "trendsignal.db"
 STOP_FLAG  = BASE_DIR / ".optimizer_stop"
 
+# In-memory subprocess handle — hogy le tudjuk állítani azonnal
+_active_proc: Optional[subprocess.Popen] = None
+
 router = APIRouter(prefix="/api/v1/optimizer", tags=["Optimizer"])
 
 
@@ -167,8 +170,9 @@ async def start_optimizer(req: RunRequest):
     ]
 
     log_path = BASE_DIR / f"optimizer_run_{run_id}.log"
+    global _active_proc
     with open(log_path, "w") as log_f:
-        subprocess.Popen(
+        _active_proc = subprocess.Popen(
             cmd,
             stdout=log_f,
             stderr=subprocess.STDOUT,
@@ -277,9 +281,18 @@ async def stop_optimizer(run_id: int):
             status_code=400,
             detail=f"Run {run_id} is not currently running.",
         )
-    # Write stop flag — subprocess checks this each generation
+    # 1. Stop flag írása — subprocess ellenőrzi generációk között
     STOP_FLAG.touch()
-    return {"message": f"Stop signal sent to run {run_id}. Will stop after current generation."}
+
+    # 2. Azonnali SIGTERM a subprocess-re (nem vár a következő generációig)
+    global _active_proc
+    if _active_proc is not None and _active_proc.poll() is None:
+        try:
+            _active_proc.terminate()
+        except Exception:
+            pass  # folyamat már leállt
+
+    return {"message": f"Stop signal sent to run {run_id}. Terminating process."}
 
 
 # ---------------------------------------------------------------------------
