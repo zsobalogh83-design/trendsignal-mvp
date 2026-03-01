@@ -14,9 +14,14 @@ Verzió: 1.0 | 2026-02-25
 
 import feedparser
 import requests
+import socket
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, TYPE_CHECKING
 import time
+
+# Globális socket timeout – minden feedparser.parse() hívásra vonatkozik.
+# Seeking Alpha és SEC EDGAR néha lassan / soha sem válaszol → 8 másodperc elég.
+_FEEDPARSER_TIMEOUT = 8  # másodperc
 
 if TYPE_CHECKING:
     from src.sentiment_analyzer import NewsItem
@@ -64,6 +69,19 @@ BET_RSS_URL = "https://www.bet.hu/rss"
 
 # StockTwits API URL sablon
 STOCKTWITS_URL = "https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
+
+
+def _parse_feed_with_timeout(url: str, timeout: int = _FEEDPARSER_TIMEOUT, **kwargs) -> object:
+    """
+    feedparser.parse() hívás globális socket timeout-tal.
+    Preventing hanging on slow/unresponsive RSS servers (Seeking Alpha, SEC EDGAR).
+    """
+    old_timeout = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(timeout)
+        return feedparser.parse(url, **kwargs)
+    finally:
+        socket.setdefaulttimeout(old_timeout)
 
 
 def _parse_feed_date(entry) -> datetime:
@@ -116,6 +134,33 @@ def _make_news_item(
     )
 
 
+# ------------------------------------------------------------------
+# SEC EDGAR in-process feed cache – 1 request / 60s az összes tickernek
+# ------------------------------------------------------------------
+import threading as _threading
+
+_sec_edgar_lock = _threading.Lock()
+_sec_edgar_cache: Dict = {"feed": None, "fetched_at": 0.0}
+_SEC_EDGAR_CACHE_TTL = 60  # másodperc – az összes ticker 1 requestből kap adatot
+
+
+def _get_sec_edgar_feed() -> object:
+    """
+    SEC EDGAR globális 8-K feed – in-process cache-sel (TTL: 60s).
+    9 ticker × collect_news() helyett csak 1 HTTP kérés / ciklus.
+    """
+    import time
+    now = time.monotonic()
+    with _sec_edgar_lock:
+        if _sec_edgar_cache["feed"] is not None and (now - _sec_edgar_cache["fetched_at"]) < _SEC_EDGAR_CACHE_TTL:
+            return _sec_edgar_cache["feed"]
+        # Cache lejárt vagy üres → frissítés
+        feed = _parse_feed_with_timeout(SEC_EDGAR_RSS_URL, timeout=10)
+        _sec_edgar_cache["feed"] = feed
+        _sec_edgar_cache["fetched_at"] = now
+        return feed
+
+
 # ==================================================================
 # SEC EDGAR RSS Collector
 # ==================================================================
@@ -148,7 +193,8 @@ class SecEdgarCollector:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         try:
-            feed = feedparser.parse(SEC_EDGAR_RSS_URL)
+            # In-process cache: 60s TTL → 9 ticker helyett 1 HTTP request / ciklus
+            feed = _get_sec_edgar_feed()
             if feed.bozo and not feed.entries:
                 print(f"  ⚠️ SEC EDGAR RSS parse hiba: {feed.bozo_exception}")
                 return result
@@ -232,7 +278,7 @@ class NasdaqRssCollector:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         try:
-            feed = feedparser.parse(url)
+            feed = _parse_feed_with_timeout(url)
             if feed.bozo and not feed.entries:
                 return []
 
@@ -301,7 +347,7 @@ class BetRssCollector:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         try:
-            feed = feedparser.parse(BET_RSS_URL)
+            feed = _parse_feed_with_timeout(BET_RSS_URL)
             if feed.bozo and not feed.entries:
                 print(f"  ⚠️ BÉT RSS parse hiba: {feed.bozo_exception}")
                 return result
@@ -368,12 +414,16 @@ class SeekingAlphaRssCollector:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         try:
-            # Seeking Alpha bot-detection ellen User-Agent header szükséges
+            # Seeking Alpha bot-detection ellen User-Agent header szükséges.
+            # Timeout: 6 másodperc – SA néha nem válaszol vagy 403-at ad.
             headers = {
                 'User-Agent': 'Mozilla/5.0 (compatible; TrendSignal/2.0; +https://trendsignal.app)'
             }
-            feed = feedparser.parse(url, request_headers=headers)
+            feed = _parse_feed_with_timeout(url, timeout=6, request_headers=headers)
 
+            # Seeking Alpha sokszor 403/429-et ad – ilyenkor entries üres
+            if not feed.entries:
+                return []
             if feed.bozo and not feed.entries:
                 return []
 
