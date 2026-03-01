@@ -276,14 +276,18 @@ class NewsCollector:
                 )
 
         if tier1_tasks:
+            # Tier 1 timeout: 15 mp/forrás – RSS lassulás vagy bot-block esetén sem akad el
+            _TIER1_TASK_TIMEOUT = 15
             with ThreadPoolExecutor(max_workers=len(tier1_tasks)) as executor:
                 futures = {executor.submit(fn): name for name, fn in tier1_tasks.items()}
-                for future in as_completed(futures):
+                for future in as_completed(futures, timeout=_TIER1_TASK_TIMEOUT * 2):
                     source_name = futures[future]
                     try:
-                        items = future.result()
+                        items = future.result(timeout=_TIER1_TASK_TIMEOUT)
                         all_news.extend(items)
                         print(f"  📰 {source_name}: {len(items)} cikk")
+                    except TimeoutError:
+                        print(f"  ⏱️ {source_name} timeout ({_TIER1_TASK_TIMEOUT}s), skip")
                     except Exception as e:
                         print(f"  ⚠️ {source_name} hiba: {e}")
 
