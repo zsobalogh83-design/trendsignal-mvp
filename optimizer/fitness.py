@@ -155,8 +155,8 @@ def compute_fitness_for_subset(
 def split_rows(
     rows: List[SignalSimRow],
     trade_outcomes=None,            # DEPRECATED: kept for backward compat only
-    train_ratio: float = 0.60,
-    val_ratio:   float = 0.20,
+    train_ratio: float = 0.50,
+    val_ratio:   float = 0.30,
     min_trades_per_split: int = 20,
 ) -> Tuple[List[SignalSimRow], List[SignalSimRow], List[SignalSimRow]]:
     """
@@ -166,7 +166,8 @@ def split_rows(
     In v2, we split by signal count (not by trade count) because we no longer
     need a pre-existing simulated_trades table — trades are generated on-the-fly.
 
-    Default: 60% train / 20% val / 20% test by signal count.
+    Default: 50% train / 30% val / 20% test by signal count.
+    A nagyobb val szett megbízhatóbb overfitting-detekciót biztosít.
     """
     n = len(rows)
     train_end = int(n * train_ratio)
