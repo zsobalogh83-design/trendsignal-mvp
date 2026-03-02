@@ -124,5 +124,15 @@
   "SENTIMENT_CONF_MED_NEWS_COUNT": 3,
   "SENTIMENT_CONF_LOW_NEWS_COUNT": 2,
   "SENTIMENT_POSITIVE_THRESHOLD": 0.2,
-  "SENTIMENT_NEGATIVE_THRESHOLD": -0.2
+  "SENTIMENT_NEGATIVE_THRESHOLD": -0.2,
+  "LLM_CONTEXT_ENABLED": false,
+  "LLM_MODEL": "openai/gpt-4o-mini",
+  "LLM_TIMEOUT": 3.0,
+  "LLM_MAX_CONCURRENT": 5,
+  "DURATION_WEIGHT": {
+    "hours": 0.6,
+    "days": 1.0,
+    "weeks": 1.4,
+    "permanent": 1.8
+  }
 }

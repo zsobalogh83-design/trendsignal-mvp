@@ -122,6 +122,25 @@ TELEGRAM_INCLUDE_LINK = True  # Include link to TrendSignal UI
 
 
 # ==========================================
+# LLM CONTEXT CHECKER CONFIGURATION (v2.1)
+# ==========================================
+
+LLM_CONTEXT_ENABLED = False   # Default OFF – safe toggle
+LLM_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+LLM_MODEL = "openai/gpt-4o-mini"
+LLM_TIMEOUT = 3.0             # API timeout seconds
+LLM_MAX_CONCURRENT = 5        # ThreadPoolExecutor max workers
+
+# Duration weight – news item szintjen hat a sentiment aggregalasban (spec 2.5)
+DURATION_WEIGHT = {
+    'hours':     0.6,   # rovid hatas (Fed dontes napjan)
+    'days':      1.0,   # alapeset (earnings)
+    'weeks':     1.4,   # hosszabb hatas (jogi ugy)
+    'permanent': 1.8,   # tarto shatas (felvasarlas)
+}
+
+
+# ==========================================
 # TECHNICAL INDICATOR PARAMETERS
 # ==========================================
 
@@ -572,6 +591,12 @@ def save_config_to_file(config_instance):
             "SENTIMENT_CONF_LOW_NEWS_COUNT": config_instance.sentiment_conf_low_news_count,
             "SENTIMENT_POSITIVE_THRESHOLD": config_instance.sentiment_positive_threshold,
             "SENTIMENT_NEGATIVE_THRESHOLD": config_instance.sentiment_negative_threshold,
+            # LLM Context Checker
+            "LLM_CONTEXT_ENABLED": config_instance.llm_context_enabled,
+            "LLM_MODEL": config_instance.llm_model,
+            "LLM_TIMEOUT": config_instance.llm_timeout,
+            "LLM_MAX_CONCURRENT": config_instance.llm_max_concurrent,
+            "DURATION_WEIGHT": config_instance.duration_weight,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -829,6 +854,13 @@ class TrendSignalConfig:
     sentiment_positive_threshold: float = SENTIMENT_POSITIVE_THRESHOLD
     sentiment_negative_threshold: float = SENTIMENT_NEGATIVE_THRESHOLD
 
+    # LLM Context Checker parameters (v2.1)
+    llm_context_enabled: bool = LLM_CONTEXT_ENABLED
+    llm_model: str = LLM_MODEL
+    llm_timeout: float = LLM_TIMEOUT
+    llm_max_concurrent: int = LLM_MAX_CONCURRENT
+    duration_weight: Dict[str, float] = None  # initialized in __post_init__
+
     # 🆕 Scheduler settings
     signal_refresh_interval: int = SIGNAL_REFRESH_INTERVAL
     bet_market_open: str = BET_MARKET_OPEN
@@ -996,11 +1028,21 @@ class TrendSignalConfig:
             self.sentiment_conf_low_news_count = saved_config.get("SENTIMENT_CONF_LOW_NEWS_COUNT", SENTIMENT_CONF_LOW_NEWS_COUNT)
             self.sentiment_positive_threshold = saved_config.get("SENTIMENT_POSITIVE_THRESHOLD", SENTIMENT_POSITIVE_THRESHOLD)
             self.sentiment_negative_threshold = saved_config.get("SENTIMENT_NEGATIVE_THRESHOLD", SENTIMENT_NEGATIVE_THRESHOLD)
+            # LLM Context Checker
+            self.llm_context_enabled = saved_config.get("LLM_CONTEXT_ENABLED", LLM_CONTEXT_ENABLED)
+            self.llm_model = saved_config.get("LLM_MODEL", LLM_MODEL)
+            self.llm_timeout = saved_config.get("LLM_TIMEOUT", LLM_TIMEOUT)
+            self.llm_max_concurrent = saved_config.get("LLM_MAX_CONCURRENT", LLM_MAX_CONCURRENT)
+            if "DURATION_WEIGHT" in saved_config:
+                self.duration_weight = saved_config["DURATION_WEIGHT"]
             print("[OK] Config loaded from file with custom weights")
         
         # Initialize nested dicts if not loaded (legacy compatibility)
         if self.decay_weights is None:
             self.decay_weights = DECAY_WEIGHTS.copy()
+
+        if self.duration_weight is None:
+            self.duration_weight = DURATION_WEIGHT.copy()
         
         if self.sma_periods is None:
             self.sma_periods = {
@@ -1032,7 +1074,8 @@ class TrendSignalConfig:
             new_params = [
                 'SR_DBSCAN_EPS', 'SR_DBSCAN_MIN_SAMPLES', 'SR_DBSCAN_ORDER', 'SR_DBSCAN_LOOKBACK',
                 'RSI_TIMEFRAME', 'SMA_SHORT_TIMEFRAME', 'MACD_TIMEFRAME',
-                'RISK_VOLATILITY_WEIGHT', 'RISK_PROXIMITY_WEIGHT'
+                'RISK_VOLATILITY_WEIGHT', 'RISK_PROXIMITY_WEIGHT',
+                'LLM_CONTEXT_ENABLED', 'DURATION_WEIGHT',
             ]
             
             missing_params = [p for p in new_params if p not in saved_config]
