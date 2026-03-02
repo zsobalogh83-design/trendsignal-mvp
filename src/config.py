@@ -36,22 +36,8 @@ MARKETAUX_API_KEY = os.getenv("MARKETAUX_API_KEY", "")  # Marketaux API (100 req
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")  # Telegram Bot API token
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # Your Telegram chat ID
 
-# For development/testing (replace with your keys)
-if not NEWSAPI_KEY:
-    NEWSAPI_KEY = "c042824059404c8e9da37ef7cd4088b6"  # DISABLED – csak megőrzés
-if not ALPHAVANTAGE_KEY:
-    ALPHAVANTAGE_KEY = "Q3R3ZCIBFDJI8BU9"  # DISABLED – csak megőrzés
-if not GNEWS_API_KEY:
-    GNEWS_API_KEY = "422e63bafec92ab1e705b47455a16ce5"
-if not FINNHUB_API_KEY:
-    FINNHUB_API_KEY = "d60j2mpr01qto1rdbjmgd60j2mpr01qto1rdbjn0"
-if not MARKETAUX_API_KEY:
-    MARKETAUX_API_KEY = "Xmr2SpSnRFN44kJObAIr2LHVMuzj9jl15lDYD4F8"
-# ✅ Telegram (set your values here or use environment variables)
-if not TELEGRAM_BOT_TOKEN:
-    TELEGRAM_BOT_TOKEN = "8533645963:AAEZWIHDRQCDKkcE90cijlKJO5kllHiYOKk"
-if not TELEGRAM_CHAT_ID:
-    TELEGRAM_CHAT_ID = "8264087377"
+# API kulcsok a .env fájlból töltődnek (load_dotenv fent).
+# Ha hiányoznak, a funkció le van tiltva vagy üres választ ad.
 
 
 # ==========================================
