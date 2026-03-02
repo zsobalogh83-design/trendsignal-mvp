@@ -1301,14 +1301,13 @@ class TrendSignalConfig:
     
     def validate(self) -> bool:
         """Validate configuration"""
-        # Check API keys
-        if not self.newsapi_key or self.newsapi_key == "YOUR_NEWSAPI_KEY_HERE":
-            print("[WARN] Warning: NewsAPI key not set!")
-            return False
-
-        if not self.alphavantage_key or self.alphavantage_key == "YOUR_ALPHAVANTAGE_KEY_HERE":
-            print("[WARN] Warning: Alpha Vantage key not set!")
-            return False
+        # Check active API keys (NewsAPI + AlphaVantage DISABLED – free tier delay)
+        if not self.gnews_api_key:
+            print("[WARN] Warning: GNews API key not set!")
+        if not self.finnhub_api_key:
+            print("[WARN] Warning: Finnhub API key not set!")
+        if not self.marketaux_api_key:
+            print("[WARN] Warning: Marketaux API key not set!")
 
         # Check weights sum to 1.0
         total_weight = self.sentiment_weight + self.technical_weight + self.risk_weight
