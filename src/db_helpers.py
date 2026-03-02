@@ -97,7 +97,20 @@ def save_news_item_to_db(news_item: NewsItem, ticker_symbol: str, db: Session) -
             sentiment_score=news_item.sentiment_score,
             sentiment_confidence=news_item.sentiment_confidence,
             sentiment_label=news_item.sentiment_label,
-            is_duplicate=False
+            is_duplicate=False,
+            # LLM Context Checker fields (v2.1)
+            finbert_score=news_item.sentiment_score,
+            active_score=getattr(news_item, 'active_score', None),
+            active_score_source=getattr(news_item, 'active_score_source', 'finbert'),
+            llm_score=getattr(news_item, 'llm_score', None),
+            llm_price_impact=getattr(news_item, 'llm_price_impact', None),
+            llm_impact_level=getattr(news_item, 'llm_impact_level', None),
+            llm_impact_duration=getattr(news_item, 'llm_impact_duration', None),
+            llm_catalyst_type=getattr(news_item, 'llm_catalyst_type', None),
+            llm_priced_in=getattr(news_item, 'llm_priced_in', None),
+            llm_confidence=getattr(news_item, 'llm_confidence', None),
+            llm_reason=getattr(news_item, 'llm_reason', None),
+            llm_latency_ms=getattr(news_item, 'llm_latency_ms', None),
         )
         
         db.add(news_record)
@@ -172,7 +185,11 @@ def get_recent_news_from_db(
                 sentiment_score=news_record.sentiment_score,
                 sentiment_confidence=news_record.sentiment_confidence or 0.0,
                 sentiment_label=news_record.sentiment_label,
-                credibility=news_record.source.credibility_weight if news_record.source else 0.8
+                credibility=news_record.source.credibility_weight if news_record.source else 0.8,
+                # LLM Context Checker fields (v2.1)
+                active_score=news_record.active_score,
+                active_score_source=news_record.active_score_source or 'finbert',
+                llm_impact_duration=news_record.llm_impact_duration,
             )
             news_items.append(news_item)
         

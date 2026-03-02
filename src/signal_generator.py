@@ -1309,8 +1309,20 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
             decay = 0.0
         
         if decay > 0:
-            final_weight = decay * news_item.credibility
-            weighted_scores.append(news_item.sentiment_score * final_weight)
+            # Duration weight (spec 2.5) – LLM impact_duration alapjan
+            duration_map = getattr(config, 'duration_weight', None) or {
+                'hours': 0.6, 'days': 1.0, 'weeks': 1.4, 'permanent': 1.8
+            }
+            duration = duration_map.get(
+                getattr(news_item, 'llm_impact_duration', None) or 'days',
+                1.0  # fallback ha nincs LLM adat
+            )
+            # active_score: llm_score ha LLM sikeres, finbert_score ha nem (spec 1.3)
+            score = getattr(news_item, 'active_score', None)
+            if score is None:
+                score = news_item.sentiment_score  # teljes fallback
+            final_weight = decay * news_item.credibility * duration
+            weighted_scores.append(score * final_weight)
             weights_sum += final_weight
             confidences.append(news_item.sentiment_confidence)
     
@@ -1379,6 +1391,9 @@ def aggregate_sentiment_from_news(news_items: List) -> Dict:
                 "source": getattr(item, 'source', 'Unknown'),
                 "sentiment_score": item.sentiment_score,
                 "sentiment_confidence": item.sentiment_confidence,
+                "active_score": getattr(item, 'active_score', item.sentiment_score),
+                "active_score_source": getattr(item, 'active_score_source', 'finbert'),
+                "llm_impact_duration": getattr(item, 'llm_impact_duration', None),
                 "published_at": item.published_at,
                 "credibility_weight": item.credibility,
                 "time_decay": (

@@ -212,7 +212,11 @@ class NewsItem:
     sentiment_confidence: float
     sentiment_label: str
     credibility: float = 0.80
-    
+    # LLM Context Checker fields (v2.1)
+    active_score: Optional[float] = None       # ScoreResolver output (llm or finbert)
+    active_score_source: str = 'finbert'        # 'llm' | 'finbert'
+    llm_impact_duration: Optional[str] = None   # 'hours'|'days'|'weeks'|'permanent'
+
     def get_age_hours(self, reference_time: Optional[datetime] = None) -> float:
         """Calculate news age in hours"""
         ref = reference_time or datetime.now(timezone.utc)
