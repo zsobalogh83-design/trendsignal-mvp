@@ -12,6 +12,13 @@ import os
 import json
 from pathlib import Path
 
+# Load .env file from project root (if exists) – OS env vars take priority
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent / ".env", override=False)
+except ImportError:
+    pass  # python-dotenv not installed, rely on OS env vars
+
 
 # ==========================================
 # API KEYS (Environment Variables)
