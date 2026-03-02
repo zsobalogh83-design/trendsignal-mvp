@@ -358,6 +358,9 @@ class NewsCollector:
         all_news = self._deduplicate_news(all_news)
         all_news.sort(key=lambda x: x.published_at, reverse=True)
 
+        # LLM Context Check – deduplikacio utan, DB mentes elott
+        self._run_llm_context_check(all_news, ticker_symbol, company_name)
+
         if save_to_db and self.db and all_news:
             self._save_news_to_db(all_news, ticker_symbol)
 
@@ -698,6 +701,70 @@ class NewsCollector:
         """Az elmúlt `hours` órában megjelent cikkek száma."""
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         return sum(1 for item in news_items if item.published_at >= cutoff)
+
+    def _run_llm_context_check(
+        self,
+        news_items: List[NewsItem],
+        ticker_symbol: str,
+        company_name: str,
+    ) -> None:
+        """
+        LLM arfolyamhatas scoring – deduplikacio utan, DB mentes elott.
+        FinBERT parallellel fut: az active_score az LLM vagy FinBERT score lesz.
+        Ha LLM ki van kapcsolva vagy hiba van, active_score = sentiment_score.
+        """
+        if not news_items:
+            return
+
+        # LLM disabled: active_score = finbert (sentiment_score)
+        if not self.config.llm_context_enabled:
+            for item in news_items:
+                if getattr(item, 'active_score', None) is None:
+                    item.active_score = item.sentiment_score
+                    item.active_score_source = 'finbert'
+            return
+
+        from src.config import LLM_API_KEY
+        from src.llm_context_checker import LLMContextChecker
+
+        try:
+            checker = LLMContextChecker(
+                api_key=LLM_API_KEY,
+                model=self.config.llm_model,
+                timeout=self.config.llm_timeout,
+                max_concurrent=self.config.llm_max_concurrent,
+            )
+            results = checker.check_batch(news_items, ticker_symbol, company_name)
+
+            llm_ok = 0
+            llm_fail = 0
+            for item, result in zip(news_items, results):
+                if result.success:
+                    item.active_score = result.llm_score
+                    item.active_score_source = 'llm'
+                    item.llm_impact_duration = result.impact_duration
+                    # Extra mezok DB-be
+                    item.llm_score = result.llm_score
+                    item.llm_price_impact = result.price_impact
+                    item.llm_impact_level = result.impact_level
+                    item.llm_catalyst_type = result.catalyst_type
+                    item.llm_priced_in = result.priced_in
+                    item.llm_confidence = result.confidence
+                    item.llm_reason = result.reason
+                    item.llm_latency_ms = result.latency_ms
+                    llm_ok += 1
+                else:
+                    item.active_score = item.sentiment_score
+                    item.active_score_source = 'finbert'
+                    llm_fail += 1
+
+            print(f"  [LLM] {ticker_symbol}: {llm_ok} OK, {llm_fail} fallback-to-FinBERT")
+
+        except Exception as e:
+            print(f"  [LLM] Batch check failed for {ticker_symbol}: {e} -- fallback to FinBERT")
+            for item in news_items:
+                item.active_score = item.sentiment_score
+                item.active_score_source = 'finbert'
 
     def _save_news_to_db(self, news_items: List[NewsItem], ticker_symbol: str):
         """Hírek mentése az adatbázisba."""

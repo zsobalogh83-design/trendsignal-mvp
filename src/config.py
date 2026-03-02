@@ -12,6 +12,13 @@ import os
 import json
 from pathlib import Path
 
+# Load .env file from project root (if exists) – OS env vars take priority
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent / ".env", override=False)
+except ImportError:
+    pass  # python-dotenv not installed, rely on OS env vars
+
 
 # ==========================================
 # API KEYS (Environment Variables)
@@ -29,22 +36,8 @@ MARKETAUX_API_KEY = os.getenv("MARKETAUX_API_KEY", "")  # Marketaux API (100 req
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")  # Telegram Bot API token
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")  # Your Telegram chat ID
 
-# For development/testing (replace with your keys)
-if not NEWSAPI_KEY:
-    NEWSAPI_KEY = "c042824059404c8e9da37ef7cd4088b6"  # DISABLED – csak megőrzés
-if not ALPHAVANTAGE_KEY:
-    ALPHAVANTAGE_KEY = "Q3R3ZCIBFDJI8BU9"  # DISABLED – csak megőrzés
-if not GNEWS_API_KEY:
-    GNEWS_API_KEY = "422e63bafec92ab1e705b47455a16ce5"
-if not FINNHUB_API_KEY:
-    FINNHUB_API_KEY = "d60j2mpr01qto1rdbjmgd60j2mpr01qto1rdbjn0"
-if not MARKETAUX_API_KEY:
-    MARKETAUX_API_KEY = "Xmr2SpSnRFN44kJObAIr2LHVMuzj9jl15lDYD4F8"
-# ✅ Telegram (set your values here or use environment variables)
-if not TELEGRAM_BOT_TOKEN:
-    TELEGRAM_BOT_TOKEN = "8533645963:AAEZWIHDRQCDKkcE90cijlKJO5kllHiYOKk"
-if not TELEGRAM_CHAT_ID:
-    TELEGRAM_CHAT_ID = "8264087377"
+# API kulcsok a .env fájlból töltődnek (load_dotenv fent).
+# Ha hiányoznak, a funkció le van tiltva vagy üres választ ad.
 
 
 # ==========================================
@@ -119,6 +112,25 @@ TELEGRAM_SCORE_THRESHOLD = 30  # Alert when |combined_score| > 30
 TELEGRAM_MAX_ALERTS_PER_HOUR = 10  # Rate limit: max alerts per hour
 TELEGRAM_INCLUDE_NEWS = True  # Include top 3 news headlines in alert
 TELEGRAM_INCLUDE_LINK = True  # Include link to TrendSignal UI
+
+
+# ==========================================
+# LLM CONTEXT CHECKER CONFIGURATION (v2.1)
+# ==========================================
+
+LLM_CONTEXT_ENABLED = False   # Default OFF – safe toggle
+LLM_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+LLM_MODEL = "openai/gpt-4o-mini"
+LLM_TIMEOUT = 3.0             # API timeout seconds
+LLM_MAX_CONCURRENT = 5        # ThreadPoolExecutor max workers
+
+# Duration weight – news item szintjen hat a sentiment aggregalasban (spec 2.5)
+DURATION_WEIGHT = {
+    'hours':     0.6,   # rovid hatas (Fed dontes napjan)
+    'days':      1.0,   # alapeset (earnings)
+    'weeks':     1.4,   # hosszabb hatas (jogi ugy)
+    'permanent': 1.8,   # tarto shatas (felvasarlas)
+}
 
 
 # ==========================================
@@ -572,6 +584,12 @@ def save_config_to_file(config_instance):
             "SENTIMENT_CONF_LOW_NEWS_COUNT": config_instance.sentiment_conf_low_news_count,
             "SENTIMENT_POSITIVE_THRESHOLD": config_instance.sentiment_positive_threshold,
             "SENTIMENT_NEGATIVE_THRESHOLD": config_instance.sentiment_negative_threshold,
+            # LLM Context Checker
+            "LLM_CONTEXT_ENABLED": config_instance.llm_context_enabled,
+            "LLM_MODEL": config_instance.llm_model,
+            "LLM_TIMEOUT": config_instance.llm_timeout,
+            "LLM_MAX_CONCURRENT": config_instance.llm_max_concurrent,
+            "DURATION_WEIGHT": config_instance.duration_weight,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -829,6 +847,13 @@ class TrendSignalConfig:
     sentiment_positive_threshold: float = SENTIMENT_POSITIVE_THRESHOLD
     sentiment_negative_threshold: float = SENTIMENT_NEGATIVE_THRESHOLD
 
+    # LLM Context Checker parameters (v2.1)
+    llm_context_enabled: bool = LLM_CONTEXT_ENABLED
+    llm_model: str = LLM_MODEL
+    llm_timeout: float = LLM_TIMEOUT
+    llm_max_concurrent: int = LLM_MAX_CONCURRENT
+    duration_weight: Dict[str, float] = None  # initialized in __post_init__
+
     # 🆕 Scheduler settings
     signal_refresh_interval: int = SIGNAL_REFRESH_INTERVAL
     bet_market_open: str = BET_MARKET_OPEN
@@ -996,11 +1021,21 @@ class TrendSignalConfig:
             self.sentiment_conf_low_news_count = saved_config.get("SENTIMENT_CONF_LOW_NEWS_COUNT", SENTIMENT_CONF_LOW_NEWS_COUNT)
             self.sentiment_positive_threshold = saved_config.get("SENTIMENT_POSITIVE_THRESHOLD", SENTIMENT_POSITIVE_THRESHOLD)
             self.sentiment_negative_threshold = saved_config.get("SENTIMENT_NEGATIVE_THRESHOLD", SENTIMENT_NEGATIVE_THRESHOLD)
+            # LLM Context Checker
+            self.llm_context_enabled = saved_config.get("LLM_CONTEXT_ENABLED", LLM_CONTEXT_ENABLED)
+            self.llm_model = saved_config.get("LLM_MODEL", LLM_MODEL)
+            self.llm_timeout = saved_config.get("LLM_TIMEOUT", LLM_TIMEOUT)
+            self.llm_max_concurrent = saved_config.get("LLM_MAX_CONCURRENT", LLM_MAX_CONCURRENT)
+            if "DURATION_WEIGHT" in saved_config:
+                self.duration_weight = saved_config["DURATION_WEIGHT"]
             print("[OK] Config loaded from file with custom weights")
         
         # Initialize nested dicts if not loaded (legacy compatibility)
         if self.decay_weights is None:
             self.decay_weights = DECAY_WEIGHTS.copy()
+
+        if self.duration_weight is None:
+            self.duration_weight = DURATION_WEIGHT.copy()
         
         if self.sma_periods is None:
             self.sma_periods = {
@@ -1032,7 +1067,8 @@ class TrendSignalConfig:
             new_params = [
                 'SR_DBSCAN_EPS', 'SR_DBSCAN_MIN_SAMPLES', 'SR_DBSCAN_ORDER', 'SR_DBSCAN_LOOKBACK',
                 'RSI_TIMEFRAME', 'SMA_SHORT_TIMEFRAME', 'MACD_TIMEFRAME',
-                'RISK_VOLATILITY_WEIGHT', 'RISK_PROXIMITY_WEIGHT'
+                'RISK_VOLATILITY_WEIGHT', 'RISK_PROXIMITY_WEIGHT',
+                'LLM_CONTEXT_ENABLED', 'DURATION_WEIGHT',
             ]
             
             missing_params = [p for p in new_params if p not in saved_config]
@@ -1265,14 +1301,13 @@ class TrendSignalConfig:
     
     def validate(self) -> bool:
         """Validate configuration"""
-        # Check API keys
-        if not self.newsapi_key or self.newsapi_key == "YOUR_NEWSAPI_KEY_HERE":
-            print("[WARN] Warning: NewsAPI key not set!")
-            return False
-
-        if not self.alphavantage_key or self.alphavantage_key == "YOUR_ALPHAVANTAGE_KEY_HERE":
-            print("[WARN] Warning: Alpha Vantage key not set!")
-            return False
+        # Check active API keys (NewsAPI + AlphaVantage DISABLED – free tier delay)
+        if not self.gnews_api_key:
+            print("[WARN] Warning: GNews API key not set!")
+        if not self.finnhub_api_key:
+            print("[WARN] Warning: Finnhub API key not set!")
+        if not self.marketaux_api_key:
+            print("[WARN] Warning: Marketaux API key not set!")
 
         # Check weights sum to 1.0
         total_weight = self.sentiment_weight + self.technical_weight + self.risk_weight

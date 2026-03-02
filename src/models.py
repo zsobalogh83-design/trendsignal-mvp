@@ -88,6 +88,20 @@ class NewsItem(Base):
     duplicate_of = Column(Integer, ForeignKey("news_items.id"), nullable=True)
     cluster_id = Column(String(50))
 
+    # LLM Context Checker columns (v2.1)
+    finbert_score = Column(Float)                # FinBERT score (copy of sentiment_score)
+    llm_score = Column(Float)                    # LLM price impact score [-1.0, +1.0]
+    llm_price_impact = Column(String(20))        # strong_up|up|neutral|down|strong_down
+    llm_impact_level = Column(Integer)           # 1-5
+    llm_impact_duration = Column(String(20))     # hours|days|weeks|permanent
+    llm_catalyst_type = Column(String(30))       # earnings|macro|regulatory|...
+    llm_priced_in = Column(Boolean)              # true if already priced in
+    llm_confidence = Column(String(10))          # low|medium|high
+    llm_reason = Column(String(100))             # max 10 word reason
+    llm_latency_ms = Column(Integer)             # API response time ms
+    active_score = Column(Float)                 # ScoreResolver: llm_score or finbert_score
+    active_score_source = Column(String(10))     # 'llm' | 'finbert'
+
 
 class NewsTicker(Base):
     """Many-to-many: news <-> tickers"""
