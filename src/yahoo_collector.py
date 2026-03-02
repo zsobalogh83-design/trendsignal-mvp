@@ -7,8 +7,21 @@ Date: 2025-02-03
 """
 
 import feedparser
+import socket
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Optional
+
+_YAHOO_FEEDPARSER_TIMEOUT = 10  # seconds – GOOGL-típusú végtelen hang megelőzése
+
+
+def _parse_yahoo_feed(url: str) -> object:
+    """feedparser.parse() 10s socket timeout-tal (thread-safe: old_timeout visszaállítva)."""
+    old_timeout = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(_YAHOO_FEEDPARSER_TIMEOUT)
+        return feedparser.parse(url)
+    finally:
+        socket.setdefaulttimeout(old_timeout)
 
 
 class YahooFinanceCollector:
@@ -47,8 +60,8 @@ class YahooFinanceCollector:
             # Build RSS feed URL
             feed_url = f"{self.base_url}?s={ticker_symbol}"
             
-            # Parse RSS feed
-            feed = feedparser.parse(feed_url)
+            # Parse RSS feed (10s socket timeout – végtelen hang megelőzése)
+            feed = _parse_yahoo_feed(feed_url)
             
             if not feed.entries:
                 print(f"  ℹ️ Yahoo Finance: No news found for {ticker_symbol}")
