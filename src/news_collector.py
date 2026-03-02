@@ -276,20 +276,28 @@ class NewsCollector:
                 )
 
         if tier1_tasks:
-            # Tier 1 timeout: 15 mp/forrás – RSS lassulás vagy bot-block esetén sem akad el
+            # Tier 1 timeout: 15 mp/forrás, összesen max 20 mp/forrás
+            # Az overall TimeoutError-t elkapjuk: a már begyűjtött hírek megmaradnak
             _TIER1_TASK_TIMEOUT = 15
+            _TIER1_OVERALL_TIMEOUT = _TIER1_TASK_TIMEOUT * max(2, len(tier1_tasks))
             with ThreadPoolExecutor(max_workers=len(tier1_tasks)) as executor:
                 futures = {executor.submit(fn): name for name, fn in tier1_tasks.items()}
-                for future in as_completed(futures, timeout=_TIER1_TASK_TIMEOUT * 2):
-                    source_name = futures[future]
-                    try:
-                        items = future.result(timeout=_TIER1_TASK_TIMEOUT)
-                        all_news.extend(items)
-                        print(f"  📰 {source_name}: {len(items)} cikk")
-                    except TimeoutError:
-                        print(f"  ⏱️ {source_name} timeout ({_TIER1_TASK_TIMEOUT}s), skip")
-                    except Exception as e:
-                        print(f"  ⚠️ {source_name} hiba: {e}")
+                try:
+                    for future in as_completed(futures, timeout=_TIER1_OVERALL_TIMEOUT):
+                        source_name = futures[future]
+                        try:
+                            items = future.result(timeout=_TIER1_TASK_TIMEOUT)
+                            all_news.extend(items)
+                            print(f"  📰 {source_name}: {len(items)} cikk")
+                        except TimeoutError:
+                            print(f"  ⏱️ {source_name} timeout ({_TIER1_TASK_TIMEOUT}s), skip")
+                        except Exception as e:
+                            print(f"  ⚠️ {source_name} hiba: {e}")
+                except TimeoutError:
+                    # Néhány Tier 1 forrás nem végzett időben – folytatás a már begyűjtött hírekkel
+                    remaining = [name for fut, name in futures.items() if not fut.done()]
+                    for name in remaining:
+                        print(f"  ⏱️ {name} overall timeout – skip")
 
         # ════════════════════════════════════════════════════════════
         # TIER 2 – Finnhub (rate-limited, 60/perc)
