@@ -299,13 +299,25 @@ def run_batch_analysis(
                     db_thread.close()
 
         MAX_FETCH_WORKERS = min(9, len(tickers))
+        _TICKER_FETCH_TIMEOUT = 120  # sec/ticker – végtelen hang megelőzése
         with ThreadPoolExecutor(max_workers=MAX_FETCH_WORKERS) as executor:
             fetch_futures = {executor.submit(_fetch_ticker_data, t): t for t in tickers}
-            for future in as_completed(fetch_futures):
-                symbol, news_items, dual_data = future.result()
-                news_data[symbol] = news_items
-                price_data[symbol] = dual_data
-                print(f"  ✓ {symbol} data collected")
+            for future in as_completed(fetch_futures, timeout=_TICKER_FETCH_TIMEOUT * len(tickers)):
+                ticker_info = fetch_futures[future]
+                sym = ticker_info['symbol']
+                try:
+                    symbol, news_items, dual_data = future.result(timeout=_TICKER_FETCH_TIMEOUT)
+                    news_data[symbol] = news_items
+                    price_data[symbol] = dual_data
+                    print(f"  ✓ {symbol} data collected")
+                except TimeoutError:
+                    print(f"  ⚠️ {sym} timeout ({_TICKER_FETCH_TIMEOUT}s) – kihagyva")
+                    news_data[sym] = []
+                    price_data[sym] = {}
+                except Exception as e:
+                    print(f"  ⚠️ {sym} hiba – kihagyva: {e}")
+                    news_data[sym] = []
+                    price_data[sym] = {}
         
         print("\n" + "=" * 70)
         print("🎯 Generating signals...")
