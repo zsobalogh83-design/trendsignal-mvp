@@ -118,7 +118,7 @@ TELEGRAM_INCLUDE_LINK = True  # Include link to TrendSignal UI
 # LLM CONTEXT CHECKER CONFIGURATION (v2.1)
 # ==========================================
 
-LLM_CONTEXT_ENABLED = False   # Default OFF – safe toggle
+LLM_CONTEXT_ENABLED = True   # Default OFF – safe toggle
 LLM_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 LLM_MODEL = "openai/gpt-4o-mini"
 LLM_TIMEOUT = 3.0             # API timeout seconds
