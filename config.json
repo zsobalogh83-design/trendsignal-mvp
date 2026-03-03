@@ -127,7 +127,7 @@
   "SENTIMENT_NEGATIVE_THRESHOLD": -0.2,
   "LLM_CONTEXT_ENABLED": true,
   "LLM_MODEL": "openai/gpt-4o-mini",
-  "LLM_TIMEOUT": 3.0,
+  "LLM_TIMEOUT": 5.0,
   "LLM_MAX_CONCURRENT": 5,
   "DURATION_WEIGHT": {
     "hours": 0.6,
