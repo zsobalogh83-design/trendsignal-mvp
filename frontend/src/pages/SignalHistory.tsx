@@ -677,6 +677,7 @@ export function SignalHistory() {
                     <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Stop Loss</th>
                     <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Take Profit</th>
                     <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>R/R</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'center', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }} title="Az ármozgás iránya a belépéstől számított 2 órán belül (csak kereskedési idő alatt keletkezett, nem-HOLD signalokra)">2H Irány</th>
                     <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>P&L</th>
                     <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '600', color: '#94a3b8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Nettó</th>
                   </tr>
@@ -735,6 +736,37 @@ export function SignalHistory() {
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#f87171', fontSize: '12px' }}>${signal.stop_loss.toFixed(2)}</td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#34d399', fontSize: '12px' }}>${signal.take_profit.toFixed(2)}</td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '500', color: '#e0e7ff', fontSize: '12px' }}>{signal.risk_reward_ratio.toFixed(2)}</td>
+                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                        {signal.direction_result?.eligible ? (
+                          <span
+                            title={`${signal.direction_result.window_minutes} perces ablak${signal.direction_result.hit_eod ? ' (EOD-ig)' : ''}`}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                              padding: '2px 7px',
+                              borderRadius: '10px',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              fontFamily: 'monospace',
+                              background: signal.direction_result.correct
+                                ? 'rgba(16, 185, 129, 0.12)'
+                                : 'rgba(239, 68, 68, 0.12)',
+                              color: signal.direction_result.correct ? '#34d399' : '#f87171',
+                              border: `1px solid ${signal.direction_result.correct
+                                ? 'rgba(16, 185, 129, 0.3)'
+                                : 'rgba(239, 68, 68, 0.3)'}`,
+                            }}
+                          >
+                            {signal.direction_result.correct ? '✓' : '✗'}
+                            {' '}
+                            {signal.direction_result.price_change_pct > 0 ? '+' : ''}
+                            {signal.direction_result.price_change_pct.toFixed(2)}%
+                          </span>
+                        ) : (
+                          <span style={{ color: '#334155', fontSize: '12px' }}>—</span>
+                        )}
+                      </td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', fontFamily: 'monospace' }}>
                         {renderPnl(signal.simulated_trade, openPnlData, signal)}
                       </td>

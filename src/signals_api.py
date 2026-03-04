@@ -17,11 +17,98 @@ from datetime import datetime, timedelta
 
 # Database imports
 from src.database import get_db
-from src.models import Ticker, Signal, SignalCalculation, SimulatedTrade
+from src.models import Ticker, Signal, SignalCalculation, SimulatedTrade, PriceData
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/signals", tags=["Signals"])
+
+
+def _compute_direction_result(
+    signal_created_at: datetime,
+    ticker_symbol: str,
+    decision: str,
+    db: Session
+) -> dict | None:
+    """
+    Kiszámolja, hogy egy signal helyes irányt jelzett-e a belépéstől
+    számított 2 órán belül (vagy EOD zárásig, ha az közelebb van).
+
+    Visszatérési érték:
+        None  — ha a signal nem értékelhető (HOLD, after-hours, nincs adat)
+        dict  — {eligible, correct, price_change_pct, window_minutes, hit_eod}
+
+    Feltételek (azonos logika mint analyze_signal_direction.py):
+        - Belépés = created_at + 15 perc
+        - Csak kereskedési időben lévő belépések vizsgálhatók
+        - Kilépési referencia: entry + 2h, max EOD - 5 perc
+        - 5m gyertyák ±20 perces toleranciával
+    """
+    if decision == 'HOLD':
+        return None
+
+    entry_time = signal_created_at + timedelta(minutes=15)
+
+    # Kereskedési idő és hétvége ellenőrzés
+    def _is_weekend(t: datetime) -> bool:
+        return t.weekday() >= 5
+
+    def _is_trading(t: datetime, sym: str) -> bool:
+        dec = t.hour + t.minute / 60.0
+        return (8.0 <= dec < 16.0) if sym.endswith('.BD') else (14.5 <= dec < 21.0)
+
+    if _is_weekend(entry_time) or not _is_trading(entry_time, ticker_symbol):
+        return None
+
+    # Piacvégi időpont (UTC)
+    if ticker_symbol.endswith('.BD'):
+        eod = entry_time.replace(hour=16, minute=0, second=0, microsecond=0)
+    else:
+        eod = entry_time.replace(hour=21, minute=0, second=0, microsecond=0)
+
+    raw_exit_time = entry_time + timedelta(hours=2)
+    exit_time     = min(raw_exit_time, eod - timedelta(minutes=5))
+
+    if (exit_time - entry_time).total_seconds() < 300:
+        return None  # Kevesebb mint 5 perc kereskedési idő maradt
+
+    hit_eod = raw_exit_time > eod
+
+    # Legközelebbi 5m gyertya a target időponthoz
+    def _nearest_candle(t: datetime, tol_min: int = 20):
+        t_low  = t - timedelta(minutes=tol_min)
+        t_high = t + timedelta(minutes=tol_min)
+        rows = db.query(PriceData).filter(
+            PriceData.ticker_symbol == ticker_symbol,
+            PriceData.interval == '5m',
+            PriceData.timestamp >= t_low,
+            PriceData.timestamp <= t_high,
+        ).all()
+        if not rows:
+            return None
+        return min(rows, key=lambda c: abs((c.timestamp - t).total_seconds()))
+
+    entry_candle = _nearest_candle(entry_time)
+    if not entry_candle:
+        return None
+
+    exit_candle = _nearest_candle(exit_time)
+    if not exit_candle:
+        return None
+
+    entry_price  = float(entry_candle.close)
+    exit_price   = float(exit_candle.close)
+    pct_change   = (exit_price - entry_price) / entry_price * 100
+    correct      = (exit_price > entry_price) if decision == 'BUY' else (exit_price < entry_price)
+    window_min   = int((exit_time - entry_time).total_seconds() / 60)
+
+    return {
+        "eligible":          True,
+        "correct":           correct,
+        "price_change_pct":  round(pct_change, 3),
+        "window_minutes":    window_min,
+        "hit_eod":           hit_eod,
+    }
 
 
 def to_python(val):
@@ -589,6 +676,10 @@ async def get_signal_history(
                     "usd_huf_rate": float(trade.usd_huf_rate) if trade.usd_huf_rate is not None else None,
                 }
 
+            direction_result = _compute_direction_result(
+                signal.created_at, signal.ticker_symbol, signal.decision, db
+            )
+
             signals_list.append({
                 "id": signal.id,
                 "ticker_symbol": signal.ticker_symbol,
@@ -611,6 +702,7 @@ async def get_signal_history(
                 "expires_at": signal.expires_at.isoformat() + "Z" if signal.expires_at else None,
                 "status": signal.status,
                 "simulated_trade": simulated_trade,
+                "direction_result": direction_result,
             })
         
         # Return response with applied filters info
