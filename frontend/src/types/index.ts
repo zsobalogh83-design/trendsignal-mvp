@@ -181,6 +181,14 @@ export interface Signal {
     position_size_shares: number | null;
     usd_huf_rate: number | null;
   } | null;
+  /** 2 órás irányprecizitás — null ha a signal nem értékelhető (after-hours, HOLD) */
+  direction_result?: {
+    eligible: boolean;
+    correct: boolean;
+    price_change_pct: number;
+    window_minutes: number;
+    hit_eod: boolean;
+  } | null;
 }
 
 export interface SentimentConfig {
