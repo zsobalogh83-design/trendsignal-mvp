@@ -203,7 +203,30 @@ class TradeManager:
 
         # 5. DETERMINE DIRECTION (already set above for SHORT guard, repeated for clarity)
         # direction = "LONG" if signal.combined_score >= 25 else "SHORT"
-        
+
+        # 5b. ENTRY FILTER: skip if price already moved >1×ATR in signal direction
+        # Prevents entering after a sentiment spike has already run the price up/down.
+        # ATR proxy = SL distance / 2 (≈ 1×ATR when atr_sl_mult ≈ 2.0)
+        if signal.entry_price and signal.stop_loss:
+            if direction == "LONG":
+                atr_proxy = (signal.entry_price - signal.stop_loss) / 2.0
+                if atr_proxy > 0 and (entry_price - signal.entry_price) > atr_proxy:
+                    signal.status = 'nogo'
+                    raise InvalidSignalError(
+                        signal.id,
+                        f"Entry filter [NoGO]: price moved +{entry_price - signal.entry_price:.2f} "
+                        f"vs ATR proxy {atr_proxy:.2f} — buying at top, skip"
+                    )
+            else:  # SHORT
+                atr_proxy = (signal.stop_loss - signal.entry_price) / 2.0
+                if atr_proxy > 0 and (signal.entry_price - entry_price) > atr_proxy:
+                    signal.status = 'nogo'
+                    raise InvalidSignalError(
+                        signal.id,
+                        f"Entry filter [NoGO]: price dropped -{signal.entry_price - entry_price:.2f} "
+                        f"vs ATR proxy {atr_proxy:.2f} — selling at bottom, skip"
+                    )
+
         # 6. CALCULATE POSITION SIZE
         position_size, position_value, usd_huf_rate = self._calculate_position_size(
             symbol, entry_price
@@ -297,6 +320,27 @@ class TradeManager:
 
         entry_price = candle['close']
         execution_time_market = candle['timestamp']
+
+        # ENTRY FILTER: skip if price already moved >1×ATR in signal direction
+        if signal.entry_price and signal.stop_loss:
+            if direction == "LONG":
+                atr_proxy = (signal.entry_price - signal.stop_loss) / 2.0
+                if atr_proxy > 0 and (entry_price - signal.entry_price) > atr_proxy:
+                    signal.status = 'nogo'
+                    raise InvalidSignalError(
+                        signal.id,
+                        f"Entry filter [NoGO]: price moved +{entry_price - signal.entry_price:.2f} "
+                        f"vs ATR proxy {atr_proxy:.2f} — buying at top, skip"
+                    )
+            else:  # SHORT
+                atr_proxy = (signal.stop_loss - signal.entry_price) / 2.0
+                if atr_proxy > 0 and (signal.entry_price - entry_price) > atr_proxy:
+                    signal.status = 'nogo'
+                    raise InvalidSignalError(
+                        signal.id,
+                        f"Entry filter [NoGO]: price dropped -{signal.entry_price - entry_price:.2f} "
+                        f"vs ATR proxy {atr_proxy:.2f} — selling at bottom, skip"
+                    )
 
         # CALCULATE POSITION SIZE
         position_size, position_value, usd_huf_rate = self._calculate_position_size(

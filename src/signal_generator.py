@@ -623,9 +623,9 @@ class SignalGenerator:
         if "SELL" in decision:
             # Confidence-adaptive SL multiplier — daytrade SHORT
             if confidence >= 0.75:
-                atr_sl_mult = config.short_atr_stop_high_conf   # ~0.5× — tight intraday SL
+                atr_sl_mult = config.short_atr_stop_high_conf   # ~1.0× — wider intraday SL for strong signals (allows pullback)
             elif confidence < 0.50:
-                atr_sl_mult = config.short_atr_stop_low_conf    # ~1.0× — wider for weak signal
+                atr_sl_mult = config.short_atr_stop_low_conf    # ~0.5× — tight for weak short signals
             else:
                 atr_sl_mult = config.short_atr_stop_default     # ~0.7× — default daytrade SL
 
@@ -645,9 +645,9 @@ class SignalGenerator:
         else:
             # Confidence-adaptive ATR multiplier for SL — swing LONG
             if confidence >= 0.75:
-                atr_sl_mult = config.stop_loss_atr_high_conf   # 1.5× — tighter SL for strong signals
+                atr_sl_mult = config.stop_loss_atr_high_conf   # 2.5× — wider SL — allows pullback on strong signals
             elif confidence < 0.50:
-                atr_sl_mult = config.stop_loss_atr_low_conf    # 2.5× — wider SL for weak signals
+                atr_sl_mult = config.stop_loss_atr_low_conf    # 1.5× — tighter SL — reduces risk on weak signals
             else:
                 atr_sl_mult = config.stop_loss_atr_mult        # 2.0× — default
 
@@ -801,10 +801,25 @@ class SignalGenerator:
             rr_ratio = reward / risk if risk > 0 else 0
             print(f"  📌 SL capped at {effective_sl_max_pct*100:.1f}% max: {stop_loss:.2f} → R:R={rr_ratio:.2f}")
 
+        # Step 1b: TP max cap — LONG swing: 6%, SHORT daytrade: 3%
+        effective_tp_max_pct = config.short_tp_max_pct if "SELL" in decision else config.tp_max_pct
+        tp_max_distance = entry_price * effective_tp_max_pct
+        if reward > tp_max_distance:
+            if "BUY" in decision:
+                take_profit = entry_price + tp_max_distance
+            else:
+                take_profit = entry_price - tp_max_distance
+            tp_method = "capped"
+            reward = abs(take_profit - entry_price)
+            rr_ratio = reward / risk if risk > 0 else 0
+            print(f"  📌 TP capped at {effective_tp_max_pct*100:.1f}% max: {take_profit:.2f} → R:R={rr_ratio:.2f}")
+
         # Step 2: Try to reach minimum R:R (1.5) by pushing TP further — NEVER by tightening SL
         # This is the preferred way: move TP, not SL
+        # Note: Step 2 can push TP up to TP_MAX_PCT — that cap was applied in Step 1b above,
+        # and will be respected here since R:R target = 1.5×SL ≤ 1.5×4% = 6% = TP_MAX_PCT.
         if rr_ratio < config.min_risk_reward and risk > 0:
-            target_tp_distance = risk * config.min_risk_reward
+            target_tp_distance = min(risk * config.min_risk_reward, tp_max_distance)  # cap by TP_MAX_PCT
             if "BUY" in decision:
                 target_tp = entry_price + target_tp_distance
                 if target_tp > take_profit:  # Only push TP further, never closer
