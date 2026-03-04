@@ -28,7 +28,7 @@ Date: 2026-02-21
 """
 
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 import logging
@@ -234,6 +234,8 @@ class BacktestService:
         _cfg = _get_config()
         trading_days_held = 1
         last_counted_date = trade.entry_execution_time.date()
+        trading_slots_held = 0   # trading-hours slotok száma (debug/log)
+        stagnation_slots = 0     # consecutive slotok ahol az ár az entry körül oldalaz
 
         # Check every 15 minutes
         while check_time_utc <= now_utc:
@@ -294,6 +296,23 @@ class BacktestService:
                     self._apply_eod_trailing_sl(trade, check_time_utc, trading_days_held)
                 check_time_utc = price_service._next_market_open_utc(check_time_utc, trade.symbol)
                 continue
+
+            trading_slots_held += 1
+
+            # Stagnation check: bármikor exit-el ha az ár huzamosan oldalaz az entry körül
+            stagnation_slots, stag_exit = self._check_stagnation(trade, check_time_utc, stagnation_slots)
+            if stag_exit:
+                logger.debug(
+                    f"      Exit: {trade.symbol} STAGNATION_EXIT "
+                    f"@ {check_time_utc} UTC ({stagnation_slots} egymást követő slot)"
+                )
+                self.trade_manager.close_position(
+                    trade,
+                    exit_reason='STAGNATION_EXIT',
+                    exit_signal=None,
+                    trigger_time_utc=check_time_utc
+                )
+                return True
 
             trigger = self._check_exit_triggers_at_time(trade, check_time_utc)
 
@@ -411,14 +430,171 @@ class BacktestService:
             f"(sl_dist={sl_distance_pct*100:.2f}%, @ {eod_time_utc})"
         )
 
-    def _check_exit_triggers_at_time(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Dict]:
+    # Stagnation: ha az ár legalább ennyi egymást követő sloton át az entry ±band-on belül marad
+    STAGNATION_CONSECUTIVE_SLOTS = 6     # 6 × 15min = 90 perc
+    STAGNATION_BAND_FACTOR = 0.30        # band = 0.30 × initial_risk (≈ 0.6–0.75×ATR alapértelmezetten)
+
+    def _check_stagnation(
+        self,
+        trade: SimulatedTrade,
+        check_time_utc: datetime,
+        current_slots: int,
+    ) -> Tuple[int, bool]:
+        """
+        Oldalazó ár detektálása: ha az árfolyam STAGNATION_CONSECUTIVE_SLOTS egymást
+        követő 15-perces sloton keresztül az entry_price ± band sávban marad, exit.
+
+        - Band = STAGNATION_BAND_FACTOR × initial_risk (ahol initial_risk = entry - orig_SL)
+        - Ha az ár kilép a sávból, a számláló nullázódik → a detektálás bármikor újraindul.
+        - LONG-ra és SHORT-ra egyaránt vonatkozik.
+
+        Returns:
+            (new_slots, should_exit)
+        """
+        if not trade.initial_stop_loss_price:
+            return current_slots, False
+
+        if trade.direction == 'LONG':
+            initial_risk = trade.entry_price - trade.initial_stop_loss_price
+        else:
+            initial_risk = trade.initial_stop_loss_price - trade.entry_price
+
+        if initial_risk <= 0:
+            return current_slots, False
+
+        band = self.STAGNATION_BAND_FACTOR * initial_risk
+
+        try:
+            candle = self.trade_manager.price_service.get_5min_candle_at_time(
+                trade.symbol, check_time_utc, tolerance_minutes=15
+            )
+        except Exception:
+            return current_slots, False
+
+        if not candle:
+            return current_slots, False
+
+        current_price = candle['close']
+        in_band = abs(current_price - trade.entry_price) <= band
+
+        new_slots = current_slots + 1 if in_band else 0
+        should_exit = new_slots >= self.STAGNATION_CONSECUTIVE_SLOTS
+
+        if new_slots > 0:
+            logger.debug(
+                f"   📊 Stagnation: {trade.symbol} {trade.direction} "
+                f"slot {new_slots}/{self.STAGNATION_CONSECUTIVE_SLOTS} "
+                f"(price={current_price:.4f}, entry={trade.entry_price:.4f}, band=±{band:.4f})"
+            )
+
+        return new_slots, should_exit
+
+    def _apply_intraday_breakeven(self, trade: SimulatedTrade, candle: Dict) -> bool:
+        """Break-even stop: move SL to entry_price when price moved +0.5×initial_risk.
+
+        Only fires once — when SL is still on the losing side of entry.
+        Uses candle HIGH (LONG) / LOW (SHORT) to detect intraday touch.
+        """
+        if not trade.initial_stop_loss_price:
+            return False
+
+        if trade.direction == 'LONG':
+            if trade.stop_loss_price >= trade.entry_price:
+                return False  # Already at break-even or better
+            initial_risk = trade.entry_price - trade.initial_stop_loss_price
+            if initial_risk <= 0:
+                return False
+            if candle['high'] >= trade.entry_price + 0.5 * initial_risk:
+                old_sl = trade.stop_loss_price
+                trade.stop_loss_price = round(trade.entry_price, 4)
+                trade.sl_tp_update_count = (trade.sl_tp_update_count or 0) + 1
+                trade.sl_tp_last_updated_at = datetime.utcnow()
+                logger.debug(
+                    f"   🛡️ Break-even: {trade.symbol} LONG SL {old_sl:.4f} → {trade.stop_loss_price:.4f}"
+                )
+                return True
+
+        else:  # SHORT
+            if trade.stop_loss_price <= trade.entry_price:
+                return False  # Already at break-even or better
+            initial_risk = trade.initial_stop_loss_price - trade.entry_price
+            if initial_risk <= 0:
+                return False
+            if candle['low'] <= trade.entry_price - 0.5 * initial_risk:
+                old_sl = trade.stop_loss_price
+                trade.stop_loss_price = round(trade.entry_price, 4)
+                trade.sl_tp_update_count = (trade.sl_tp_update_count or 0) + 1
+                trade.sl_tp_last_updated_at = datetime.utcnow()
+                logger.debug(
+                    f"   🛡️ Break-even: {trade.symbol} SHORT SL {old_sl:.4f} → {trade.stop_loss_price:.4f}"
+                )
+                return True
+
+        return False
+
+    def _apply_tp_tighten(self, trade: SimulatedTrade, candle: Dict) -> bool:
+        """TP tightening: when price is ≥75% of the way to TP, move TP closer.
+
+        New TP = current_price + 10% of original TP range (locks in ~65% of profit).
+        Only moves TP closer (never widens).
+        """
+        if not trade.initial_take_profit_price:
+            return False
+
+        current_price = candle['close']
+
+        if trade.direction == 'LONG':
+            tp_range = trade.initial_take_profit_price - trade.entry_price
+            if tp_range <= 0:
+                return False
+            tp_progress = (current_price - trade.entry_price) / tp_range
+            if tp_progress >= 0.50:  # 50%: halfway to TP → tighten
+                new_tp = current_price + 0.15 * tp_range
+                if new_tp < trade.take_profit_price:  # Only tighten
+                    old_tp = trade.take_profit_price
+                    trade.take_profit_price = round(new_tp, 4)
+                    trade.sl_tp_update_count = (trade.sl_tp_update_count or 0) + 1
+                    trade.sl_tp_last_updated_at = datetime.utcnow()
+                    logger.debug(
+                        f"   🎯 TP tighten: {trade.symbol} LONG TP {old_tp:.4f} → {trade.take_profit_price:.4f} "
+                        f"(progress={tp_progress:.0%})"
+                    )
+                    return True
+
+        else:  # SHORT
+            tp_range = trade.entry_price - trade.initial_take_profit_price
+            if tp_range <= 0:
+                return False
+            tp_progress = (trade.entry_price - current_price) / tp_range
+            if tp_progress >= 0.50:  # 50%: halfway to TP → tighten
+                new_tp = current_price - 0.15 * tp_range
+                if new_tp > trade.take_profit_price:  # Only tighten (move TP up = closer for SHORT)
+                    old_tp = trade.take_profit_price
+                    trade.take_profit_price = round(new_tp, 4)
+                    trade.sl_tp_update_count = (trade.sl_tp_update_count or 0) + 1
+                    trade.sl_tp_last_updated_at = datetime.utcnow()
+                    logger.debug(
+                        f"   🎯 TP tighten: {trade.symbol} SHORT TP {old_tp:.4f} → {trade.take_profit_price:.4f} "
+                        f"(progress={tp_progress:.0%})"
+                    )
+                    return True
+
+        return False
+
+    def _check_exit_triggers_at_time(
+        self,
+        trade: SimulatedTrade,
+        check_time_utc: datetime,
+    ) -> Optional[Dict]:
         """Check all exit triggers at specific UTC time.
 
         Priority order:
         1. SL_HIT / TP_HIT  (uses current SL/TP which may already be updated)
+        1b. Intraday break-even + TP tighten (uses already-fetched candle, then re-check)
         2. Same-direction signal → update SL/TP in-place (no exit, continue loop)
         3. OPPOSING_SIGNAL → exit
         4. EOD_AUTO_LIQUIDATION (SHORT only)
+        Note: STAGNATION_EXIT is checked separately in _check_and_close_trade before this.
         """
 
         # Priority 1: SL/TP check against current (possibly already updated) levels
@@ -436,6 +612,28 @@ class BacktestService:
                 'exit_reason': price_trigger['trigger_type'],
                 'exit_signal': None
             }
+
+        # Priority 1b: Intraday break-even + TP tighten using the already-fetched candle
+        if price_trigger and price_trigger.get('candle'):
+            candle = price_trigger['candle']
+            be_triggered = self._apply_intraday_breakeven(trade, candle)
+            tp_tightened = self._apply_tp_tighten(trade, candle)
+
+            if be_triggered or tp_tightened:
+                # Re-check SL/TP with adjusted levels (edge case: new SL immediately breached)
+                price_trigger_adj = self.trade_manager.price_service.check_price_triggers(
+                    trade.symbol,
+                    trade.stop_loss_price,
+                    trade.take_profit_price,
+                    trade.direction,
+                    check_time_utc,
+                    tolerance_minutes=15
+                )
+                if price_trigger_adj and price_trigger_adj['triggered']:
+                    return {
+                        'exit_reason': price_trigger_adj['trigger_type'],
+                        'exit_signal': None
+                    }
 
         # Priority 2: Same-direction signal → adaptive SL/TP update (no exit)
         same_dir = self._find_same_direction_signal(trade, check_time_utc)

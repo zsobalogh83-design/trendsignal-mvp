@@ -232,8 +232,8 @@ RISK_TREND_STRENGTH_WEIGHT = 0.25  # 25% - ADX trend strength risk
 # Stop-loss calculation
 STOP_LOSS_SR_BUFFER = 0.5          # S/R buffer multiplier (0.5×ATR below support)
 STOP_LOSS_ATR_MULTIPLIER = 2.0     # ATR-based stop multiplier (2×ATR), fallback
-STOP_LOSS_ATR_HIGH_CONF = 1.5      # ATR multiplier for high-confidence signals (≥0.75)
-STOP_LOSS_ATR_LOW_CONF = 2.5       # ATR multiplier for low-confidence signals (<0.50)
+STOP_LOSS_ATR_HIGH_CONF = 2.5      # ATR multiplier for high-confidence signals (≥0.75) — wide, allows pullback
+STOP_LOSS_ATR_LOW_CONF = 1.5       # ATR multiplier for low-confidence signals (<0.50) — tight, reduce risk
 MIN_STOP_LOSS_PCT = 0.02           # 2% (deprecated - kept for compatibility)
 MAX_STOP_LOSS_PCT = 0.05           # 5% (deprecated - kept for compatibility)
 
@@ -255,16 +255,18 @@ MIN_RISK_REWARD_HARD = 0.8        # Hard minimum — below this signal is still 
 
 # Trade fee and SL/TP boundary constraints
 TRADE_FEE_PCT = 0.002              # Round-trip trade fee: 0.2% (0.1% open + 0.1% close)
-SL_MAX_PCT = 0.05                  # Maximum stop-loss distance from entry: 5% (LONG swing)
+SL_MAX_PCT = 0.04                  # Maximum stop-loss distance from entry: 4% (LONG swing)
+TP_MAX_PCT = 0.06                  # Maximum take-profit distance from entry: 6% (LONG swing)
 
 # SHORT daytrade SL/TP multipliers (intraday — szűkebb range, EOD zárás)
 # Ezek külön a LONG swing multiplierektől, hogy a napi range-en belül befutható legyen a TP.
-SHORT_ATR_STOP_HIGH_CONF = 0.5    # vs LONG: 1.5 — tight SL for high-confidence shorts
+SHORT_ATR_STOP_HIGH_CONF = 1.0    # vs LONG: 2.5 — wider SL for high-confidence shorts (allows pullback)
 SHORT_ATR_STOP_DEFAULT   = 0.7    # vs LONG: 2.0 — default SHORT SL width
-SHORT_ATR_STOP_LOW_CONF  = 1.0    # vs LONG: 2.5 — wider SL for weak signals
+SHORT_ATR_STOP_LOW_CONF  = 0.5    # vs LONG: 1.5 — tight SL for weak short signals
 SHORT_ATR_TP_LOW_VOL     = 1.0    # vs LONG: 2.5 — intraday TP in calm markets
 SHORT_ATR_TP_HIGH_VOL    = 1.8    # vs LONG: 4.0 — intraday TP in volatile markets
-SHORT_SL_MAX_PCT         = 0.015  # vs LONG: 5%  — max SL cap for daytrade shorts
+SHORT_SL_MAX_PCT         = 0.015  # vs LONG: 4%  — max SL cap for daytrade shorts
+SHORT_TP_MAX_PCT         = 0.03   # vs LONG: 6%  — max TP cap for daytrade shorts
 
 # LONG trade max holding period (kereskedési napokban, nem naptári napokban)
 LONG_MAX_HOLD_DAYS           = 5    # kényszerzárás ennyi kereskedési nap után
@@ -771,12 +773,14 @@ class TrendSignalConfig:
     min_risk_reward_hard: float = MIN_RISK_REWARD_HARD
     trade_fee_pct: float = TRADE_FEE_PCT
     sl_max_pct: float = SL_MAX_PCT
+    tp_max_pct: float = TP_MAX_PCT
     short_atr_stop_high_conf: float = SHORT_ATR_STOP_HIGH_CONF
     short_atr_stop_default: float = SHORT_ATR_STOP_DEFAULT
     short_atr_stop_low_conf: float = SHORT_ATR_STOP_LOW_CONF
     short_atr_tp_low_vol: float = SHORT_ATR_TP_LOW_VOL
     short_atr_tp_high_vol: float = SHORT_ATR_TP_HIGH_VOL
     short_sl_max_pct: float = SHORT_SL_MAX_PCT
+    short_tp_max_pct: float = SHORT_TP_MAX_PCT
     long_max_hold_days: int = LONG_MAX_HOLD_DAYS
     long_trailing_tighten_day: int = LONG_TRAILING_TIGHTEN_DAY
     long_trailing_tighten_factor: float = LONG_TRAILING_TIGHTEN_FACTOR
@@ -953,12 +957,14 @@ class TrendSignalConfig:
             self.min_risk_reward_hard = saved_config.get("MIN_RISK_REWARD_HARD", MIN_RISK_REWARD_HARD)
             self.trade_fee_pct = saved_config.get("TRADE_FEE_PCT", TRADE_FEE_PCT)
             self.sl_max_pct = saved_config.get("SL_MAX_PCT", SL_MAX_PCT)
+            self.tp_max_pct = saved_config.get("TP_MAX_PCT", TP_MAX_PCT)
             self.short_atr_stop_high_conf = saved_config.get("SHORT_ATR_STOP_HIGH_CONF", SHORT_ATR_STOP_HIGH_CONF)
             self.short_atr_stop_default = saved_config.get("SHORT_ATR_STOP_DEFAULT", SHORT_ATR_STOP_DEFAULT)
             self.short_atr_stop_low_conf = saved_config.get("SHORT_ATR_STOP_LOW_CONF", SHORT_ATR_STOP_LOW_CONF)
             self.short_atr_tp_low_vol = saved_config.get("SHORT_ATR_TP_LOW_VOL", SHORT_ATR_TP_LOW_VOL)
             self.short_atr_tp_high_vol = saved_config.get("SHORT_ATR_TP_HIGH_VOL", SHORT_ATR_TP_HIGH_VOL)
             self.short_sl_max_pct = saved_config.get("SHORT_SL_MAX_PCT", SHORT_SL_MAX_PCT)
+            self.short_tp_max_pct = saved_config.get("SHORT_TP_MAX_PCT", SHORT_TP_MAX_PCT)
             self.long_max_hold_days = saved_config.get("LONG_MAX_HOLD_DAYS", LONG_MAX_HOLD_DAYS)
             self.long_trailing_tighten_day = saved_config.get("LONG_TRAILING_TIGHTEN_DAY", LONG_TRAILING_TIGHTEN_DAY)
             self.long_trailing_tighten_factor = saved_config.get("LONG_TRAILING_TIGHTEN_FACTOR", LONG_TRAILING_TIGHTEN_FACTOR)
@@ -1223,12 +1229,14 @@ class TrendSignalConfig:
             self.min_risk_reward_hard = saved_config.get("MIN_RISK_REWARD_HARD", MIN_RISK_REWARD_HARD)
             self.trade_fee_pct = saved_config.get("TRADE_FEE_PCT", TRADE_FEE_PCT)
             self.sl_max_pct = saved_config.get("SL_MAX_PCT", SL_MAX_PCT)
+            self.tp_max_pct = saved_config.get("TP_MAX_PCT", TP_MAX_PCT)
             self.short_atr_stop_high_conf = saved_config.get("SHORT_ATR_STOP_HIGH_CONF", SHORT_ATR_STOP_HIGH_CONF)
             self.short_atr_stop_default = saved_config.get("SHORT_ATR_STOP_DEFAULT", SHORT_ATR_STOP_DEFAULT)
             self.short_atr_stop_low_conf = saved_config.get("SHORT_ATR_STOP_LOW_CONF", SHORT_ATR_STOP_LOW_CONF)
             self.short_atr_tp_low_vol = saved_config.get("SHORT_ATR_TP_LOW_VOL", SHORT_ATR_TP_LOW_VOL)
             self.short_atr_tp_high_vol = saved_config.get("SHORT_ATR_TP_HIGH_VOL", SHORT_ATR_TP_HIGH_VOL)
             self.short_sl_max_pct = saved_config.get("SHORT_SL_MAX_PCT", SHORT_SL_MAX_PCT)
+            self.short_tp_max_pct = saved_config.get("SHORT_TP_MAX_PCT", SHORT_TP_MAX_PCT)
             self.long_max_hold_days = saved_config.get("LONG_MAX_HOLD_DAYS", LONG_MAX_HOLD_DAYS)
             self.long_trailing_tighten_day = saved_config.get("LONG_TRAILING_TIGHTEN_DAY", LONG_TRAILING_TIGHTEN_DAY)
             self.long_trailing_tighten_factor = saved_config.get("LONG_TRAILING_TIGHTEN_FACTOR", LONG_TRAILING_TIGHTEN_FACTOR)
