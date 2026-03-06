@@ -499,9 +499,17 @@ async def get_signal_history(
     Returns signals with status='active', 'expired' or 'archived'
     """
     try:
-        # Start with base query - all signals (active, expired, archived)
+        # Pre-compute requested skip statuses so base query can include them
+        _skip_status_map = {
+            'NOGO': 'nogo', 'NO_DATA': 'no_data', 'SKIP_HRS': 'skip_hours',
+            'INV_LVL': 'invalid_levels', 'PAR_SKIP': 'parallel_skip',
+        }
+        _requested_skip = [_skip_status_map[r] for r in (exit_reasons or []) if r in _skip_status_map]
+
+        # Start with base query - normal signals + any explicitly requested skip statuses
+        _base_statuses = ['active', 'expired', 'archived'] + _requested_skip
         query = db.query(Signal).filter(
-            Signal.status.in_(['active', 'expired', 'archived'])
+            Signal.status.in_(_base_statuses)
         )
         
         # Date range filtering
@@ -564,12 +572,19 @@ async def get_signal_history(
 
         # Exit reason filtering (joins SimulatedTrade)
         # Frontend categories -> DB values:
-        #   SL   -> SL_HIT
-        #   TP   -> TP_HIT
-        #   REV  -> OPPOSING_SIGNAL
-        #   EOD  -> EOD_AUTO_LIQUIDATION
-        #   OPEN -> trade.status == 'OPEN'
-        #   NONE -> no trade exists
+        #   SL       -> SL_HIT
+        #   TP       -> TP_HIT
+        #   REV      -> OPPOSING_SIGNAL
+        #   EOD      -> EOD_AUTO_LIQUIDATION
+        #   STAG     -> STAGNATION_EXIT
+        #   MAX      -> MAX_HOLD_LIQUIDATION
+        #   OPEN     -> trade.status == 'OPEN'
+        #   NOGO     -> signal.status == 'nogo'
+        #   NO_DATA  -> signal.status == 'no_data'
+        #   SKIP_HRS -> signal.status == 'skip_hours'
+        #   INV_LVL  -> signal.status == 'invalid_levels'
+        #   PAR_SKIP -> signal.status == 'parallel_skip'
+        #   NONE     -> no trade exists
         if exit_reasons:
             exit_reason_conditions = []
             db_reason_map = {
@@ -577,8 +592,18 @@ async def get_signal_history(
                 'TP':   'TP_HIT',
                 'REV':  'OPPOSING_SIGNAL',
                 'EOD':  'EOD_AUTO_LIQUIDATION',
+                'STAG': 'STAGNATION_EXIT',
+                'MAX':  'MAX_HOLD_LIQUIDATION',
+            }
+            signal_status_map = {
+                'NOGO':     'nogo',
+                'NO_DATA':  'no_data',
+                'SKIP_HRS': 'skip_hours',
+                'INV_LVL':  'invalid_levels',
+                'PAR_SKIP': 'parallel_skip',
             }
             db_reasons = [db_reason_map[r] for r in exit_reasons if r in db_reason_map]
+            sig_statuses = [signal_status_map[r] for r in exit_reasons if r in signal_status_map]
             include_open = 'OPEN' in exit_reasons
             include_none = 'NONE' in exit_reasons
 
@@ -599,6 +624,8 @@ async def get_signal_history(
                              trade_alias.status == 'OPEN')
                     )
                 )
+            if sig_statuses:
+                exit_reason_conditions.append(Signal.status.in_(sig_statuses))
             if include_none:
                 exit_reason_conditions.append(
                     ~exists().where(trade_alias.entry_signal_id == Signal.id)

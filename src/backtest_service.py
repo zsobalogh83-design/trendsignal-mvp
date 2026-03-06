@@ -183,16 +183,30 @@ class BacktestService:
                 return 'skipped_invalid'
 
             self.db.flush()
+            self._fill_2h_direction(trade)
 
             was_closed = self._check_and_close_trade(trade)
             return 'newly_opened' if not was_closed else 'newly_closed'
 
         except InsufficientDataError as e:
             logger.debug(f"   Skip {signal.ticker_symbol}: No price data")
+            signal.status = 'no_data'
             return 'skipped_no_data'
 
         except InvalidSignalError as e:
-            logger.debug(f"   Skip {signal.ticker_symbol}: {e}")
+            err_msg = str(e)
+            logger.debug(f"   Skip {signal.ticker_symbol}: {err_msg}")
+            # signal.status may already be 'nogo' (set inside trade_manager for ATR filter).
+            # Tag remaining cases so every skipped signal has a meaningful status.
+            if signal.status not in ('nogo',):
+                if 'outside trading hours' in err_msg:
+                    signal.status = 'skip_hours'
+                elif 'Invalid' in err_msg and ('LONG' in err_msg or 'SHORT' in err_msg):
+                    signal.status = 'invalid_levels'
+                elif 'Missing SL/TP' in err_msg:
+                    signal.status = 'no_sl_tp'
+                else:
+                    signal.status = 'skipped'
             return 'skipped_invalid'
 
         except PositionAlreadyExistsError as e:
@@ -201,12 +215,15 @@ class BacktestService:
             try:
                 trade = self.trade_manager.open_position_simulated(signal)
                 if not trade:
+                    signal.status = 'parallel_skip'
                     return 'skipped_invalid'
                 self.db.flush()
+                self._fill_2h_direction(trade)
                 was_closed = self._check_and_close_trade(trade)
                 return 'newly_opened' if not was_closed else 'newly_closed'
             except (InsufficientDataError, InvalidSignalError) as inner_e:
                 logger.debug(f"   Skip parallel {signal.ticker_symbol}: {inner_e}")
+                signal.status = 'parallel_skip'
                 return 'skipped_invalid'
 
         except Exception as e:
@@ -223,8 +240,8 @@ class BacktestService:
         if trade.status != 'OPEN':
             return False
         
-        # Start checking from entry + 15 min
-        check_time_utc = trade.entry_signal_generated_at + timedelta(minutes=30)
+        # Start checking from execution time (signal + 15min) — eliminates the unchecked gap
+        check_time_utc = trade.entry_execution_time
         now_utc = datetime.utcnow()
 
         price_service = self.trade_manager.price_service
@@ -836,6 +853,81 @@ class BacktestService:
                     best = signal
 
         return best
+
+    # ──────────────────────────────────────────────────────────────
+    # 2H DIRECTION HELPER
+    # ──────────────────────────────────────────────────────────────
+
+    def _fill_2h_direction(self, trade: SimulatedTrade) -> None:
+        """
+        Kiszámolja, hogy a trade belépésétől számított 2 óra alatt (max EOD-ig)
+        a piac helyes irányt mozgott-e, majd eltárolja a trade rekordon.
+
+        Logika (azonos a signals_api._compute_direction_result-tal):
+          - Belépési időpont: trade.entry_execution_time
+          - Csak kereskedési időben indult trade-ek értékelhetők
+          - Kilépési referencia: entry + 2h, max EOD - 5 perc
+          - 5m gyertyák ±20 perces toleranciával keresve
+        """
+        entry_time = trade.entry_execution_time
+        symbol     = trade.symbol
+
+        price_service = self.trade_manager.price_service
+
+        # Csak kereskedési időben
+        if (price_service._is_weekend(entry_time) or
+                not price_service._is_trading_hours(entry_time, symbol)):
+            trade.direction_2h_eligible = False
+            return
+
+        # EOD időpont
+        if symbol.endswith('.BD'):
+            eod = entry_time.replace(hour=16, minute=0, second=0, microsecond=0)
+        else:
+            eod = entry_time.replace(hour=21, minute=0, second=0, microsecond=0)
+
+        raw_exit = entry_time + timedelta(hours=2)
+        exit_time = min(raw_exit, eod - timedelta(minutes=5))
+
+        if (exit_time - entry_time).total_seconds() < 300:
+            trade.direction_2h_eligible = False
+            return
+
+        tol = timedelta(minutes=20)
+
+        try:
+            entry_rows = self.db.query(PriceData).filter(
+                PriceData.ticker_symbol == symbol,
+                PriceData.interval == '5m',
+                PriceData.timestamp >= entry_time - tol,
+                PriceData.timestamp <= entry_time + tol,
+            ).all()
+
+            exit_rows = self.db.query(PriceData).filter(
+                PriceData.ticker_symbol == symbol,
+                PriceData.interval == '5m',
+                PriceData.timestamp >= exit_time - tol,
+                PriceData.timestamp <= exit_time + tol,
+            ).all()
+        except Exception as exc:
+            logger.warning(f"   2h direction query error {symbol}: {exc}")
+            trade.direction_2h_eligible = False
+            return
+
+        if not entry_rows or not exit_rows:
+            trade.direction_2h_eligible = False
+            return
+
+        entry_candle = min(entry_rows, key=lambda c: abs((c.timestamp - entry_time).total_seconds()))
+        exit_candle  = min(exit_rows,  key=lambda c: abs((c.timestamp - exit_time).total_seconds()))
+
+        ep  = float(entry_candle.close)
+        xp  = float(exit_candle.close)
+        pct = (xp - ep) / ep * 100
+
+        trade.direction_2h_eligible = True
+        trade.direction_2h_correct  = (xp > ep) if trade.direction == 'LONG' else (xp < ep)
+        trade.direction_2h_pct      = round(pct, 3)
 
     ALERT_THRESHOLD = 25  # Valódi alert küszöb (Telegram, real trade)
     SIGNAL_THRESHOLD = 15  # Signal generálási küszöb (HOLD zone határa)

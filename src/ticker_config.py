@@ -266,7 +266,10 @@ if __name__ == "__main__":
     
     # Test with database
     try:
-        from database import SessionLocal
+        try:
+            from src.database import SessionLocal
+        except ImportError:
+            from database import SessionLocal
         
         db = SessionLocal()
         

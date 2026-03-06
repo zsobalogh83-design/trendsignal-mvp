@@ -917,7 +917,10 @@ class SignalGenerator:
         try:
             # Try to import database components
             try:
-                from database import SessionLocal
+                try:
+                    from src.database import SessionLocal
+                except ImportError:
+                    from database import SessionLocal
                 from src.models import SignalCalculation
                 db_available = True
             except ImportError:
@@ -1231,9 +1234,8 @@ def generate_signals_for_tickers(
                         db=db_thread
                     )
                 else:
-                    technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
-                    swing_sr = None
-                    print(f"  ⚠️ Insufficient intraday data")
+                    print(f"  ⏭️ [{ticker_symbol}] Nincs elegendő intraday adat – signal kihagyva (hálózathiba?)")
+                    return None
 
             # Handle single DataFrame (backward compatibility)
             elif isinstance(technical_data_raw, pd.DataFrame) and len(technical_data_raw) > 50:
@@ -1244,9 +1246,8 @@ def generate_signals_for_tickers(
                 technical_data = technical_data_raw
                 swing_sr = None
             else:
-                technical_data = {"score": 0, "confidence": 0.5, "current_price": None, "key_signals": []}
-                swing_sr = None
-                print(f"  ⚠️ No technical data")
+                print(f"  ⏭️ [{ticker_symbol}] Nincs ár-adat – signal kihagyva (hálózathiba?)")
+                return None
 
             # ===== RISK CALCULATION =====
             if technical_data.get("current_price") and technical_data.get("atr_pct"):

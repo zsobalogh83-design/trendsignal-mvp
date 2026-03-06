@@ -9,7 +9,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 // Map: trade_id → { current_price, unrealized_pnl_percent, unrealized_pnl_huf }
 type OpenPnlMap = Record<number, { current_price: number | null; unrealized_pnl_percent: number | null; unrealized_pnl_huf: number | null }>;
 
-type ExitReasonFilter = 'SL' | 'TP' | 'REV' | 'EOD' | 'OPEN' | 'NONE';
+type ExitReasonFilter = 'SL' | 'TP' | 'REV' | 'EOD' | 'STAG' | 'MAX' | 'OPEN' | 'NOGO' | 'NO_DATA' | 'SKIP_HRS' | 'INV_LVL' | 'PAR_SKIP' | 'NONE';
 
 function getExitCategory(trade: Signal['simulated_trade']): ExitReasonFilter {
   if (!trade) return 'NONE';
@@ -18,6 +18,8 @@ function getExitCategory(trade: Signal['simulated_trade']): ExitReasonFilter {
   if (trade.exit_reason === 'TP_HIT') return 'TP';
   if (trade.exit_reason === 'OPPOSING_SIGNAL') return 'REV';
   if (trade.exit_reason === 'EOD_AUTO_LIQUIDATION') return 'EOD';
+  if (trade.exit_reason === 'STAGNATION_EXIT') return 'STAG';
+  if (trade.exit_reason === 'MAX_HOLD_LIQUIDATION') return 'MAX';
   return 'NONE';
 }
 
@@ -501,8 +503,15 @@ export function SignalHistory() {
                       { key: 'SL',   label: 'SL',   activeColor: '#f87171', activeBg: 'rgba(239, 68, 68, 0.2)',   activeBorder: '#ef4444' },
                       { key: 'REV',  label: 'REV',  activeColor: '#fb923c', activeBg: 'rgba(251, 146, 60, 0.2)',  activeBorder: '#f97316' },
                       { key: 'EOD',  label: 'EOD',  activeColor: '#94a3b8', activeBg: 'rgba(100, 116, 139, 0.2)', activeBorder: '#64748b' },
-                      { key: 'OPEN', label: 'OPEN', activeColor: '#fbbf24', activeBg: 'rgba(251, 191, 36, 0.2)',  activeBorder: '#f59e0b' },
-                      { key: 'NONE', label: '—',    activeColor: '#64748b', activeBg: 'rgba(51, 65, 85, 0.4)',    activeBorder: '#475569' },
+                      { key: 'STAG', label: 'STAG', activeColor: '#c084fc', activeBg: 'rgba(192, 132, 252, 0.2)', activeBorder: '#a855f7' },
+                      { key: 'MAX',  label: 'MAX',  activeColor: '#67e8f9', activeBg: 'rgba(103, 232, 249, 0.2)', activeBorder: '#22d3ee' },
+                      { key: 'OPEN',     label: 'OPEN',  activeColor: '#fbbf24', activeBg: 'rgba(251, 191, 36, 0.2)',  activeBorder: '#f59e0b' },
+                      { key: 'NOGO',     label: 'NOGO',  activeColor: '#f97316', activeBg: 'rgba(249, 115, 22, 0.2)',  activeBorder: '#ea580c' },
+                      { key: 'NO_DATA',  label: 'N/D',   activeColor: '#94a3b8', activeBg: 'rgba(100, 116, 139, 0.2)', activeBorder: '#64748b' },
+                      { key: 'SKIP_HRS', label: 'HOURS', activeColor: '#818cf8', activeBg: 'rgba(129, 140, 248, 0.2)', activeBorder: '#6366f1' },
+                      { key: 'INV_LVL',  label: 'INV',   activeColor: '#fde047', activeBg: 'rgba(253, 224, 71, 0.15)', activeBorder: '#eab308' },
+                      { key: 'PAR_SKIP', label: 'PAR',   activeColor: '#38bdf8', activeBg: 'rgba(56, 189, 248, 0.2)',  activeBorder: '#0ea5e9' },
+                      { key: 'NONE',     label: '—',     activeColor: '#64748b', activeBg: 'rgba(51, 65, 85, 0.4)',    activeBorder: '#475569' },
                     ] as const).map(({ key, label, activeColor, activeBg, activeBorder }) => {
                       const active = (filters.exit_reasons || []).includes(key);
                       return (
@@ -881,6 +890,8 @@ function renderPnl(
     : trade.exit_reason === 'TP_HIT' ? 'TP'
     : trade.exit_reason === 'OPPOSING_SIGNAL' ? 'REV'
     : trade.exit_reason === 'EOD_AUTO_LIQUIDATION' ? 'EOD'
+    : trade.exit_reason === 'STAGNATION_EXIT' ? 'STAG'
+    : trade.exit_reason === 'MAX_HOLD_LIQUIDATION' ? 'MAX'
     : 'CL'
     : 'CL';
 
