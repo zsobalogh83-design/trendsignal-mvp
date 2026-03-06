@@ -384,7 +384,7 @@ class SimulatedTrade(Base):
     exit_trigger_time = Column(DateTime, nullable=True, index=True)
     exit_execution_time = Column(DateTime, nullable=True, index=True)
     exit_price = Column(Float, nullable=True)
-    exit_reason = Column(String(30), nullable=True, index=True)  # 'SL_HIT', 'TP_HIT', 'OPPOSING_SIGNAL', 'EOD_AUTO_LIQUIDATION'
+    exit_reason = Column(String(30), nullable=True, index=True)  # 'SL_HIT'|'TP_HIT'|'OPPOSING_SIGNAL'|'EOD_AUTO_LIQUIDATION'|'STAGNATION_EXIT'|'MAX_HOLD_LIQUIDATION'
     exit_signal_id = Column(Integer, ForeignKey("signals.id", ondelete="SET NULL"), nullable=True)
     exit_score = Column(Float, nullable=True)
     exit_confidence = Column(Float, nullable=True)
@@ -395,6 +395,19 @@ class SimulatedTrade(Base):
     
     # ===== DURATION =====
     duration_minutes = Column(Integer, nullable=True)
+
+    # ===== 2H DIRECTION RESULT =====
+    # Értékeli, hogy a signal belépéstől számított 2 órán belül (vagy EOD-ig)
+    # helyes irányt jelzett-e a piac — entry után +15 perc késleltetéssel.
+    direction_2h_eligible = Column(Boolean, nullable=True)   # értékelhető-e egyáltalán
+    direction_2h_correct  = Column(Boolean, nullable=True)   # helyes irány volt-e
+    direction_2h_pct      = Column(Float,   nullable=True)   # ár%-változás a 2h ablakban
+
+    # ===== SKIP REASON =====
+    # Ha nem léptünk be a trade-be (status marad OPEN-ra sosem kerül), ide kerül az ok.
+    # Kitöltve: 'nogo' | 'no_data' | 'skip_hours' | 'invalid_levels' | 'parallel'
+    # A Signal.status is ugyanezzel a értékkel taggelődik.
+    skip_reason = Column(String(30), nullable=True)
 
     # ===== FINE-TUNING FLAG =====
     # True  = valódi trade lett volna (|score| >= 25, nem volt párhuzamos pozíció)

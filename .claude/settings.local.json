@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from src.news_collector import NewsCollector; print\\(''OK''\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(sqlite3 \"C:/Users/ZsoltBalogh/OneDrive - R34DY Zrt/Dokumentumok/GitHub/trendsignal-mvp/trendsignal.db\" \"SELECT DATE\\(created_at\\) as day, STRFTIME\\(''%H'', created_at\\) as hour, COUNT\\(*\\) as total_signals, SUM\\(CASE WHEN combined_score = 0 AND technical_score = 0 AND sentiment_score = 0 THEN 1 ELSE 0 END\\) as zero_signals, ROUND\\(AVG\\(combined_score\\),2\\) as avg_score FROM signals WHERE created_at >= ''2026-03-05 00:00:00'' GROUP BY DATE\\(created_at\\), STRFTIME\\(''%H'', created_at\\) ORDER BY created_at DESC LIMIT 50;\")",
+      "Bash(python3 -c \"import sqlite3; print\\(''Python sqlite3 available''\\)\")",
+      "Bash(python -c \"import sqlite3; print\\(''Python sqlite3 available''\\)\")",
+      "Bash(sqlite3 \"C:/Users/ZsoltBalogh/OneDrive - R34DY Zrt/Dokumentumok/GitHub/trendsignal-mvp/trendsignal.db\" \"SELECT STRFTIME\\(''%Y-%m-%d %H:00'', created_at\\) as hour_bucket, COUNT\\(*\\) as total, SUM\\(CASE WHEN combined_score = 0 AND technical_score = 0 THEN 1 ELSE 0 END\\) as zeros, ROUND\\(AVG\\(combined_score\\),2\\) as avg_score, GROUP_CONCAT\\(DISTINCT ticker_symbol\\) as tickers FROM signals WHERE created_at >= ''2026-03-05 20:00:00'' GROUP BY hour_bucket ORDER BY created_at;\")",
+      "Bash(python3 -:*)",
+      "Bash(/c/Python314/python.exe -:*)",
+      "Bash(sqlite3 \"C:\\\\Users\\\\ZsoltBalogh\\\\OneDrive - R34DY Zrt\\\\Dokumentumok\\\\GitHub\\\\trendsignal-mvp\\\\trendsignal.db\" \"SELECT id, ticker_symbol, ROUND\\(combined_score,2\\) as combined, ROUND\\(technical_score,2\\) as tech, ROUND\\(sentiment_score,2\\) as sent, ROUND\\(overall_confidence,2\\) as conf, created_at FROM signals WHERE combined_score = 0 AND technical_score = 0 AND created_at >= ''2026-03-05 14:30:00'' AND created_at <= ''2026-03-05 17:30:00'' ORDER BY created_at, ticker_symbol;\")",
+      "Bash(where sqlite3)",
+      "Bash(python -m src.recalculate_signals --dry-run)",
+      "Bash(python -X utf8 -m src.recalculate_signals --dry-run)",
+      "Bash(python -X utf8 -m src.recalculate_signals)",
+      "Bash(python -X utf8 -c \":*)"
+    ]
+  }
+}

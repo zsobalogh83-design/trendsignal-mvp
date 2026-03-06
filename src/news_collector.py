@@ -720,6 +720,11 @@ class NewsCollector:
         LLM arfolyamhatas scoring – deduplikacio utan, DB mentes elott.
         FinBERT parallellel fut: az active_score az LLM vagy FinBERT score lesz.
         Ha LLM ki van kapcsolva vagy hiba van, active_score = sentiment_score.
+
+        DB-cache: ha egy hir URL-je mar szerepel a DB-ben active_score_source='llm'
+        ertekkel, az LLM-eredmenyt visszatoltjuk a DB-bol – az API NEM hivodik meg
+        ujra. Az LLM-ertekeles statikus: ugyanazon hirhez mindig ugyanaz az eredmeny
+        ervenyes, tehat felesleges 15 percenkent ujraertekeli.
         """
         if not news_items:
             return
@@ -732,9 +737,53 @@ class NewsCollector:
                     item.active_score_source = 'finbert'
             return
 
+        import hashlib
         from src.config import LLM_API_KEY
         from src.llm_context_checker import LLMContextChecker
+        from src.db_helpers import get_llm_cached_news
 
+        # ── 1. DB-cache lookup ────────────────────────────────────────
+        # Egy batch SQL-lekerdezesben megnezzuk, melyik URL volt mar LLM-mel ertekelt.
+        url_hash_map = {
+            hashlib.md5(item.url.encode()).hexdigest(): item
+            for item in news_items
+            if item.url
+        }
+        cached_records = get_llm_cached_news(list(url_hash_map.keys()), self.db)
+
+        uncached_items: List[NewsItem] = []
+        llm_cached = 0
+
+        for item in news_items:
+            url_hash = hashlib.md5(item.url.encode()).hexdigest() if item.url else None
+            db_record = cached_records.get(url_hash) if url_hash else None
+
+            if db_record is not None:
+                # ── Cache HIT: DB-bol visszatoltjuk az LLM-adatokat ──
+                item.active_score = db_record.llm_score
+                item.active_score_source = 'llm'
+                item.llm_impact_duration = db_record.llm_impact_duration
+                item.llm_score = db_record.llm_score
+                item.llm_price_impact = db_record.llm_price_impact
+                item.llm_impact_level = db_record.llm_impact_level
+                item.llm_catalyst_type = db_record.llm_catalyst_type
+                item.llm_priced_in = db_record.llm_priced_in
+                item.llm_confidence = db_record.llm_confidence
+                item.llm_reason = db_record.llm_reason
+                item.llm_latency_ms = db_record.llm_latency_ms
+                llm_cached += 1
+            else:
+                # ── Cache MISS: LLM-ertekeles szukseges ──
+                uncached_items.append(item)
+
+        if llm_cached > 0:
+            print(f"  [LLM] {ticker_symbol}: {llm_cached} hir DB-cache-bol visszatoltve (API-hivas elmarad)")
+
+        if not uncached_items:
+            # Minden hir cachelt – nincs API-hivas
+            return
+
+        # ── 2. LLM-hivas csak az uj (nem cachelt) hirekre ────────────
         try:
             checker = LLMContextChecker(
                 api_key=LLM_API_KEY,
@@ -742,11 +791,11 @@ class NewsCollector:
                 timeout=self.config.llm_timeout,
                 max_concurrent=self.config.llm_max_concurrent,
             )
-            results = checker.check_batch(news_items, ticker_symbol, company_name)
+            results = checker.check_batch(uncached_items, ticker_symbol, company_name)
 
             llm_ok = 0
             llm_fail = 0
-            for item, result in zip(news_items, results):
+            for item, result in zip(uncached_items, results):
                 if result.success:
                     item.active_score = result.llm_score
                     item.active_score_source = 'llm'
@@ -766,11 +815,11 @@ class NewsCollector:
                     item.active_score_source = 'finbert'
                     llm_fail += 1
 
-            print(f"  [LLM] {ticker_symbol}: {llm_ok} OK, {llm_fail} fallback-to-FinBERT")
+            print(f"  [LLM] {ticker_symbol}: {llm_ok} uj API-hivas OK, {llm_fail} fallback-to-FinBERT")
 
         except Exception as e:
             print(f"  [LLM] Batch check failed for {ticker_symbol}: {e} -- fallback to FinBERT")
-            for item in news_items:
+            for item in uncached_items:
                 item.active_score = item.sentiment_score
                 item.active_score_source = 'finbert'
 

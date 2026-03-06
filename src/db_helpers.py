@@ -206,24 +206,26 @@ def get_price_data_from_db(
     ticker_symbol: str,
     interval: str,
     days: int,
-    db: Session
+    db: Session,
+    allow_stale: bool = False
 ) -> Optional['pd.DataFrame']:
     """
     Retrieve price data from database with FRESHNESS CHECK
-    
+
     Cache is considered STALE if:
     - Last candle is older than expected for the interval
     - 5m: 10 minutes stale
-    - 15m: 20 minutes stale  
+    - 15m: 20 minutes stale
     - 1h: 90 minutes stale
     - 1d: 1 day stale
-    
+
     Args:
         ticker_symbol: Stock ticker symbol
         interval: Candle interval ('5m', '15m', '1h', '1d')
         days: Number of days to look back
         db: Database session
-    
+        allow_stale: If True, return data even if the cache is stale (yfinance fallback)
+
     Returns:
         DataFrame with OHLCV data or None if not found/stale
     """
@@ -270,10 +272,14 @@ def get_price_data_from_db(
         max_age = staleness_threshold.get(interval, 30)
         
         if age_minutes > max_age:
-            print(f"🔄 Cache STALE for {ticker_symbol} ({interval}): latest={latest_timestamp}, age={age_minutes:.1f}min > {max_age}min")
-            return None  # Cache is stale, force refresh
-        
-        print(f"✅ Cache FRESH for {ticker_symbol} ({interval}): latest={latest_timestamp}, age={age_minutes:.1f}min")
+            if not allow_stale:
+                print(f"🔄 Cache STALE for {ticker_symbol} ({interval}): latest={latest_timestamp}, age={age_minutes:.1f}min > {max_age}min")
+                return None  # Cache is stale, force refresh
+            else:
+                print(f"⚠️ Cache STALE (fallback) for {ticker_symbol} ({interval}): age={age_minutes:.1f}min > {max_age}min – returning stale data")
+                # fall through and return the stale data below
+        else:
+            print(f"✅ Cache FRESH for {ticker_symbol} ({interval}): latest={latest_timestamp}, age={age_minutes:.1f}min")
         
         # Convert to DataFrame
         data = {
@@ -507,6 +513,40 @@ def save_technical_indicators_to_db(
         import traceback
         traceback.print_exc()
         return None
+
+
+def get_llm_cached_news(url_hashes: List[str], db: Session) -> dict:
+    """
+    Batch lekérés: mely URL hash-ek rendelkeznek már LLM-scorral a DB-ben.
+
+    Egyetlen SQL-lekérdezéssel visszaadja az összes már kiértékelt rekordot,
+    elkerülve a felesleges OpenRouter API-hívásokat.
+
+    Args:
+        url_hashes: MD5 hash-ek listája (news_items.url_hash)
+        db: Database session
+
+    Returns:
+        Dict[url_hash -> NewsItemModel] – csak azok a rekordok szerepelnek,
+        amelyekre active_score_source='llm' (vagyis már volt LLM-értékelés).
+    """
+    if not url_hashes or db is None:
+        return {}
+
+    try:
+        from src.models import NewsItem as NewsItemModel
+
+        records = db.query(NewsItemModel).filter(
+            NewsItemModel.url_hash.in_(url_hashes),
+            NewsItemModel.active_score_source == 'llm',
+            NewsItemModel.llm_score.isnot(None),
+        ).all()
+
+        return {r.url_hash: r for r in records}
+
+    except Exception as e:
+        print(f"⚠️ [LLM cache] DB lookup failed: {e}")
+        return {}
 
 
 def cleanup_old_news(db: Session, days_old: int = 7) -> int:

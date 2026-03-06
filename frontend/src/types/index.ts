@@ -168,7 +168,7 @@ export interface Signal {
   
   created_at: string;
   expires_at: string;
-  status: 'active' | 'expired' | 'archived';
+  status: 'active' | 'expired' | 'archived' | 'nogo' | 'no_data' | 'skip_hours' | 'invalid_levels' | 'parallel_skip' | string;
   simulated_trade?: {
     id: number;
     status: 'OPEN' | 'CLOSED';
@@ -258,7 +258,7 @@ export interface SignalHistoryFilters {
   strengths?: ('STRONG' | 'MODERATE' | 'WEAK')[];
   min_score?: number;
   max_score?: number;
-  exit_reasons?: ('SL' | 'TP' | 'REV' | 'EOD' | 'OPEN' | 'NONE')[];
+  exit_reasons?: ('SL' | 'TP' | 'REV' | 'EOD' | 'STAG' | 'MAX' | 'OPEN' | 'NOGO' | 'NO_DATA' | 'SKIP_HRS' | 'INV_LVL' | 'PAR_SKIP' | 'NONE')[];
   limit?: number;
   offset?: number;
 }

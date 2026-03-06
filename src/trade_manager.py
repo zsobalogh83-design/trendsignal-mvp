@@ -413,7 +413,10 @@ class TradeManager:
         if trade.status != "OPEN":
             raise ValueError(f"Trade {trade.id} not open")
         
-        valid_reasons = ['SL_HIT', 'TP_HIT', 'OPPOSING_SIGNAL', 'EOD_AUTO_LIQUIDATION']
+        valid_reasons = [
+            'SL_HIT', 'TP_HIT', 'OPPOSING_SIGNAL', 'EOD_AUTO_LIQUIDATION',
+            'STAGNATION_EXIT', 'MAX_HOLD_LIQUIDATION',
+        ]
         if exit_reason not in valid_reasons:
             raise ValueError(f"Invalid exit_reason: {exit_reason}")
         

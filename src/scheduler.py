@@ -77,8 +77,12 @@ def get_active_tickers() -> List[dict]:
         List of ticker dictionaries for active markets
     """
     # Import database components
-    from database import SessionLocal
-    from models import Ticker
+    try:
+        from src.database import SessionLocal
+        from src.models import Ticker
+    except ImportError:
+        from database import SessionLocal
+        from models import Ticker
     
     bet_open = is_bet_open()
     us_open = is_us_market_open()
@@ -163,11 +167,12 @@ def generate_signals_for_active_markets():
         # 🆕 Save signals to database
         try:
             # Import database components
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'api'))
-            from signals_api import save_signal_to_db
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-            from database import SessionLocal
-            
+            from src.signals_api import save_signal_to_db
+            try:
+                from src.database import SessionLocal
+            except ImportError:
+                from database import SessionLocal
+
             db = SessionLocal()
             try:
                 saved_count = 0
@@ -233,12 +238,12 @@ def trigger_signal_refresh_now():
         # 🆕 Save signals to database
         try:
             # Import database components
-            import os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'api'))
-            from signals_api import save_signal_to_db
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-            from database import SessionLocal
-            
+            from src.signals_api import save_signal_to_db
+            try:
+                from src.database import SessionLocal
+            except ImportError:
+                from database import SessionLocal
+
             db = SessionLocal()
             try:
                 saved_count = 0

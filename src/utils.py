@@ -28,38 +28,39 @@ def fetch_price_data(
     use_cache: bool = True
 ) -> Optional[pd.DataFrame]:
     """
-    Fetch price data using yfinance with optional database caching
+    Fetch price data using yfinance with optional database caching.
+    Returns None if data is unavailable (network error, rate limit, etc.).
+    Callers must treat None as "no signal" rather than generating a zero signal.
     """
     print(f"🔍 DEBUG: fetch_price_data called for {ticker_symbol} ({interval}, {period})")
-    
-    # Try database first if caching enabled
+
+    # ── 1. Try fresh DB cache ──────────────────────────────────────────
     if use_cache and db:
         try:
             from src.db_helpers import get_price_data_from_db
-            
-            # Convert period to days
+
             period_days = _period_to_days(period)
             print(f"🔍 DEBUG: Trying DB cache ({period_days} days)...")
             df = get_price_data_from_db(ticker_symbol, interval, period_days, db)
-            
+
             if df is not None and len(df) > 0:
                 print(f"✅ Loaded {len(df)} candles from DB cache for {ticker_symbol} ({interval})")
                 return df
-            else:
-                print(f"🔍 DEBUG: DB cache returned None or empty")
+
+            print(f"🔍 DEBUG: DB cache returned None or empty")
         except Exception as e:
-            print(f"⚠️ DB cache miss, fetching from yfinance: {e}")
+            print(f"⚠️ DB cache error, fetching from yfinance: {e}")
     else:
         print(f"🔍 DEBUG: Skipping DB cache (use_cache={use_cache}, db={db is not None})")
-    
-    # Fetch from yfinance
+
+    # ── 2. Fetch from yfinance ─────────────────────────────────────────
     try:
         print(f"🔍 DEBUG: Calling yfinance for {ticker_symbol}...")
         ticker = yf.Ticker(ticker_symbol)
         df = ticker.history(interval=interval, period=period)
-        
+
         print(f"🔍 DEBUG: yfinance returned DataFrame with {len(df)} rows")
-        
+
         if df.empty:
             print(f"⚠️ No data retrieved for {ticker_symbol}")
             return None
@@ -72,15 +73,15 @@ def fetch_price_data(
         # Ensure required columns
         required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
         print(f"🔍 DEBUG: DataFrame columns: {list(df.columns)}")
-        
+
         if not all(col in df.columns for col in required_cols):
             print(f"⚠️ Missing required columns for {ticker_symbol}")
             print(f"   Required: {required_cols}")
             print(f"   Available: {list(df.columns)}")
             return None
-        
+
         print(f"✅ Fetched {len(df)} candles for {ticker_symbol} ({interval})")
-        
+
         # Save to database if session provided
         if db:
             try:
@@ -89,9 +90,9 @@ def fetch_price_data(
                 save_price_data_to_db(df, ticker_symbol, interval, db)
             except Exception as e:
                 print(f"⚠️ Could not save to DB: {e}")
-        
+
         return df
-        
+
     except Exception as e:
         print(f"❌ Error fetching data for {ticker_symbol}: {e}")
         import traceback
