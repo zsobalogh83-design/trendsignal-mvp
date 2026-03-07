@@ -1179,3 +1179,60 @@ async def update_advanced_confidence(updates: AdvancedConfidenceUpdate):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== TRADE MANAGEMENT PARAMETERS =====
+
+class TradeManagementUpdate(BaseModel):
+    """LONG tartási idő, trailing SL és R:R korlátok"""
+    min_risk_reward: Optional[float] = Field(None, ge=0.3, le=5.0)
+    short_tp_max_pct: Optional[float] = Field(None, ge=0.005, le=0.10)
+    long_max_hold_days: Optional[int] = Field(None, ge=1, le=14)
+    long_trailing_tighten_day: Optional[int] = Field(None, ge=1, le=10)
+    long_trailing_tighten_factor: Optional[float] = Field(None, ge=0.2, le=1.0)
+
+class TradeManagementResponse(BaseModel):
+    min_risk_reward: float
+    short_tp_max_pct: float
+    long_max_hold_days: int
+    long_trailing_tighten_day: int
+    long_trailing_tighten_factor: float
+
+@router.get("/trade-management", response_model=TradeManagementResponse)
+async def get_trade_management():
+    try:
+        from src.config import get_config
+        c = get_config()
+        return TradeManagementResponse(
+            min_risk_reward=c.min_risk_reward,
+            short_tp_max_pct=c.short_tp_max_pct,
+            long_max_hold_days=c.long_max_hold_days,
+            long_trailing_tighten_day=c.long_trailing_tighten_day,
+            long_trailing_tighten_factor=c.long_trailing_tighten_factor,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/trade-management", response_model=TradeManagementResponse)
+async def update_trade_management(updates: TradeManagementUpdate):
+    try:
+        from src.config import get_config, update_config_values
+        config_updates = {}
+        for field, key in [
+            ("min_risk_reward",           "MIN_RISK_REWARD"),
+            ("short_tp_max_pct",          "SHORT_TP_MAX_PCT"),
+            ("long_max_hold_days",        "LONG_MAX_HOLD_DAYS"),
+            ("long_trailing_tighten_day", "LONG_TRAILING_TIGHTEN_DAY"),
+            ("long_trailing_tighten_factor", "LONG_TRAILING_TIGHTEN_FACTOR"),
+        ]:
+            v = getattr(updates, field)
+            if v is not None:
+                config_updates[key] = v
+        if not config_updates:
+            raise HTTPException(status_code=400, detail="No updates provided")
+        update_config_values(get_config(), config_updates)
+        return await get_trade_management()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

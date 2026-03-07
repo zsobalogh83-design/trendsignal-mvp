@@ -699,7 +699,7 @@ function SignalsTab({ componentWeights: cw, setComponentWeights: setCw, threshol
 }
 
 function RiskTab({ params: rp, setParams: setRp, advSignal: as, setAdvSignal: setAs,
-  advRisk: ar, setAdvRisk: setAr }: any) {
+  advRisk: ar, setAdvRisk: setAr, tradeMgmt: tm, setTradeMgmt: setTm }: any) {
   const rwTotal = rp.volatilityWeight + rp.proximityWeight + rp.trendStrengthWeight;
   const rr = (rp.takeProfitAtrMult / rp.stopLossAtrMult).toFixed(2);
 
@@ -863,6 +863,37 @@ function RiskTab({ params: rp, setParams: setRp, advSignal: as, setAdvSignal: se
         </ParamRow>
         <div className="info-bar">ℹ️ A szintek között lineáris interpoláció történik a folyamatos skálázáshoz.</div>
       </div>
+
+      {/* Trade Management */}
+      <div className="cfg-section">
+        <div className="cfg-section-title">🕐 Trade Management</div>
+        <div className="cfg-section-desc">Kereskedések max. tartási ideje, trailing stop-loss szűkítés és R:R korlátok.</div>
+        <ParamRow name="Max. tartási idő (LONG)" desc="Ennyi kereskedési nap után kényszerzárás, ha SL/TP nem teljesül"
+          tip="5 kereskedési nap ≈ 1 hét. A trailing SL-t ez nem befolyásolja, csak a végső kényszerzárást.">
+          <NumInput value={tm.longMaxHoldDays} min={1} max={14} onChange={(v) => setTm({...tm, longMaxHoldDays: v})} />
+          <span className="p-unit">nap</span>
+        </ParamRow>
+        <ParamRow name="Trailing SL szűkítés napja" desc="Ettől a kereskedési naptól szűkebb trailing stop-loss aktiválódik"
+          tip="Alapesetben 3. naptól a trailing SL-t a LONG_TRAILING_TIGHTEN_FACTOR-ral szorozza.">
+          <NumInput value={tm.longTrailingTightenDay} min={1} max={10} onChange={(v) => setTm({...tm, longTrailingTightenDay: v})} />
+          <span className="p-unit">nap</span>
+        </ParamRow>
+        <ParamRow name="Trailing SL szűkítési szorzó" desc="Ennyivel szorozza a SL távolságot a szűkítési naptól (kisebb = szorosabb)"
+          tip="0.6 = a SL 60%-ra szűkül. Alacsonyabb → több profit lock-in, de korábbi kilépés.">
+          <NumInput value={tm.longTrailingTightenFactor} min={0.2} max={1.0} step={0.05} onChange={(v) => setTm({...tm, longTrailingTightenFactor: v})} />
+          <span className="p-unit">×</span>
+        </ParamRow>
+        <ParamRow name="Min. R:R arány" desc="Alatta a rendszer a TP-t felfelé tolja, hogy elérje ezt az arányt"
+          tip="1.5 = minimálisan 1:1.5 R:R. Ha a természetes TP kisebb, felfelé igazítja.">
+          <NumInput value={tm.minRiskReward} min={0.3} max={5.0} step={0.1} onChange={(v) => setTm({...tm, minRiskReward: v})} />
+          <span className="p-unit">1:x</span>
+        </ParamRow>
+        <ParamRow name="SHORT TP max. korlát" desc="SHORT daytrade kereskedésnél a TP nem lehet magasabb ennél (%)"
+          tip="LONG esetén 6%, SHORT intraday esetén kisebb mozgás várható. Alapesetben 3%.">
+          <NumInput value={tm.shortTpMaxPct} min={0.5} max={6.0} step={0.5} onChange={(v) => setTm({...tm, shortTpMaxPct: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+      </div>
     </div>
   );
 }
@@ -933,6 +964,14 @@ export function Configuration() {
   const [advRisk, setAdvRisk] = useState({
     atrVolVeryLow: 1.5, atrVolLow: 2.5, atrVolModerate: 3.5, atrVolHigh: 5.0,
     adxVeryStrong: 40, adxStrong: 30, adxModerate: 25, adxWeak: 20, adxVeryWeak: 15,
+  });
+
+  const [tradeMgmt, setTradeMgmt] = useState({
+    minRiskReward: 1.5,
+    shortTpMaxPct: 3.0,
+    longMaxHoldDays: 5,
+    longTrailingTightenDay: 3,
+    longTrailingTightenFactor: 0.6,
   });
 
   const [advConf, setAdvConf] = useState({
@@ -1089,6 +1128,18 @@ export function Configuration() {
           sentimentConfLowNewsCount: ac.sentiment_conf_low_news_count,
           sentimentPositiveThreshold: ac.sentiment_positive_threshold,
           sentimentNegativeThreshold: ac.sentiment_negative_threshold,
+        });
+      }
+
+      const tmResponse = await fetch('http://localhost:8000/api/v1/config/trade-management');
+      if (tmResponse.ok) {
+        const tm = await tmResponse.json();
+        setTradeMgmt({
+          minRiskReward: tm.min_risk_reward,
+          shortTpMaxPct: +(tm.short_tp_max_pct * 100).toFixed(2),
+          longMaxHoldDays: tm.long_max_hold_days,
+          longTrailingTightenDay: tm.long_trailing_tighten_day,
+          longTrailingTightenFactor: tm.long_trailing_tighten_factor,
         });
       }
     } catch (error) {
@@ -1274,6 +1325,17 @@ export function Configuration() {
         }),
       });
 
+      await fetch('http://localhost:8000/api/v1/config/trade-management', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          min_risk_reward: tradeMgmt.minRiskReward,
+          short_tp_max_pct: tradeMgmt.shortTpMaxPct / 100,
+          long_max_hold_days: tradeMgmt.longMaxHoldDays,
+          long_trailing_tighten_day: tradeMgmt.longTrailingTightenDay,
+          long_trailing_tighten_factor: tradeMgmt.longTrailingTightenFactor,
+        }),
+      });
+
       alert('✅ Configuration saved successfully!');
       await loadConfigFromBackend();
     } catch (error) {
@@ -1347,6 +1409,7 @@ export function Configuration() {
             params={riskParams} setParams={setRiskParams}
             advSignal={advSignal} setAdvSignal={setAdvSignal}
             advRisk={advRisk} setAdvRisk={setAdvRisk}
+            tradeMgmt={tradeMgmt} setTradeMgmt={setTradeMgmt}
           />
         )}
       </div>

@@ -134,5 +134,10 @@
     "days": 1.0,
     "weeks": 1.4,
     "permanent": 1.8
-  }
+  },
+  "MIN_RISK_REWARD": 1.5,
+  "SHORT_TP_MAX_PCT": 0.03,
+  "LONG_MAX_HOLD_DAYS": 5,
+  "LONG_TRAILING_TIGHTEN_DAY": 3,
+  "LONG_TRAILING_TIGHTEN_FACTOR": 0.6
 }
