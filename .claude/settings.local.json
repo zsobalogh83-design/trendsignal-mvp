@@ -14,7 +14,18 @@
       "Bash(python -m src.recalculate_signals --dry-run)",
       "Bash(python -X utf8 -m src.recalculate_signals --dry-run)",
       "Bash(python -X utf8 -m src.recalculate_signals)",
-      "Bash(python -X utf8 -c \":*)"
+      "Bash(python -X utf8 -c \":*)",
+      "Bash(python -c \"import config_api; print\\(''config_api imports OK''\\)\")",
+      "Bash(python -c \"from src.config import TrendSignalConfig; c = TrendSignalConfig\\(\\); print\\(''long_max_hold_days:'', c.long_max_hold_days\\); print\\(''long_trailing_tighten_day:'', c.long_trailing_tighten_day\\); print\\(''long_trailing_tighten_factor:'', c.long_trailing_tighten_factor\\); print\\(''min_risk_reward:'', c.min_risk_reward\\); print\\(''short_tp_max_pct:'', c.short_tp_max_pct\\)\")",
+      "Bash(curl -s http://localhost:8000/api/v1/config/trade-management)",
+      "Bash(curl -s -X PUT http://localhost:8000/api/v1/config/trade-management -H \"Content-Type: application/json\" -d \"{\"\"long_max_hold_days\"\": 3, \"\"long_trailing_tighten_factor\"\": 0.5}\")",
+      "Bash(python -c \"import json; d = json.load\\(open\\(''C:/Users/ZsoltBalogh/OneDrive - R34DY Zrt/Dokumentumok/GitHub/trendsignal-mvp/config.json''\\)\\); keys = [''MIN_RISK_REWARD'', ''SHORT_TP_MAX_PCT'', ''LONG_MAX_HOLD_DAYS'', ''LONG_TRAILING_TIGHTEN_DAY'', ''LONG_TRAILING_TIGHTEN_FACTOR'']; [print\\(f''{k}: {d[k]}''\\) for k in keys]\")",
+      "Bash(curl -s -X PUT http://localhost:8000/api/v1/config/trade-management -H \"Content-Type: application/json\" -d \"{\"\"long_max_hold_days\"\": 5, \"\"long_trailing_tighten_factor\"\": 0.6}\")",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/config/reload)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(git add config_api.py frontend/src/pages/Configuration.tsx src/config.py config.json)",
+      "Bash(git commit:*)",
+      "Bash(git push origin main)"
     ]
   }
 }
