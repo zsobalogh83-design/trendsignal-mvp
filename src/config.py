@@ -592,6 +592,12 @@ def save_config_to_file(config_instance):
             "LLM_TIMEOUT": config_instance.llm_timeout,
             "LLM_MAX_CONCURRENT": config_instance.llm_max_concurrent,
             "DURATION_WEIGHT": config_instance.duration_weight,
+            # Trade management
+            "MIN_RISK_REWARD": config_instance.min_risk_reward,
+            "SHORT_TP_MAX_PCT": config_instance.short_tp_max_pct,
+            "LONG_MAX_HOLD_DAYS": config_instance.long_max_hold_days,
+            "LONG_TRAILING_TIGHTEN_DAY": config_instance.long_trailing_tighten_day,
+            "LONG_TRAILING_TIGHTEN_FACTOR": config_instance.long_trailing_tighten_factor,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
