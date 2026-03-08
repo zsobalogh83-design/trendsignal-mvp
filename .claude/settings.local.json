@@ -25,7 +25,19 @@
       "Bash(npx tsc --noEmit)",
       "Bash(git add config_api.py frontend/src/pages/Configuration.tsx src/config.py config.json)",
       "Bash(git commit:*)",
-      "Bash(git push origin main)"
+      "Bash(git push origin main)",
+      "Bash(python migrate_add_bcd_tables.py)",
+      "Bash(python optimizer/_bcd_process.py --max-rounds 3 --max-dims 7 --patience 5 --mini-pop 5 --mini-gen 5)",
+      "Bash(git add optimizer/atomic_units.py optimizer/bcd_runner.py optimizer/_bcd_process.py migrate_add_bcd_tables.py bcd_api.py api.py)",
+      "Bash(tasklist /FI \"IMAGENAME eq python.exe\" /FO LIST)",
+      "Bash(findstr /i \"python\\\\|PID\\\\|runner\")",
+      "Bash(tasklist)",
+      "Bash(Select-Object Id, Name, CPU, StartTime)",
+      "Bash(Format-Table)",
+      "Bash(powershell -Command \"Get-Process -Name python* -ErrorAction SilentlyContinue | Select-Object Id, Name, CPU | Format-Table\")",
+      "Bash(powershell -Command \"Get-WmiObject Win32_Process -Filter ''Name like \"\"%python%\"\"'' | Select-Object ProcessId, CommandLine | Format-List\")",
+      "Bash(powershell -Command \"Get-Process -Name python* -ErrorAction SilentlyContinue | Select-Object Id, CPU | Format-Table\")",
+      "Bash(git add optimizer/fitness.py)"
     ]
   }
 }
