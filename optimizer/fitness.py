@@ -20,8 +20,15 @@ Fitness formula:
     If total_trades < MIN_TRADES: fitness = 0.0 (penalty)
     If total_gross_loss == 0:     fitness = win_rate × 3.0 (cap)
 
-Version: 2.0
-Date: 2026-02-24
+Data split (v2.1):
+    The baseline config was iteratively improved on recent market conditions,
+    so the optimizer must also target recent data.  Split direction is
+    REVERSED so the newest 50% becomes the training set:
+
+        [── TEST 20% (oldest) ──][─── VAL 30% ───][──── TRAIN 50% (newest) ────]
+
+Version: 2.1
+Date: 2026-03-08
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -149,7 +156,7 @@ def compute_fitness_for_subset(
 
 
 # ---------------------------------------------------------------------------
-# Train / val / test split  (chronological, no trade_outcomes needed in v2)
+# Train / val / test split  (reversed-chronological: newest = train, v2.1)
 # ---------------------------------------------------------------------------
 
 def split_rows(
@@ -161,25 +168,39 @@ def split_rows(
 ) -> Tuple[List[SignalSimRow], List[SignalSimRow], List[SignalSimRow]]:
     """
     Split signal rows into train / validation / test sets.
-    Split is chronological to prevent data leakage.
 
-    In v2, we split by signal count (not by trade count) because we no longer
-    need a pre-existing simulated_trades table — trades are generated on-the-fly.
+    REVERSED chronological split (v2.1): the newest data is the TRAINING set.
 
-    Default: 50% train / 30% val / 20% test by signal count.
-    A nagyobb val szett megbízhatóbb overfitting-detekciót biztosít.
+    Rationale: the baseline config was iteratively fine-tuned on recent market
+    conditions, so it naturally performs best on recent data.  Optimizing on
+    old data (original split) produced configs that degraded on newer periods.
+    By reversing, the GA/BCD targets the same market regime the baseline was
+    tuned for, making the fitness landscape consistent.
+
+    Layout (oldest → newest signal by timestamp):
+        [── TEST 20% ──][─── VAL 30% ───][──── TRAIN 50% ────]
+
+    - TRAIN (newest 50%): primary optimization target — matches current regime
+    - VAL   (middle 30%): overfitting guard — must also improve
+    - TEST  (oldest 20%): stability check — we don't want to collapse on
+                          historical market conditions entirely
+
+    Split is by signal count (not trade count); trades are generated on-the-fly.
+    Default: 50% train / 30% val / 20% test.
     """
     n = len(rows)
-    train_end = int(n * train_ratio)
-    val_end   = int(n * (train_ratio + val_ratio))
 
-    # Ensure minimum sizes
-    train_end = max(train_end, int(n * 0.40))
-    val_end   = max(val_end,   train_end + int(n * 0.10))
-    val_end   = min(val_end,   n - int(n * 0.10))
+    test_ratio = 1.0 - train_ratio - val_ratio   # default 0.20
+    test_end   = int(n * test_ratio)
+    val_end    = int(n * (test_ratio + val_ratio))
 
-    train = rows[:train_end]
-    val   = rows[train_end:val_end]
-    test  = rows[val_end:]
+    # Ensure minimum sizes — each split must have at least 10% of data
+    test_end = max(test_end, int(n * 0.10))
+    val_end  = max(val_end,  test_end + int(n * 0.10))
+    val_end  = min(val_end,  n - int(n * 0.10))
+
+    test  = rows[:test_end]        # oldest  ~20% — stability / sanity check
+    val   = rows[test_end:val_end] # middle  ~30% — overfitting guard
+    train = rows[val_end:]         # newest  ~50% — primary optimization target
 
     return train, val, test
