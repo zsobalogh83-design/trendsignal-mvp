@@ -29,18 +29,26 @@ logger = logging.getLogger(__name__)
 # ==========================================
 
 IMPACT_SCORE_MAP = {
+    # strong_up: teljes skála (1-5)
     ('strong_up',   5): +1.00,  ('strong_up',   4): +0.85,
     ('strong_up',   3): +0.70,  ('strong_up',   2): +0.55,
     ('strong_up',   1): +0.40,
+    # up: teljes skála (1-5)
     ('up',          5): +0.75,  ('up',          4): +0.60,
     ('up',          3): +0.45,  ('up',          2): +0.32,
     ('up',          1): +0.20,
-    ('neutral',     5):  0.10,  ('neutral',     3):  0.00,
-    ('neutral',     1): -0.10,
-    ('down',        1): -0.20,  ('down',        3): -0.45,
-    ('down',        5): -0.75,
-    ('strong_down', 1): -0.40,  ('strong_down', 3): -0.70,
-    ('strong_down', 5): -1.00,
+    # neutral: teljes skála (1-5), szimmetrikus 0 körül
+    ('neutral',     5): +0.10,  ('neutral',     4): +0.05,
+    ('neutral',     3):  0.00,
+    ('neutral',     2): -0.05,  ('neutral',     1): -0.10,
+    # down: teljes skála (1-5), up tükörképe
+    ('down',        5): -0.75,  ('down',        4): -0.60,
+    ('down',        3): -0.45,  ('down',        2): -0.32,
+    ('down',        1): -0.20,
+    # strong_down: teljes skála (1-5), strong_up tükörképe
+    ('strong_down', 5): -1.00,  ('strong_down', 4): -0.85,
+    ('strong_down', 3): -0.70,  ('strong_down', 2): -0.55,
+    ('strong_down', 1): -0.40,
 }
 
 CONFIDENCE_MAP = {'low': 0.50, 'medium': 0.75, 'high': 0.92}

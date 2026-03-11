@@ -37,7 +37,21 @@
       "Bash(powershell -Command \"Get-Process -Name python* -ErrorAction SilentlyContinue | Select-Object Id, Name, CPU | Format-Table\")",
       "Bash(powershell -Command \"Get-WmiObject Win32_Process -Filter ''Name like \"\"%python%\"\"'' | Select-Object ProcessId, CommandLine | Format-List\")",
       "Bash(powershell -Command \"Get-Process -Name python* -ErrorAction SilentlyContinue | Select-Object Id, CPU | Format-Table\")",
-      "Bash(git add optimizer/fitness.py)"
+      "Bash(git add optimizer/fitness.py)",
+      "Bash(python -c \"import sqlite3, glob, os; dbs = glob.glob\\(''C:/Users/ZsoltBalogh/OneDrive - R34DY Zrt/Dokumentumok/GitHub/trendsignal-mvp/**/*.db'', recursive=True\\); print\\(''Found DB files:'', dbs\\)\")",
+      "Bash(python -c \"from src.alpaca_collector import create_table; create_table\\(\\); print\\(''OK''\\)\")",
+      "WebFetch(domain:www.alphavantage.co)",
+      "Bash(python -c \"import sqlite3; conn=sqlite3.connect\\(''trendsignal.db''\\); cur=conn.cursor\\(\\); cur.execute\\(''PRAGMA table_info\\(archive_news_items\\)''\\); cols=[r[1] for r in cur.fetchall\\(\\)]; print\\(f''archive_news_items columns \\({len\\(cols\\)}\\):''\\); print\\(cols\\); cur.execute\\(''SELECT COUNT\\(*\\) FROM archive_news_items''\\); print\\(f''Total rows: {cur.fetchone\\(\\)[0]}''\\); cur.execute\\(''SELECT COUNT\\(*\\) FROM archive_news_items WHERE llm_score IS NULL''\\); print\\(f''Unprocessed \\(llm_score IS NULL\\): {cur.fetchone\\(\\)[0]}''\\); conn.close\\(\\)\")",
+      "Bash(python run_archive_llm_analysis.py --dry-run)",
+      "Bash(python run_archive_llm_analysis.py --batch-size 5 --max-concurrent 5)",
+      "Bash(ping -n 15 127.0.0.)",
+      "Bash(ping -n 30 127.0.0.)",
+      "Bash(python run_archive_llm_analysis.py --batch-size 5 --max-rows 10 --max-concurrent 5)",
+      "Bash(python3 -c \":*)",
+      "Bash(sqlite3 \"C:/Users/ZsoltBalogh/OneDrive - R34DY Zrt/Dokumentumok/GitHub/trendsignal-mvp/trendsignal.db\" \".tables\")",
+      "Bash(python -c \"import sys; print\\(sys.stdin.buffer.read\\(\\).decode\\(''utf-8'', errors=''replace''\\)\\)\")",
+      "Bash(python gen_archive_signals.py --ticker AAPL --dry-run --from-date 2026-01-01)",
+      "Bash(git add gen_archive_signals.py fetch_alpaca_history.py fetch_av_news_history.py run_archive_llm_analysis.py src/alpaca_collector.py src/alphavantage_news_backfill.py)"
     ]
   }
 }

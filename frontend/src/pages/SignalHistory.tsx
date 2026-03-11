@@ -65,6 +65,7 @@ export function SignalHistory() {
         filters.strengths.forEach(s => params.append('strengths', s));
       }
       if (filters.min_score !== undefined) params.append('min_score', String(filters.min_score));
+      if (filters.max_score !== undefined) params.append('max_score', String(filters.max_score));
       if (filters.exit_reasons && filters.exit_reasons.length > 0) {
         filters.exit_reasons.forEach(r => params.append('exit_reasons', r));
       }
@@ -94,6 +95,7 @@ export function SignalHistory() {
       decisions: [],
       strengths: [],
       min_score: undefined,
+      max_score: undefined,
       exit_reasons: [],
     });
   };
@@ -315,7 +317,7 @@ export function SignalHistory() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <FiFilter style={{ color: '#3b82f6', fontSize: '14px' }} />
               <span>Filters</span>
-              {((filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0)) > 0 && (
+              {((filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0) + (filters.max_score !== undefined ? 1 : 0)) > 0 && (
                 <span style={{
                   background: 'rgba(59, 130, 246, 0.2)',
                   color: '#60a5fa',
@@ -323,7 +325,7 @@ export function SignalHistory() {
                   borderRadius: '10px',
                   fontSize: '11px'
                 }}>
-                  {(filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0)} active
+                  {(filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0) + (filters.max_score !== undefined ? 1 : 0)} active
                 </span>
               )}
             </div>
@@ -405,26 +407,51 @@ export function SignalHistory() {
                     </button>
                   ))}
                   <div style={{ width: '1px', height: '20px', background: 'rgba(99, 102, 241, 0.3)', margin: '0 2px' }} />
-                  <button
-                    onClick={() => setFilters(prev => ({ ...prev, min_score: prev.min_score !== undefined ? undefined : 25 }))}
-                    style={{
-                      background: filters.min_score !== undefined ? 'rgba(245, 158, 11, 0.2)' : 'rgba(51, 65, 85, 0.5)',
-                      border: `1px solid ${filters.min_score !== undefined ? '#f59e0b' : 'rgba(99, 102, 241, 0.3)'}`,
-                      color: filters.min_score !== undefined ? '#fbbf24' : '#cbd5e1',
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '12px',
-                      fontWeight: '500',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      transition: 'all 0.2s'
-                    }}
-                    title="Csak kereskedési alertek (combined score ≥ 25)"
-                  >
-                    ⚡ Alert
-                  </button>
+                  {/* Combined score abs range */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ color: '#94a3b8', fontSize: '11px', whiteSpace: 'nowrap' }}>|score|</span>
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="tól"
+                      value={filters.min_score ?? ''}
+                      onChange={(e) => setFilters(prev => ({
+                        ...prev,
+                        min_score: e.target.value === '' ? undefined : Number(e.target.value)
+                      }))}
+                      style={{
+                        width: '52px',
+                        padding: '3px 6px',
+                        background: filters.min_score !== undefined ? 'rgba(245, 158, 11, 0.15)' : 'rgba(30, 41, 59, 0.6)',
+                        border: `1px solid ${filters.min_score !== undefined ? '#f59e0b' : 'rgba(99, 102, 241, 0.3)'}`,
+                        borderRadius: '6px',
+                        color: '#e0e7ff',
+                        fontSize: '12px',
+                        textAlign: 'center',
+                      }}
+                    />
+                    <span style={{ color: '#64748b', fontSize: '11px' }}>—</span>
+                    <input
+                      type="number"
+                      min={0}
+                      placeholder="ig"
+                      value={filters.max_score ?? ''}
+                      onChange={(e) => setFilters(prev => ({
+                        ...prev,
+                        max_score: e.target.value === '' ? undefined : Number(e.target.value)
+                      }))}
+                      style={{
+                        width: '52px',
+                        padding: '3px 6px',
+                        background: filters.max_score !== undefined ? 'rgba(245, 158, 11, 0.15)' : 'rgba(30, 41, 59, 0.6)',
+                        border: `1px solid ${filters.max_score !== undefined ? '#f59e0b' : 'rgba(99, 102, 241, 0.3)'}`,
+                        borderRadius: '6px',
+                        color: '#e0e7ff',
+                        fontSize: '12px',
+                        textAlign: 'center',
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 
