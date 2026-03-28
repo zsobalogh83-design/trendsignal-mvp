@@ -1184,12 +1184,17 @@ async def update_advanced_confidence(updates: AdvancedConfidenceUpdate):
 # ===== TRADE MANAGEMENT PARAMETERS =====
 
 class TradeManagementUpdate(BaseModel):
-    """LONG tartási idő, trailing SL és R:R korlátok"""
+    """LONG tartási idő, trailing SL, R:R korlátok és SHORT ATR szorzók"""
     min_risk_reward: Optional[float] = Field(None, ge=0.3, le=5.0)
     short_tp_max_pct: Optional[float] = Field(None, ge=0.005, le=0.10)
     long_max_hold_days: Optional[int] = Field(None, ge=1, le=14)
     long_trailing_tighten_day: Optional[int] = Field(None, ge=1, le=10)
     long_trailing_tighten_factor: Optional[float] = Field(None, ge=0.2, le=1.0)
+    short_atr_stop_high_conf: Optional[float] = Field(None, ge=0.3, le=3.0)
+    short_atr_stop_default: Optional[float] = Field(None, ge=0.3, le=3.0)
+    short_atr_stop_low_conf: Optional[float] = Field(None, ge=0.3, le=3.0)
+    short_atr_tp_low_vol: Optional[float] = Field(None, ge=0.3, le=5.0)
+    short_atr_tp_high_vol: Optional[float] = Field(None, ge=0.3, le=5.0)
 
 class TradeManagementResponse(BaseModel):
     min_risk_reward: float
@@ -1197,6 +1202,11 @@ class TradeManagementResponse(BaseModel):
     long_max_hold_days: int
     long_trailing_tighten_day: int
     long_trailing_tighten_factor: float
+    short_atr_stop_high_conf: float
+    short_atr_stop_default: float
+    short_atr_stop_low_conf: float
+    short_atr_tp_low_vol: float
+    short_atr_tp_high_vol: float
 
 @router.get("/trade-management", response_model=TradeManagementResponse)
 async def get_trade_management():
@@ -1209,6 +1219,11 @@ async def get_trade_management():
             long_max_hold_days=c.long_max_hold_days,
             long_trailing_tighten_day=c.long_trailing_tighten_day,
             long_trailing_tighten_factor=c.long_trailing_tighten_factor,
+            short_atr_stop_high_conf=c.short_atr_stop_high_conf,
+            short_atr_stop_default=c.short_atr_stop_default,
+            short_atr_stop_low_conf=c.short_atr_stop_low_conf,
+            short_atr_tp_low_vol=c.short_atr_tp_low_vol,
+            short_atr_tp_high_vol=c.short_atr_tp_high_vol,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1219,11 +1234,16 @@ async def update_trade_management(updates: TradeManagementUpdate):
         from src.config import get_config, update_config_values
         config_updates = {}
         for field, key in [
-            ("min_risk_reward",           "MIN_RISK_REWARD"),
-            ("short_tp_max_pct",          "SHORT_TP_MAX_PCT"),
-            ("long_max_hold_days",        "LONG_MAX_HOLD_DAYS"),
-            ("long_trailing_tighten_day", "LONG_TRAILING_TIGHTEN_DAY"),
+            ("min_risk_reward",              "MIN_RISK_REWARD"),
+            ("short_tp_max_pct",             "SHORT_TP_MAX_PCT"),
+            ("long_max_hold_days",           "LONG_MAX_HOLD_DAYS"),
+            ("long_trailing_tighten_day",    "LONG_TRAILING_TIGHTEN_DAY"),
             ("long_trailing_tighten_factor", "LONG_TRAILING_TIGHTEN_FACTOR"),
+            ("short_atr_stop_high_conf",     "SHORT_ATR_STOP_HIGH_CONF"),
+            ("short_atr_stop_default",       "SHORT_ATR_STOP_DEFAULT"),
+            ("short_atr_stop_low_conf",      "SHORT_ATR_STOP_LOW_CONF"),
+            ("short_atr_tp_low_vol",         "SHORT_ATR_TP_LOW_VOL"),
+            ("short_atr_tp_high_vol",        "SHORT_ATR_TP_HIGH_VOL"),
         ]:
             v = getattr(updates, field)
             if v is not None:

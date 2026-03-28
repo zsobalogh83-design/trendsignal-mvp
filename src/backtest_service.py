@@ -449,8 +449,8 @@ class BacktestService:
         )
 
     # Stagnation: ha az ár legalább ennyi egymást követő sloton át az entry ±band-on belül marad
-    STAGNATION_CONSECUTIVE_SLOTS = 6     # 6 × 15min = 90 perc
-    STAGNATION_BAND_FACTOR = 0.30        # band = 0.30 × initial_risk (≈ 0.6–0.75×ATR alapértelmezetten)
+    STAGNATION_CONSECUTIVE_SLOTS = 10    # 10 × 15min = 150 perc
+    STAGNATION_BAND_FACTOR = 0.20        # band = 0.20 × initial_risk
 
     def _check_stagnation(
         self,

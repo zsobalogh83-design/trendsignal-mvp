@@ -598,6 +598,12 @@ def save_config_to_file(config_instance):
             "LONG_MAX_HOLD_DAYS": config_instance.long_max_hold_days,
             "LONG_TRAILING_TIGHTEN_DAY": config_instance.long_trailing_tighten_day,
             "LONG_TRAILING_TIGHTEN_FACTOR": config_instance.long_trailing_tighten_factor,
+            # SHORT ATR multipliers
+            "SHORT_ATR_STOP_HIGH_CONF": config_instance.short_atr_stop_high_conf,
+            "SHORT_ATR_STOP_DEFAULT": config_instance.short_atr_stop_default,
+            "SHORT_ATR_STOP_LOW_CONF": config_instance.short_atr_stop_low_conf,
+            "SHORT_ATR_TP_LOW_VOL": config_instance.short_atr_tp_low_vol,
+            "SHORT_ATR_TP_HIGH_VOL": config_instance.short_atr_tp_high_vol,
         }
         
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)

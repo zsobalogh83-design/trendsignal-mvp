@@ -54,7 +54,11 @@
       "Bash(git add gen_archive_signals.py fetch_alpaca_history.py fetch_av_news_history.py run_archive_llm_analysis.py src/alpaca_collector.py src/alphavantage_news_backfill.py)",
       "Bash(npm run:*)",
       "Bash(python -m src.one_offs.run_archive_backtest)",
-      "Bash(python -c \"import src.archive_backtest_service; print\\(''OK''\\)\")"
+      "Bash(python -c \"import src.archive_backtest_service; print\\(''OK''\\)\")",
+      "Bash(python -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(f''''  {k}: {v}''''\\) for k,v in data.items\\(\\)]\")",
+      "Bash(curl -s -X PUT http://localhost:8000/api/v1/config/trade-management -H \"Content-Type: application/json\" -d \"{\"\"short_atr_stop_default\"\": 0.85, \"\"short_atr_tp_high_vol\"\": 1.9}\")",
+      "Bash(curl -s -X PUT http://localhost:8000/api/v1/config/trade-management -H \"Content-Type: application/json\" -d \"{\"\"short_atr_stop_default\"\": 0.7, \"\"short_atr_tp_high_vol\"\": 1.8}\")",
+      "Bash(python gen_archive_signals.py)"
     ]
   }
 }

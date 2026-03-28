@@ -264,6 +264,10 @@ def load_existing_timestamps(conn: sqlite3.Connection, ticker: str) -> set:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def compute_indicator_series(df: pd.DataFrame) -> Dict[str, pd.Series]:
+    """
+    Vectorized 15m indicators. Az 'atr' mező szándékosan NINCS itt — azt napi
+    adatból számoljuk (compute_daily_atr_series), és bar-onként inject-eljük.
+    """
     close  = df['close']
     high   = df['high']
     low    = df['low']
@@ -284,11 +288,44 @@ def compute_indicator_series(df: pd.DataFrame) -> Dict[str, pd.Series]:
         'bb_upper':    bb_up,
         'bb_middle':   bb_mid,
         'bb_lower':    bb_lo,
-        'atr':         calculate_atr(high, low, close, 14),
         'stoch_k':     stoch_k,
         'stoch_d':     stoch_d,
         'volume_sma':  calculate_sma(volume, 20),
+        # ATR szándékosan NINCS itt — napi adatból számolódik (ld. compute_daily_atr_series)
     }
+
+
+def compute_daily_atr_series(df_1d: pd.DataFrame) -> List[Tuple['date', float]]:
+    """
+    14-periódusú True Range ATR a napi gyertyákból.
+    Ugyanazt a logikát követi mint a live signal_generator.py (df_daily ág):
+      TR = max(high-low, |high-prev_close|, |low-prev_close|)
+      ATR14 = rolling(14).mean(TR)
+
+    Returns: rendezett lista [(date, atr_value), ...], csak nem-NaN értékek.
+    Felhasználás: adott signal-dátumhoz az azt MEGELŐZŐ utolsó napi ATR-t vesszük
+    (nincs lookahead), ld. get_daily_atr_for_date().
+    """
+    if df_1d.empty or len(df_1d) < 15:
+        return []
+
+    high  = df_1d['high']
+    low   = df_1d['low']
+    close = df_1d['close']
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low  - close.shift(1)).abs(),
+    ], axis=1).max(axis=1)
+
+    atr14 = tr.rolling(14).mean()
+
+    result = []
+    for idx, val in atr14.items():
+        if pd.notna(val):
+            result.append((idx.date(), float(val)))
+    return sorted(result)
 
 
 def _f(val) -> Optional[float]:
@@ -516,17 +553,28 @@ def generate_bar_signal(
     sr_data: Optional[Dict],
     config,
     generator: SignalGenerator,
+    daily_atr: Optional[float] = None,
 ) -> Optional[Dict]:
     """
     Generate one signal row for a single 15m bar.
     Returns dict ready for DB insert, or None if data is insufficient.
+
+    daily_atr: 14-periódusú napi ATR (True Range alapú), a live signal_generator-rel
+               megegyező számítással. Ha None, fallback: close * 2% (default).
+    Az ATR a SL/TP kalkuláció és a volatilitás-score alapja — a live rendszer
+    napi ATR-t használ, az archive generátornak szintén ezt kell követnie.
     """
     close = ind.get('close')
     if not close or close <= 0:
         return None
 
-    atr     = ind.get('atr') or close * 0.02
+    # Napi ATR használata (live pipeline-nal egyező) — fallback: close * 2%
+    atr     = daily_atr if (daily_atr and daily_atr > 0) else (close * 0.02)
     atr_pct = (atr / close) * 100
+
+    # Az ATR-t inject-áljuk az ind-be, hogy _volatility_score() is a napi ATR-t
+    # használja (a 2% / 5% küszöbök napi ATR-re vannak kalibrálva).
+    ind['atr'] = atr
 
     # ── Technical ─────────────────────────────────────────────────────────────
     tech_score, tech_conf = technical_score_and_confidence(ind)
@@ -735,6 +783,30 @@ def process_ticker(
     print(f"  Computing indicator series (vectorized)...")
     ind_series = compute_indicator_series(df_15m)
 
+    # Napi ATR14 (True Range) — a live signal_generator-rel azonos logika.
+    # Felépítünk egy rendezett listát [(date, atr)], majd bar-onként a legutóbbi
+    # MEGELŐZŐ napi ATR-t vesszük (nincs lookahead: signal dátuma < daily bar dátuma).
+    daily_atr_list = compute_daily_atr_series(df_1d)
+    print(f"  Daily ATR14: {len(daily_atr_list)} értékpont "
+          f"({daily_atr_list[0][0] if daily_atr_list else 'n/a'} – "
+          f"{daily_atr_list[-1][0] if daily_atr_list else 'n/a'})")
+
+    def get_daily_atr_for_date(ts_date: 'date') -> Optional[float]:
+        """
+        A ts_date-nél SZIGORÚAN KORÁBBI utolsó napi ATR értéke (bináris keresés).
+        Nincs lookahead: az adott nap intraday signalja csak előző napig látja a napi adatot.
+        """
+        lo, hi = 0, len(daily_atr_list) - 1
+        result = None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if daily_atr_list[mid][0] < ts_date:
+                result = daily_atr_list[mid][1]
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        return result
+
     sr_cache: Dict[date, Optional[Dict]] = {}
 
     def get_sr(d: date) -> Optional[Dict]:
@@ -779,6 +851,11 @@ def process_ticker(
             stats['skipped_data'] += 1
             continue
 
+        # ── Napi ATR (SL/TP kalkuláció és volatilitás-score alapja) ───────
+        # A live signal_generator df_daily ágával azonos: napi True Range ATR14,
+        # szigorúan az előző kereskedési napig (nincs lookahead).
+        daily_atr_val = get_daily_atr_for_date(ts_date)
+
         # ── Daily S/R (cached) ─────────────────────────────────────────────
         sr = get_sr(ts_date)
 
@@ -790,6 +867,7 @@ def process_ticker(
             row = generate_bar_signal(
                 ticker_id, ticker_symbol, ticker_name,
                 ts, ind, sent, sr, config, generator,
+                daily_atr=daily_atr_val,
             )
         except Exception as exc:
             stats['errors'] += 1

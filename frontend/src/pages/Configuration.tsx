@@ -894,6 +894,41 @@ function RiskTab({ params: rp, setParams: setRp, advSignal: as, setAdvSignal: se
           <span className="p-unit">%</span>
         </ParamRow>
       </div>
+
+      {/* SHORT ATR multipliers */}
+      <div className="cfg-section">
+        <div className="cfg-section-title">📉 SHORT SL/TP ATR Szorzók</div>
+        <div className="cfg-section-desc">
+          SHORT daytrade kereskedések stop-loss és take-profit szintjeinek ATR-alapú szorzói.
+          A LONG szorzókhoz képest szűkebbek, mivel a SHORT pozíciók EOD-on automatikusan zárnak.
+        </div>
+        <ParamRow name="SL szorzó – Erős signal (≥0.75 conf)" desc="Magas konfidenciánál szélesebb SL, hogy a pullbacket kibírja"
+          tip="LONG megfelelője: 2.5×. SHORT esetén szűkebb, mert intraday. Alapesetben 1.0×.">
+          <NumInput value={tm.shortAtrStopHighConf} min={0.3} max={3.0} step={0.1} onChange={(v) => setTm({...tm, shortAtrStopHighConf: v})} />
+          <span className="p-unit">× ATR</span>
+        </ParamRow>
+        <ParamRow name="SL szorzó – Közepes signal (default)" desc="Alap SHORT stop-loss szorzó"
+          tip="LONG megfelelője: 2.0×. Alapesetben 0.7×.">
+          <NumInput value={tm.shortAtrStopDefault} min={0.3} max={3.0} step={0.1} onChange={(v) => setTm({...tm, shortAtrStopDefault: v})} />
+          <span className="p-unit">× ATR</span>
+        </ParamRow>
+        <ParamRow name="SL szorzó – Gyenge signal (&lt;0.50 conf)" desc="Alacsony konfidenciánál szűkebb SL, gyorsabb kiszállás"
+          tip="LONG megfelelője: 1.5×. Alapesetben 0.5×.">
+          <NumInput value={tm.shortAtrStopLowConf} min={0.3} max={3.0} step={0.1} onChange={(v) => setTm({...tm, shortAtrStopLowConf: v})} />
+          <span className="p-unit">× ATR</span>
+        </ParamRow>
+        <ParamRow name="TP szorzó – Alacsony vol (ATR &lt; 2%)" desc="Nyugodt piacon kisebb célárat vár"
+          tip="LONG megfelelője: 2.5×. Alapesetben 1.0×.">
+          <NumInput value={tm.shortAtrTpLowVol} min={0.3} max={5.0} step={0.1} onChange={(v) => setTm({...tm, shortAtrTpLowVol: v})} />
+          <span className="p-unit">× ATR</span>
+        </ParamRow>
+        <ParamRow name="TP szorzó – Magas vol (ATR &gt; 4%)" desc="Volatilis piacon nagyobb mozgás várható"
+          tip="LONG megfelelője: 4.0×. Alapesetben 1.8×.">
+          <NumInput value={tm.shortAtrTpHighVol} min={0.3} max={5.0} step={0.1} onChange={(v) => setTm({...tm, shortAtrTpHighVol: v})} />
+          <span className="p-unit">× ATR</span>
+        </ParamRow>
+        <div className="info-bar">ℹ️ 2–4% ATR% között lineáris interpoláció történik a low_vol és high_vol szorzók között. SHORT SL max korlát: 1.5%.</div>
+      </div>
     </div>
   );
 }
@@ -972,6 +1007,11 @@ export function Configuration() {
     longMaxHoldDays: 5,
     longTrailingTightenDay: 3,
     longTrailingTightenFactor: 0.6,
+    shortAtrStopHighConf: 1.0,
+    shortAtrStopDefault: 0.7,
+    shortAtrStopLowConf: 0.5,
+    shortAtrTpLowVol: 1.0,
+    shortAtrTpHighVol: 1.8,
   });
 
   const [advConf, setAdvConf] = useState({
@@ -1140,6 +1180,11 @@ export function Configuration() {
           longMaxHoldDays: tm.long_max_hold_days,
           longTrailingTightenDay: tm.long_trailing_tighten_day,
           longTrailingTightenFactor: tm.long_trailing_tighten_factor,
+          shortAtrStopHighConf: tm.short_atr_stop_high_conf,
+          shortAtrStopDefault: tm.short_atr_stop_default,
+          shortAtrStopLowConf: tm.short_atr_stop_low_conf,
+          shortAtrTpLowVol: tm.short_atr_tp_low_vol,
+          shortAtrTpHighVol: tm.short_atr_tp_high_vol,
         });
       }
     } catch (error) {
@@ -1333,6 +1378,11 @@ export function Configuration() {
           long_max_hold_days: tradeMgmt.longMaxHoldDays,
           long_trailing_tighten_day: tradeMgmt.longTrailingTightenDay,
           long_trailing_tighten_factor: tradeMgmt.longTrailingTightenFactor,
+          short_atr_stop_high_conf: tradeMgmt.shortAtrStopHighConf,
+          short_atr_stop_default: tradeMgmt.shortAtrStopDefault,
+          short_atr_stop_low_conf: tradeMgmt.shortAtrStopLowConf,
+          short_atr_tp_low_vol: tradeMgmt.shortAtrTpLowVol,
+          short_atr_tp_high_vol: tradeMgmt.shortAtrTpHighVol,
         }),
       });
 

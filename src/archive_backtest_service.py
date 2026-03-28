@@ -6,12 +6,14 @@ Logika:
 - Minden BUY/SELL archive_signal kap egy archive_simulated_trade-et
 - Entry: signal_timestamp utáni első kereskedési bar NYITÓÁRÁN (+15 perces végrehajtási késés)
 - SL/TP: a signal által javasolt szintek; az új entry price alapján érvényesség-ellenőrzés fut
-- Exit prioritás:
+- Exit prioritás (bar-onként, live-val egyező sorrendben):
     1. STAGNATION_EXIT       – 6 egymást követő 15m bar az entry ±30% × initial_risk sávon belül
-    2. SL_HIT / TP_HIT       – stop/target elérése
-    3. EOD_AUTO_LIQUIDATION  – SHORT trade-ek nap végén kötelezően zárnak
-    4. OPPOSING_SIGNAL       – ellentétes alert-szintű signal, +15 perces végrehajtással;
+    2. SL_HIT / TP_HIT       – stop/target elérése (TP/SL ütközésnél nyitóárhoz közelebb lévő nyer)
+    2b. Intraday breakeven   – ár eléri az entry + 0.5×initial_risk szintet → SL = entry;
+                               TP tightening – ár 50%+ úton van a TP felé → TP szűkítése
+    3. OPPOSING_SIGNAL       – ellentétes alert-szintű signal, +15 perces végrehajtással;
                                kereskedési időn kívüli végrehajtásnál következő nap nyitóján
+    4. EOD_AUTO_LIQUIDATION  – SHORT trade-ek nap végén kötelezően zárnak
     5. MAX_HOLD_LIQUIDATION  – 10 kereskedési nap után kényszerzárás
 - SL dinamikus frissítés (live-val egyező):
     - Azonos irányú signal (|score| >= 25) → SL frissítés ha kedvezőbb (profit lock-in)
@@ -22,7 +24,7 @@ Logika:
 - TP/SL ütközés esetén: amelyik közelebb volt a bar nyitóárhoz, az teljesül előbb
 - Teljesítmény: ticker-enkénti in-memory price lookup (1 DB lekérés/ticker)
 
-Version: 3.0 – EOD trailing SL (LONG) + signal-alapú SL update + SHORT EOD kényszerzárás
+Version: 4.0 – Intraday breakeven + TP tightening + OPP/EOD prioritás igazítás (live-val egyező)
 """
 
 from __future__ import annotations
@@ -40,8 +42,8 @@ ALERT_THRESHOLD              = 25          # is_real_trade határ (score >= 25)
 MAX_HOLD_BARS                = 10 * 26     # 10 kereskedési nap × 26 bar/nap (15m, 09:30-16:00 ET)
 US_OPEN_UTC                  = (14, 30)    # 09:30 ET
 US_CLOSE_UTC                 = (21,  0)    # 16:00 ET
-STAGNATION_CONSECUTIVE_SLOTS = 6           # 6 × 15min = 90 perc oldalazás → exit
-STAGNATION_BAND_FACTOR       = 0.30        # sáv = 0.30 × initial_risk
+STAGNATION_CONSECUTIVE_SLOTS = 10          # 10 × 15min = 150 perc oldalazás → exit
+STAGNATION_BAND_FACTOR       = 0.20        # sáv = 0.20 × initial_risk
 LONG_TRAILING_TIGHTEN_DAY    = 3           # ettől a naptól szűkebb trailing SL (live-val egyező)
 LONG_TRAILING_TIGHTEN_FACTOR = 0.6         # sl_pct szorzója a tighten naptól
 
@@ -437,14 +439,17 @@ class ArchiveBacktestService:
 
         SL dinamikusan frissülhet (live-val egyező):
           - Azonos irányú signal (alert-szintű) → SL frissítés ha kedvezőbb
+          - Intraday breakeven: ár eléri entry + 0.5×initial_risk → SL = entry (csak egyszer)
+          - TP tightening: ár 50%+ úton TP felé → TP szűkítése (current_price + 15% × tp_range)
           - EOD trailing SL (csak LONG): nap végén day_close × (1 - sl_pct), csak felfelé;
             3. naptól szűkebb szorzó
 
-        Prioritás (bar-onként):
+        Prioritás (bar-onként, live-val egyező sorrendben):
         1. STAGNATION_EXIT      – 6 egymást követő bar az entry ±sávon belül
         2. SL_HIT / TP_HIT      – stop/target elérése (TP/SL ütközésnél nyitóárhoz közelebb lévő nyer)
-        3. EOD_AUTO_LIQUIDATION – SHORT trade-ek nap végén kötelezően zárnak
-        4. OPPOSING_SIGNAL      – ellentétes alert-szintű signal, +15 perces végrehajtási késéssel
+        2b. Intraday breakeven + TP tightening → re-check SL/TP
+        3. OPPOSING_SIGNAL      – ellentétes alert-szintű signal, +15 perces végrehajtási késéssel
+        4. EOD_AUTO_LIQUIDATION – SHORT trade-ek nap végén kötelezően zárnak
         5. MAX_HOLD_LIQUIDATION – max tartási határ elérése
 
         Returns:
@@ -455,11 +460,13 @@ class ArchiveBacktestService:
         stagnation_band  = STAGNATION_BAND_FACTOR * initial_risk if initial_risk > 0 else 0.0
         stagnation_slots = 0
 
-        # Dinamikus SL (frissülhet signal alapján és EOD trailing által); TP rögzített
-        current_sl = sl
-        current_tp = tp  # TP-t NEM frissítjük signal alapján (live-val egyező döntés)
+        # Dinamikus SL/TP (SL frissülhet, TP tighten-elhet)
+        current_sl  = sl
+        current_tp  = tp
+        initial_tp  = tp   # eredeti TP a tightening számításhoz
+        be_applied  = False  # intraday breakeven egyszer tüzel
 
-        # Ugyanúgy mint live: nap végi trailing SL számla
+        # Nap végi trailing SL számla (live-val egyező)
         trading_days_held = 0
 
         # Pending opposing-signal exit
@@ -520,22 +527,81 @@ class ArchiveBacktestService:
                 sl_hit = h >= current_sl
                 tp_hit = l <= current_tp
 
-            if sl_hit and tp_hit:
-                if abs(o - current_sl) <= abs(o - current_tp):
-                    return {"exit_price": current_sl, "exit_time": bar_ts, "exit_reason": "SL_HIT",
-                            "duration_bars": bars_held}
-                else:
-                    return {"exit_price": current_tp, "exit_time": bar_ts, "exit_reason": "TP_HIT",
-                            "duration_bars": bars_held}
+            if sl_hit or tp_hit:
+                if sl_hit and tp_hit:
+                    if abs(o - current_sl) <= abs(o - current_tp):
+                        return {"exit_price": current_sl, "exit_time": bar_ts,
+                                "exit_reason": "SL_HIT", "duration_bars": bars_held}
+                    else:
+                        return {"exit_price": current_tp, "exit_time": bar_ts,
+                                "exit_reason": "TP_HIT", "duration_bars": bars_held}
+                if sl_hit:
+                    return {"exit_price": current_sl, "exit_time": bar_ts,
+                            "exit_reason": "SL_HIT", "duration_bars": bars_held}
+                return {"exit_price": current_tp, "exit_time": bar_ts,
+                        "exit_reason": "TP_HIT", "duration_bars": bars_held}
 
-            if sl_hit:
-                return {"exit_price": current_sl, "exit_time": bar_ts, "exit_reason": "SL_HIT",
-                        "duration_bars": bars_held}
-            if tp_hit:
-                return {"exit_price": current_tp, "exit_time": bar_ts, "exit_reason": "TP_HIT",
-                        "duration_bars": bars_held}
+            # ── 2b. Intraday breakeven (live-val egyező) ───────────────────
+            # Ha az ár eléri entry + 0.5×initial_risk szintet → SL = entry.
+            # Csak egyszer tüzel. Re-check SL ha az új SL-t azonnal leütik.
+            if not be_applied and initial_risk > 0:
+                be_triggered = False
+                if direction == "LONG" and current_sl < entry_price:
+                    if h >= entry_price + 0.5 * initial_risk:
+                        current_sl  = round(entry_price, 4)
+                        be_triggered = True
+                        be_applied  = True
+                elif direction == "SHORT" and current_sl > entry_price:
+                    if l <= entry_price - 0.5 * initial_risk:
+                        current_sl  = round(entry_price, 4)
+                        be_triggered = True
+                        be_applied  = True
+                if be_triggered:
+                    # Re-check: az új breakeven SL-t ezen a baron azonnal leüthetik
+                    if direction == "LONG" and l <= current_sl:
+                        return {"exit_price": current_sl, "exit_time": bar_ts,
+                                "exit_reason": "SL_HIT", "duration_bars": bars_held}
+                    elif direction == "SHORT" and h >= current_sl:
+                        return {"exit_price": current_sl, "exit_time": bar_ts,
+                                "exit_reason": "SL_HIT", "duration_bars": bars_held}
 
-            # ── 3. EOD kezelés (nap utolsó barján) ────────────────────────
+            # ── 2b. TP tightening (live-val egyező) ───────────────────────
+            # Ha az ár >= 50% úton a TP felé: TP = close + 15% × original_tp_range.
+            # Csak szűkíthet (current_tp irányába mozog), soha nem tágíthat.
+            if direction == "LONG":
+                tp_range_val = initial_tp - entry_price
+                if tp_range_val > 0:
+                    tp_progress = (bar["close"] - entry_price) / tp_range_val
+                    if tp_progress >= 0.50:
+                        new_tp = bar["close"] + 0.15 * tp_range_val
+                        if new_tp < current_tp:
+                            current_tp = round(new_tp, 4)
+                            if h >= current_tp:  # Re-check TP az új szűkebb célárral
+                                return {"exit_price": current_tp, "exit_time": bar_ts,
+                                        "exit_reason": "TP_HIT", "duration_bars": bars_held}
+            elif direction == "SHORT":
+                tp_range_val = entry_price - initial_tp
+                if tp_range_val > 0:
+                    tp_progress = (entry_price - bar["close"]) / tp_range_val
+                    if tp_progress >= 0.50:
+                        new_tp = bar["close"] - 0.15 * tp_range_val
+                        if new_tp > current_tp:
+                            current_tp = round(new_tp, 4)
+                            if l <= current_tp:  # Re-check TP az új szűkebb célárral
+                                return {"exit_price": current_tp, "exit_time": bar_ts,
+                                        "exit_reason": "TP_HIT", "duration_bars": bars_held}
+
+            # ── 3. OPPOSING_SIGNAL végrehajtása (+15 perces késés) ─────────
+            # Prioritásban megelőzi az EOD-ot (live-val egyező)
+            if pending_opp_exit is not None and bar_ts >= pending_opp_exit:
+                return {
+                    "exit_price":    bar["open"],
+                    "exit_time":     bar_ts,
+                    "exit_reason":   "OPPOSING_SIGNAL",
+                    "duration_bars": bars_held,
+                }
+
+            # ── 4. EOD kezelés (nap utolsó barján) ────────────────────────
             bar_end = bar_ts + timedelta(minutes=15)
             is_last_bar_of_day = not _is_trading_hours(bar_end, symbol) and not _is_weekend(bar_end)
 
@@ -558,15 +624,6 @@ class ArchiveBacktestService:
                         trailing_sl = round(bar["close"] * (1.0 - eff_sl_pct), 4)
                         if trailing_sl > current_sl:
                             current_sl = trailing_sl
-
-            # ── 4. OPPOSING_SIGNAL végrehajtása (+15 perces késés) ─────────
-            if pending_opp_exit is not None and bar_ts >= pending_opp_exit:
-                return {
-                    "exit_price":    bar["open"],
-                    "exit_time":     bar_ts,
-                    "exit_reason":   "OPPOSING_SIGNAL",
-                    "duration_bars": bars_held,
-                }
 
             # ── 5. MAX HOLD ─────────────────────────────────────────────────
             if bars_held > MAX_HOLD_BARS:
