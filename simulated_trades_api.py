@@ -16,6 +16,9 @@ from src.database import get_db
 from src.models import SimulatedTrade
 from src.backtest_service import BacktestService
 from src.price_service import PriceService
+from src.archive_backtest_service import ArchiveBacktestService
+import sqlite3
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -373,6 +376,134 @@ def get_trade(
         "duration_minutes": trade.duration_minutes,
         "created_at": trade.created_at.isoformat()
     }
+
+
+# ==========================================
+# ARCHIVE BACKTEST ENDPOINTS
+# ==========================================
+
+class ArchiveBacktestRequest(BaseModel):
+    symbols: Optional[List[str]] = Field(None, description="Ticker symbols (None = összes)")
+    score_threshold: float = Field(15.0, description="Minimum |combined_score|")
+
+
+@router.post("/archive-backtest")
+def run_archive_backtest(request: ArchiveBacktestRequest):
+    """
+    Futtatja a visszamenőleges szimulációt az archive_signals adatain.
+    Eredmény az archive_simulated_trades táblába kerül.
+    Korábbi eredmények törlődnek (teljes újrafuttatás).
+    """
+    import time
+    try:
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trendsignal.db")
+        service = ArchiveBacktestService(db_path)
+        t0 = time.time()
+        stats = service.run(
+            symbols=request.symbols,
+            score_threshold=request.score_threshold,
+        )
+        elapsed = round(time.time() - t0, 2)
+        return {"status": "ok", "execution_time_seconds": elapsed, "stats": stats}
+    except Exception as e:
+        logger.error(f"Archive backtest error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/archive/stats")
+def get_archive_stats(
+    symbol: Optional[str] = Query(None),
+    real_only: bool = Query(False, description="Csak is_real_trade=1 eredmények"),
+):
+    """Archive szimulációs statisztikák."""
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trendsignal.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        where = ["status = 'CLOSED'"]
+        params: list = []
+        if symbol:
+            where.append("ticker_symbol = ?")
+            params.append(symbol)
+        if real_only:
+            where.append("is_real_trade = 1")
+        w = " AND ".join(where)
+
+        row = conn.execute(f"""
+            SELECT
+                COUNT(*)                                          AS total,
+                SUM(CASE WHEN pnl_percent > 0 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN pnl_percent <= 0 THEN 1 ELSE 0 END) AS losses,
+                AVG(pnl_percent)                                  AS avg_pnl,
+                SUM(CASE WHEN exit_reason='TP_HIT'   THEN 1 ELSE 0 END) AS tp_hit,
+                SUM(CASE WHEN exit_reason='SL_HIT'   THEN 1 ELSE 0 END) AS sl_hit,
+                SUM(CASE WHEN exit_reason='OPPOSING_SIGNAL' THEN 1 ELSE 0 END) AS opposing,
+                SUM(CASE WHEN exit_reason='MAX_HOLD_LIQUIDATION' THEN 1 ELSE 0 END) AS max_hold,
+                AVG(duration_bars)                                AS avg_bars,
+                COUNT(CASE WHEN direction='LONG'  THEN 1 END)    AS long_count,
+                COUNT(CASE WHEN direction='SHORT' THEN 1 END)    AS short_count
+            FROM archive_simulated_trades WHERE {w}
+        """, params).fetchone()
+
+        open_count = conn.execute(
+            f"SELECT COUNT(*) FROM archive_simulated_trades WHERE status='OPEN'"
+            + (f" AND ticker_symbol=?" if symbol else ""),
+            ([symbol] if symbol else []),
+        ).fetchone()[0]
+
+        total = row["total"] or 0
+        wins  = row["wins"]  or 0
+        return {
+            "total_closed": total,
+            "total_open":   open_count,
+            "wins":   wins,
+            "losses": row["losses"] or 0,
+            "win_rate": round(wins / total * 100, 1) if total else 0,
+            "avg_pnl_percent": round(row["avg_pnl"] or 0, 3),
+            "tp_hit":   row["tp_hit"]   or 0,
+            "sl_hit":   row["sl_hit"]   or 0,
+            "opposing": row["opposing"] or 0,
+            "max_hold": row["max_hold"] or 0,
+            "avg_duration_bars": round(row["avg_bars"] or 0, 1),
+            "long_count":  row["long_count"]  or 0,
+            "short_count": row["short_count"] or 0,
+        }
+    finally:
+        conn.close()
+
+
+@router.get("/archive/signal/{signal_id}")
+def get_archive_trade_by_signal(signal_id: int):
+    """Visszaadja az adott archive_signal_id-hez tartozó szimulált trade-et."""
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trendsignal.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT * FROM archive_simulated_trades WHERE archive_signal_id = ?",
+            (signal_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Nincs szimulált trade ehhez a signalhoz")
+        return dict(row)
+    finally:
+        conn.close()
+
+
+@router.delete("/archive/clear")
+def clear_archive_trades(confirm: str = Query(...)):
+    """Törli az összes archive szimulált trade-et."""
+    if confirm != "yes":
+        raise HTTPException(status_code=400, detail="Add hozzá: ?confirm=yes")
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trendsignal.db")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DELETE FROM archive_simulated_trades")
+        count = conn.execute("SELECT changes()").fetchone()[0]
+        conn.commit()
+        return {"status": "ok", "deleted": count}
+    finally:
+        conn.close()
 
 
 @router.delete("/clear")

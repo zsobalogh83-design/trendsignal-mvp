@@ -885,5 +885,204 @@ async def get_signal_by_id_endpoint(
         )
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# ARCHIVE SIGNALS HISTORY
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.get("/archive/history")
+async def get_archive_signal_history(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    ticker_symbols: Optional[List[str]] = Query(None),
+    decisions: Optional[List[str]] = Query(None),
+    strengths: Optional[List[str]] = Query(None),
+    min_score: Optional[float] = None,
+    max_score: Optional[float] = None,
+    exit_reasons: Optional[List[str]] = Query(None),
+    limit: int = 100,
+    offset: int = 0,
+):
+    """
+    Archive signalok listázása szimulált trade adatokkal.
+    Azonos response formátum mint a /history endpoint — így a frontend
+    ugyanazt a komponenst tudja újrahasznosítani.
+    """
+    import sqlite3 as _sqlite3
+    import os as _os
+
+    db_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "trendsignal.db")
+    db_path = _os.path.normpath(db_path)
+    conn = _sqlite3.connect(db_path)
+    conn.row_factory = _sqlite3.Row
+    try:
+        where: list[str] = ["1=1"]
+        params: list = []
+
+        if from_date:
+            where.append("s.signal_timestamp >= ?")
+            params.append(from_date)
+        if to_date:
+            where.append("s.signal_timestamp < date(?, '+1 day')")
+            params.append(to_date)
+        if ticker_symbols:
+            ph = ",".join("?" * len(ticker_symbols))
+            where.append(f"s.ticker_symbol IN ({ph})")
+            params.extend([t.upper() for t in ticker_symbols])
+        if decisions:
+            ph = ",".join("?" * len(decisions))
+            where.append(f"s.decision IN ({ph})")
+            params.extend([d.upper() for d in decisions])
+        if strengths:
+            ph = ",".join("?" * len(strengths))
+            where.append(f"s.strength IN ({ph})")
+            params.extend([st.upper() for st in strengths])
+        if min_score is not None:
+            where.append("s.combined_score >= ?")
+            params.append(min_score)
+        if max_score is not None:
+            where.append("s.combined_score <= ?")
+            params.append(max_score)
+
+        # exit_reason filter — archive_simulated_trades alapján
+        if exit_reasons:
+            er_map = {
+                'TP': 'TP_HIT', 'SL': 'SL_HIT',
+                'REV': 'OPPOSING_SIGNAL', 'MAX': 'MAX_HOLD_LIQUIDATION',
+            }
+            db_reasons = [er_map[r] for r in exit_reasons if r in er_map]
+            include_open = 'OPEN' in exit_reasons
+            include_none = 'NONE' in exit_reasons
+
+            er_conds: list[str] = []
+            if db_reasons:
+                ph = ",".join("?" * len(db_reasons))
+                er_conds.append(
+                    f"EXISTS (SELECT 1 FROM archive_simulated_trades t "
+                    f"WHERE t.archive_signal_id=s.id AND t.exit_reason IN ({ph}))"
+                )
+                params.extend(db_reasons)
+            if include_open:
+                er_conds.append(
+                    "EXISTS (SELECT 1 FROM archive_simulated_trades t "
+                    "WHERE t.archive_signal_id=s.id AND t.status='OPEN')"
+                )
+            if include_none:
+                er_conds.append(
+                    "NOT EXISTS (SELECT 1 FROM archive_simulated_trades t "
+                    "WHERE t.archive_signal_id=s.id)"
+                )
+            if er_conds:
+                where.append(f"({' OR '.join(er_conds)})")
+
+        w = " AND ".join(where)
+
+        # Total count
+        total_count = conn.execute(
+            f"SELECT COUNT(*) FROM archive_signals s WHERE {w}", params
+        ).fetchone()[0]
+
+        # PnL summary (closed trades a teljes szűrt halmazon)
+        pnl_row = conn.execute(f"""
+            SELECT
+                COUNT(t.id)                                              AS closed_count,
+                SUM(CASE WHEN t.status='OPEN' THEN 1 ELSE 0 END)        AS open_count,
+                SUM(CASE WHEN t.status='CLOSED' THEN t.pnl_percent ELSE 0 END) AS total_pnl_pct
+            FROM archive_signals s
+            LEFT JOIN archive_simulated_trades t ON t.archive_signal_id = s.id
+            WHERE {w}
+        """, params).fetchone()
+
+        pnl_summary = {
+            "closed_count": pnl_row["closed_count"] or 0,
+            "open_count":   pnl_row["open_count"] or 0,
+            "open_trade_ids": [],
+            "total_pnl_huf": None,
+            "total_pnl_percent": float(pnl_row["total_pnl_pct"]) if pnl_row["total_pnl_pct"] else None,
+        }
+
+        # Paginated signals
+        rows = conn.execute(f"""
+            SELECT s.*, t.id as trade_id, t.status as trade_status,
+                   t.direction as trade_direction,
+                   t.pnl_percent as trade_pnl_pct,
+                   t.exit_reason as trade_exit_reason,
+                   t.entry_price as trade_entry_price,
+                   t.exit_price as trade_exit_price,
+                   t.stop_loss_price as trade_sl,
+                   t.take_profit_price as trade_tp,
+                   t.is_real_trade as trade_is_real
+            FROM archive_signals s
+            LEFT JOIN archive_simulated_trades t ON t.archive_signal_id = s.id
+            WHERE {w}
+            ORDER BY s.signal_timestamp DESC
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset]).fetchall()
+
+        signals_list = []
+        for r in rows:
+            trade_data = None
+            if r["trade_id"]:
+                trade_data = {
+                    "id":             r["trade_id"],
+                    "status":         r["trade_status"],
+                    "direction":      r["trade_direction"],
+                    "pnl_percent":    float(r["trade_pnl_pct"]) if r["trade_pnl_pct"] is not None else None,
+                    "pnl_amount_huf": None,
+                    "exit_reason":    r["trade_exit_reason"],
+                    "entry_price":    float(r["trade_entry_price"]) if r["trade_entry_price"] else None,
+                    "exit_price":     float(r["trade_exit_price"]) if r["trade_exit_price"] is not None else None,
+                    "position_size_shares": None,
+                    "usd_huf_rate":   None,
+                    "is_real_trade":  bool(r["trade_is_real"]),
+                }
+
+            reasoning = {}
+            if r["reasoning_json"]:
+                try:
+                    reasoning = json.loads(r["reasoning_json"])
+                except Exception:
+                    pass
+
+            signals_list.append({
+                "id":                r["id"],
+                "ticker_symbol":     r["ticker_symbol"],
+                "decision":          r["decision"],
+                "strength":          r["strength"],
+                "combined_score":    float(r["combined_score"]) if r["combined_score"] is not None else 0.0,
+                "overall_confidence":float(r["overall_confidence"]) if r["overall_confidence"] is not None else 0.0,
+                "sentiment_score":   float(r["sentiment_score"]) if r["sentiment_score"] is not None else 0.0,
+                "technical_score":   float(r["technical_score"]) if r["technical_score"] is not None else 0.0,
+                "risk_score":        float(r["risk_score"]) if r["risk_score"] is not None else 0.0,
+                "sentiment_confidence": float(r["sentiment_confidence"]) if r["sentiment_confidence"] is not None else 0.0,
+                "technical_confidence": float(r["technical_confidence"]) if r["technical_confidence"] is not None else 0.0,
+                "entry_price":       float(r["entry_price"]) if r["entry_price"] else 0.0,
+                "stop_loss":         float(r["stop_loss"]) if r["stop_loss"] else 0.0,
+                "take_profit":       float(r["take_profit"]) if r["take_profit"] else 0.0,
+                "risk_reward_ratio": float(r["risk_reward_ratio"]) if r["risk_reward_ratio"] else 1.0,
+                "reasoning":         reasoning,
+                "created_at":        r["signal_timestamp"] + "Z" if r["signal_timestamp"] else None,
+                "expires_at":        None,
+                "status":            "archived",
+                "simulated_trade":   trade_data,
+                "direction_result":  None,
+                "is_archive":        True,
+            })
+
+        return {
+            "signals":     signals_list,
+            "total":       total_count,
+            "pnl_summary": pnl_summary,
+            "filters_applied": {
+                "from_date": from_date, "to_date": to_date,
+                "ticker_symbols": ticker_symbols, "decisions": decisions,
+                "strengths": strengths, "min_score": min_score,
+                "max_score": max_score, "limit": limit, "offset": offset,
+            },
+        }
+
+    finally:
+        conn.close()
+
+
 # Export router
 __all__ = ['router']

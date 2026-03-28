@@ -24,6 +24,8 @@ function getExitCategory(trade: Signal['simulated_trade']): ExitReasonFilter {
 }
 
 export function SignalHistory() {
+  const [viewMode, setViewMode] = useState<'live' | 'archive'>('live');
+
   const [filters, setFilters] = useState<SignalHistoryFilters>({
     from_date: getDefaultFromDate(),
     to_date: getDefaultToDate(),
@@ -36,6 +38,8 @@ export function SignalHistory() {
   const [showFilters, setShowFilters] = useState(true);
   const [simulateStatus, setSimulateStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [simulateStats, setSimulateStats] = useState<Record<string, number> | null>(null);
+  const [archiveBacktestStatus, setArchiveBacktestStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [archiveBacktestStats, setArchiveBacktestStats] = useState<Record<string, unknown> | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -50,7 +54,7 @@ export function SignalHistory() {
   });
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['signal-history', filters],
+    queryKey: ['signal-history', filters, viewMode],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filters.from_date) params.append('from_date', filters.from_date);
@@ -69,7 +73,10 @@ export function SignalHistory() {
       if (filters.exit_reasons && filters.exit_reasons.length > 0) {
         filters.exit_reasons.forEach(r => params.append('exit_reasons', r));
       }
-      const response = await fetch(`${API_BASE}/signals/history?${params.toString()}`);
+      const endpoint = viewMode === 'archive'
+        ? `${API_BASE}/signals/archive/history`
+        : `${API_BASE}/signals/history`;
+      const response = await fetch(`${endpoint}?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch signal history');
       return response.json() as Promise<SignalHistoryResponse>;
     },
@@ -163,6 +170,29 @@ export function SignalHistory() {
     }
   };
 
+  const handleArchiveBacktest = async () => {
+    setArchiveBacktestStatus('running');
+    setArchiveBacktestStats(null);
+    try {
+      const body: Record<string, unknown> = {};
+      if (filters.ticker_symbols && filters.ticker_symbols.length > 0) {
+        body.symbols = filters.ticker_symbols;
+      }
+      const response = await fetch(`${API_BASE}/simulated-trades/archive-backtest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error('Archive backtest failed');
+      const result = await response.json();
+      setArchiveBacktestStatus('done');
+      setArchiveBacktestStats(result.stats);
+      queryClient.invalidateQueries({ queryKey: ['signal-history'] });
+    } catch {
+      setArchiveBacktestStatus('error');
+    }
+  };
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -198,56 +228,152 @@ export function SignalHistory() {
           </div>
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            {/* Simulate button */}
-            <button
-              onClick={handleSimulate}
-              disabled={simulateStatus === 'running'}
-              style={{
-                background: simulateStatus === 'running'
-                  ? 'rgba(59, 130, 246, 0.2)'
-                  : simulateStatus === 'done'
-                  ? 'rgba(16, 185, 129, 0.2)'
-                  : simulateStatus === 'error'
-                  ? 'rgba(239, 68, 68, 0.2)'
-                  : 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)',
-                border: `1px solid ${simulateStatus === 'done' ? '#10b981' : simulateStatus === 'error' ? '#ef4444' : 'rgba(99, 102, 241, 0.5)'}`,
-                color: simulateStatus === 'done' ? '#34d399' : simulateStatus === 'error' ? '#f87171' : '#e0e7ff',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                cursor: simulateStatus === 'running' ? 'not-allowed' : 'pointer',
-                fontSize: '13px',
-                fontWeight: '600',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.2s',
-                opacity: simulateStatus === 'running' ? 0.7 : 1,
-              }}
-            >
-              {simulateStatus === 'running' ? (
-                <>
-                  <span style={{
-                    display: 'inline-block',
-                    width: '12px',
-                    height: '12px',
-                    border: '2px solid rgba(255,255,255,0.3)',
-                    borderTop: '2px solid white',
-                    borderRadius: '50%',
-                    animation: 'spin 1s linear infinite'
-                  }} />
-                  Simulating...
-                </>
-              ) : simulateStatus === 'done' ? (
-                <>✓ Done</>
-              ) : simulateStatus === 'error' ? (
-                <>✗ Error</>
-              ) : (
-                <>
-                  <FiPlay size={13} />
-                  Simulate
-                </>
-              )}
-            </button>
+
+            {/* Live / Archive toggle */}
+            <div style={{
+              display: 'flex',
+              background: 'rgba(15, 23, 42, 0.8)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              borderRadius: '8px',
+              overflow: 'hidden',
+            }}>
+              {(['live', 'archive'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => {
+                    setViewMode(mode);
+                    if (mode === 'archive') {
+                      setFilters(f => ({ ...f, from_date: '2024-03-11', to_date: '2026-03-06' }));
+                    } else {
+                      setFilters(f => ({ ...f, from_date: getDefaultFromDate(), to_date: getDefaultToDate() }));
+                    }
+                  }}
+                  style={{
+                    padding: '7px 16px',
+                    border: 'none',
+                    background: viewMode === mode
+                      ? 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)'
+                      : 'transparent',
+                    color: viewMode === mode ? '#fff' : '#94a3b8',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  {mode === 'live' ? '⚡ Live' : '📦 Archive'}
+                </button>
+              ))}
+            </div>
+
+            {/* Simulate button (live only) */}
+            {viewMode === 'live' && (
+              <button
+                onClick={handleSimulate}
+                disabled={simulateStatus === 'running'}
+                style={{
+                  background: simulateStatus === 'running'
+                    ? 'rgba(59, 130, 246, 0.2)'
+                    : simulateStatus === 'done'
+                    ? 'rgba(16, 185, 129, 0.2)'
+                    : simulateStatus === 'error'
+                    ? 'rgba(239, 68, 68, 0.2)'
+                    : 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)',
+                  border: `1px solid ${simulateStatus === 'done' ? '#10b981' : simulateStatus === 'error' ? '#ef4444' : 'rgba(99, 102, 241, 0.5)'}`,
+                  color: simulateStatus === 'done' ? '#34d399' : simulateStatus === 'error' ? '#f87171' : '#e0e7ff',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  cursor: simulateStatus === 'running' ? 'not-allowed' : 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s',
+                  opacity: simulateStatus === 'running' ? 0.7 : 1,
+                }}
+              >
+                {simulateStatus === 'running' ? (
+                  <>
+                    <span style={{
+                      display: 'inline-block',
+                      width: '12px',
+                      height: '12px',
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      borderTop: '2px solid white',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite'
+                    }} />
+                    Simulating...
+                  </>
+                ) : simulateStatus === 'done' ? (
+                  <>✓ Done</>
+                ) : simulateStatus === 'error' ? (
+                  <>✗ Error</>
+                ) : (
+                  <>
+                    <FiPlay size={13} />
+                    Simulate
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Archive Backtest button (archive only) */}
+            {viewMode === 'archive' && (
+              <button
+                onClick={handleArchiveBacktest}
+                disabled={archiveBacktestStatus === 'running'}
+                title="Visszamenőleges szimuláció újrafuttatása"
+                style={{
+                  background: archiveBacktestStatus === 'running'
+                    ? 'rgba(59, 130, 246, 0.2)'
+                    : archiveBacktestStatus === 'done'
+                    ? 'rgba(16, 185, 129, 0.2)'
+                    : archiveBacktestStatus === 'error'
+                    ? 'rgba(239, 68, 68, 0.2)'
+                    : 'linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%)',
+                  border: `1px solid ${archiveBacktestStatus === 'done' ? '#10b981' : archiveBacktestStatus === 'error' ? '#ef4444' : 'rgba(139, 92, 246, 0.5)'}`,
+                  color: archiveBacktestStatus === 'done' ? '#34d399' : archiveBacktestStatus === 'error' ? '#f87171' : '#e0e7ff',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  cursor: archiveBacktestStatus === 'running' ? 'not-allowed' : 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s',
+                  opacity: archiveBacktestStatus === 'running' ? 0.7 : 1,
+                }}
+              >
+                {archiveBacktestStatus === 'running' ? (
+                  <>
+                    <span style={{
+                      display: 'inline-block',
+                      width: '12px',
+                      height: '12px',
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      borderTop: '2px solid white',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite'
+                    }} />
+                    Running...
+                  </>
+                ) : archiveBacktestStatus === 'done' ? (
+                  <>✓ Done ({(archiveBacktestStats as Record<string, number>)?.trades_created ?? 0} trades)</>
+                ) : archiveBacktestStatus === 'error' ? (
+                  <>✗ Error</>
+                ) : (
+                  <>
+                    <FiPlay size={13} />
+                    Re-simulate
+                  </>
+                )}
+              </button>
+            )}
 
             <Link to="/" style={{
               background: 'rgba(51, 65, 85, 0.5)',
