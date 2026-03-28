@@ -309,16 +309,15 @@ class TradeManager:
 
         direction = "LONG" if signal.combined_score >= 0 else "SHORT"
 
-        # SHORT trades are intraday-only – skip if the signal arrives outside trading hours
-        if direction == "SHORT":
-            execution_check = signal_utc + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
-            if (self.price_service._is_weekend(execution_check) or
-                    not self.price_service._is_trading_hours(execution_check, symbol)):
-                raise InvalidSignalError(
-                    signal.id,
-                    f"SHORT simulated signal outside trading hours – skipping "
-                    f"(execution would be at {execution_check} UTC)"
-                )
+        # No pre-market / after-hours entries (applies to both LONG and SHORT)
+        execution_check = signal_utc + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
+        if (self.price_service._is_weekend(execution_check) or
+                not self.price_service._is_trading_hours(execution_check, symbol)):
+            raise InvalidSignalError(
+                signal.id,
+                f"{direction} simulated signal outside trading hours – skipping "
+                f"(execution would be at {execution_check} UTC)"
+            )
 
         logger.debug(f"Opening simulated {symbol} ({direction}): Signal @ {signal_utc} UTC")
 
