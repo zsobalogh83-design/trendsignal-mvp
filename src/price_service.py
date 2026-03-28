@@ -339,21 +339,36 @@ class PriceService:
             if not candle:
                 return None
             
+            candle_open = candle['open']
             candle_high = candle['high']
             candle_low = candle['low']
-            
+
             if direction == 'LONG':
-                if candle_low <= stop_loss:
+                sl_hit = candle_low <= stop_loss
+                tp_hit = candle_high >= take_profit
+                if sl_hit and tp_hit:
+                    # Both hit on same candle: whichever was closer to open hit first
+                    sl_first = (candle_open - stop_loss) <= (take_profit - candle_open)
+                    trigger = 'SL_HIT' if sl_first else 'TP_HIT'
+                    return {'triggered': True, 'trigger_type': trigger, 'candle': candle}
+                elif sl_hit:
                     return {'triggered': True, 'trigger_type': 'SL_HIT', 'candle': candle}
-                elif candle_high >= take_profit:
+                elif tp_hit:
                     return {'triggered': True, 'trigger_type': 'TP_HIT', 'candle': candle}
-            
+
             elif direction == 'SHORT':
-                if candle_high >= stop_loss:
+                sl_hit = candle_high >= stop_loss
+                tp_hit = candle_low <= take_profit
+                if sl_hit and tp_hit:
+                    # Both hit on same candle: whichever was closer to open hit first
+                    sl_first = (stop_loss - candle_open) <= (candle_open - take_profit)
+                    trigger = 'SL_HIT' if sl_first else 'TP_HIT'
+                    return {'triggered': True, 'trigger_type': trigger, 'candle': candle}
+                elif sl_hit:
                     return {'triggered': True, 'trigger_type': 'SL_HIT', 'candle': candle}
-                elif candle_low <= take_profit:
+                elif tp_hit:
                     return {'triggered': True, 'trigger_type': 'TP_HIT', 'candle': candle}
-            
+
             return {'triggered': False, 'trigger_type': None, 'candle': candle}
             
         except InsufficientDataError:

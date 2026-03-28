@@ -259,6 +259,7 @@ class BacktestService:
             # Skip weekends entirely - jump directly to next market open
             if price_service._is_weekend(check_time_utc):
                 check_time_utc = price_service._next_market_open_utc(check_time_utc, trade.symbol)
+                stagnation_slots = 0  # reset: hétvégi gap megszakítja az oldalazást
                 continue
 
             # Skip outside trading hours - no candles available

@@ -199,7 +199,7 @@ class SignalGenerator:
         # ===== CALCULATE CONTRIBUTIONS =====
         sentiment_contribution = sentiment_score * sentiment_weight
         technical_contribution = technical_score * technical_weight
-        risk_contribution = risk_score * risk_weight
+        risk_contribution = (risk_score - 50) * risk_weight
         
         # ===== COMBINED SCORE =====
         base_combined_score = sentiment_contribution + technical_contribution + risk_contribution
@@ -484,9 +484,10 @@ class SignalGenerator:
                  Positive for BUY alignment, Negative for SELL alignment
         """
         # Use absolute values to check strength regardless of direction
+        # risk_score is 0-100 where 50=neutral → center at 50 for directional use
         abs_sent = abs(sentiment_score)
         abs_tech = abs(technical_score)
-        abs_risk = abs(risk_score)
+        abs_risk = abs(risk_score - 50)
         
         # Check each pair (using absolute values for strength)
         tr_strong = abs_tech > self.config.alignment_tech_threshold and abs_risk > self.config.alignment_risk_threshold
@@ -518,10 +519,10 @@ class SignalGenerator:
         # - Zero if mixed signals (components have different signs)
         
         # Check if all components have the same sign (alignment direction)
-        if sentiment_score > 0 and technical_score > 0 and risk_score > 0:
+        if sentiment_score > 0 and technical_score > 0 and risk_score > 50:
             # All positive → BUY alignment
             return bonus_magnitude
-        elif sentiment_score < 0 and technical_score < 0 and risk_score < 0:
+        elif sentiment_score < 0 and technical_score < 0 and risk_score < 50:
             # All negative → SELL alignment
             return -bonus_magnitude
         else:

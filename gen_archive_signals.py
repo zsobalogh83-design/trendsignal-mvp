@@ -564,7 +564,7 @@ def generate_bar_signal(
 
     sent_contrib  = sent_score  * sw
     tech_contrib  = tech_score  * tw
-    risk_contrib  = risk_score  * rw
+    risk_contrib  = (risk_score - 50) * rw
     base_combined = sent_contrib + tech_contrib + risk_contrib
 
     # Alignment bonus
@@ -616,8 +616,13 @@ def generate_bar_signal(
     overall_conf = sent_conf * sw + tech_conf * tw + risk_conf * rw
 
     # Final decision / strength
-    with _quiet():
-        decision, strength = generator._determine_decision(combined_score, overall_conf)
+    # If R:R correction forced HOLD (prelim already overridden above), use HOLD directly
+    # to avoid _determine_decision returning BUY/SELL again on the restored score
+    if prelim == 'HOLD' and (entry_price is None):
+        decision, strength = 'HOLD', 'NEUTRAL'
+    else:
+        with _quiet():
+            decision, strength = generator._determine_decision(combined_score, overall_conf)
 
     # S/R values for storage
     nearest_support, nearest_resistance = parse_support_resistance(risk_data)

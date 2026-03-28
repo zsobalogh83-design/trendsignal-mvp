@@ -262,33 +262,44 @@ class LLMContextChecker:
     # ------------------------------------------------------------------
 
     def _call_api(self, messages: list) -> str:
-        """OpenRouter API hivas. Visszaad raw JSON stringet."""
+        """OpenRouter API hivas. Visszaad raw JSON stringet. 3x retry SSL/network hibara."""
         if not self.api_key:
             raise ValueError("LLM API key (OPENROUTER_API_KEY) not set")
 
+        # response_format and seed are OpenAI-specific parameters
+        is_openai = self.model.startswith("openai/")
         payload = {
             "model": self.model,
             "messages": messages,
             "temperature": 0,
-            "seed": 42,
-            "response_format": {"type": "json_object"},
+            "max_tokens": 512,
+            "stream": False,
         }
+        if is_openai:
+            payload["seed"] = 42
+            payload["response_format"] = {"type": "json_object"}
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
 
-        response = requests.post(
-            OPENROUTER_API_URL,
-            json=payload,
-            headers=headers,
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        content = data["choices"][0]["message"]["content"]
-        return content
+        last_exc = None
+        for attempt in range(3):
+            try:
+                response = requests.post(
+                    OPENROUTER_API_URL,
+                    json=payload,
+                    headers=headers,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_exc = e
+                if attempt < 2:
+                    time.sleep(1.0 * (attempt + 1))
+        raise last_exc
 
     # ------------------------------------------------------------------
     # INTERNAL: RESPONSE PARSING
@@ -299,8 +310,18 @@ class LLMContextChecker:
         JSON parse + enum validacio + score szamitas.
         Parse/validacioa hiba eseten success=False.
         """
+        # Strip markdown code block if present (e.g. Gemini returns ```json ... ```)
+        text = response_text.strip()
+        if text.startswith("```"):
+            text = text[3:]                      # remove opening ```
+            if text.startswith("json"):
+                text = text[4:]                  # remove language tag
+            if text.endswith("```"):
+                text = text[:-3]                 # remove closing ```
+            text = text.strip()
+
         try:
-            data = json.loads(response_text)
+            data = json.loads(text)
         except json.JSONDecodeError as e:
             logger.warning(f"[LLM] JSON parse error: {e} | raw: {response_text[:200]}")
             return LLMCheckResult(success=False)
@@ -325,8 +346,8 @@ class LLMContextChecker:
                 logger.warning(f"[LLM] Invalid price_impact: {price_impact}")
                 return LLMCheckResult(success=False)
             if impact_duration not in VALID_IMPACT_DURATION:
-                logger.warning(f"[LLM] Invalid impact_duration: {impact_duration}")
-                return LLMCheckResult(success=False)
+                logger.warning(f"[LLM] Invalid impact_duration: {impact_duration}, defaulting to 'permanent'")
+                impact_duration = 'permanent'
             if catalyst_type not in VALID_CATALYST_TYPE:
                 catalyst_type = 'other'  # soft fallback
             if confidence not in VALID_CONFIDENCE:
