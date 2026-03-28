@@ -167,21 +167,20 @@ class TradeManager:
         # Signal.created_at is in UTC
         signal_utc = signal.created_at
 
-        # 3a. DIRECTION CHECK FOR SHORT TRADES
-        # SHORT trades are intraday-only: they MUST be opened and closed within the same
-        # trading day.  If the signal arrives outside trading hours (after close, weekend,
-        # etc.), the entry would be forwarded to the NEXT market open – but then the
-        # position can never be closed on the same day it was "generated".  Skip it.
+        # 3a. DIRECTION CHECK – no pre-market / after-hours entries
+        # Signals are only generated during trading hours, but the execution is +15 min later.
+        # If execution falls outside trading hours (e.g. signal at 20:50 ET → exec 21:05) or
+        # would spill to the next trading day, skip the trade for both directions.
+        # SHORT has the additional constraint that it MUST close same day.
         direction = "LONG" if signal.combined_score >= 25 else "SHORT"
-        if direction == "SHORT":
-            execution_check = signal_utc + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
-            if (self.price_service._is_weekend(execution_check) or
-                    not self.price_service._is_trading_hours(execution_check, symbol)):
-                raise InvalidSignalError(
-                    signal.id,
-                    f"SHORT signal outside trading hours – skipping "
-                    f"(execution would be at {execution_check} UTC)"
-                )
+        execution_check = signal_utc + timedelta(minutes=self.EXECUTION_DELAY_MINUTES)
+        if (self.price_service._is_weekend(execution_check) or
+                not self.price_service._is_trading_hours(execution_check, symbol)):
+            raise InvalidSignalError(
+                signal.id,
+                f"{direction} signal outside trading hours – skipping "
+                f"(execution would be at {execution_check} UTC)"
+            )
 
         logger.info(f"Opening {symbol} {direction}: Signal @ {signal_utc} UTC")
 
@@ -234,13 +233,23 @@ class TradeManager:
         
         logger.info(f"   Size: {position_size} shares, {position_value:,.0f} HUF")
         
-        # 7. VALIDATE SL/TP
-        stop_loss_price = signal.stop_loss
-        take_profit_price = signal.take_profit
-        
-        if not stop_loss_price or not take_profit_price:
+        # 7. VALIDATE & ADJUST SL/TP to actual entry price
+        if not signal.stop_loss or not signal.take_profit:
             raise InvalidSignalError(signal.id, "Missing SL/TP")
-        
+
+        if signal.entry_price and signal.entry_price > 0:
+            stop_loss_price, take_profit_price = self._adjust_sl_tp_to_entry(
+                direction, signal.entry_price, signal.stop_loss, signal.take_profit, entry_price
+            )
+            logger.debug(
+                f"   SL/TP adjusted: SL {signal.stop_loss:.4f}→{stop_loss_price:.4f}, "
+                f"TP {signal.take_profit:.4f}→{take_profit_price:.4f} "
+                f"(entry {signal.entry_price:.4f}→{entry_price:.4f})"
+            )
+        else:
+            stop_loss_price = signal.stop_loss
+            take_profit_price = signal.take_profit
+
         if direction == "LONG":
             if not (stop_loss_price < entry_price < take_profit_price):
                 raise InvalidSignalError(
@@ -253,7 +262,7 @@ class TradeManager:
                     signal.id,
                     f"Invalid SHORT levels: TP={take_profit_price}, Entry={entry_price}, SL={stop_loss_price}"
                 )
-        
+
         # 8. CREATE TRADE RECORD
         trade = SimulatedTrade(
             symbol=symbol,
@@ -347,12 +356,17 @@ class TradeManager:
             symbol, entry_price
         )
 
-        # VALIDATE SL/TP
-        stop_loss_price = signal.stop_loss
-        take_profit_price = signal.take_profit
-
-        if not stop_loss_price or not take_profit_price:
+        # VALIDATE & ADJUST SL/TP to actual entry price
+        if not signal.stop_loss or not signal.take_profit:
             raise InvalidSignalError(signal.id, "Missing SL/TP")
+
+        if signal.entry_price and signal.entry_price > 0:
+            stop_loss_price, take_profit_price = self._adjust_sl_tp_to_entry(
+                direction, signal.entry_price, signal.stop_loss, signal.take_profit, entry_price
+            )
+        else:
+            stop_loss_price = signal.stop_loss
+            take_profit_price = signal.take_profit
 
         if direction == "LONG":
             if not (stop_loss_price < entry_price < take_profit_price):
@@ -566,6 +580,40 @@ class TradeManager:
             query = query.filter(SimulatedTrade.symbol == symbol)
         return query.all()
     
+    def _adjust_sl_tp_to_entry(
+        self,
+        direction: str,
+        signal_entry: float,
+        signal_sl: float,
+        signal_tp: float,
+        actual_entry: float,
+    ) -> tuple:
+        """
+        SL/TP szintek igazítása a valós belépési árhoz.
+
+        A signal SL/TP-t a signal pillanatában érvényes entry price-hoz számítják,
+        de a tényleges belépés 15 perccel később, más áron történik.
+        A relatív kockázati arányokat (%-os távolságot) megőrizzük, csak az
+        abszolút szinteket toldjuk el az actual_entry-hez.
+
+        LONG: SL = actual * (1 - sl_pct), TP = actual * (1 + tp_pct)
+        SHORT: SL = actual * (1 + sl_pct), TP = actual * (1 - tp_pct)
+
+        Returns:
+            (adjusted_sl, adjusted_tp)
+        """
+        if direction == "LONG":
+            sl_pct = (signal_entry - signal_sl) / signal_entry
+            tp_pct = (signal_tp - signal_entry) / signal_entry
+            adj_sl = round(actual_entry * (1.0 - sl_pct), 4)
+            adj_tp = round(actual_entry * (1.0 + tp_pct), 4)
+        else:  # SHORT
+            sl_pct = (signal_sl - signal_entry) / signal_entry
+            tp_pct = (signal_entry - signal_tp) / signal_entry
+            adj_sl = round(actual_entry * (1.0 + sl_pct), 4)
+            adj_tp = round(actual_entry * (1.0 - tp_pct), 4)
+        return adj_sl, adj_tp
+
     def _calculate_position_size(self, symbol: str, entry_price: float) -> tuple:
         """Calculate position size"""
         is_huf_ticker = symbol.endswith('.BD')

@@ -51,7 +51,8 @@
       "Bash(sqlite3 \"C:/Users/ZsoltBalogh/OneDrive - R34DY Zrt/Dokumentumok/GitHub/trendsignal-mvp/trendsignal.db\" \".tables\")",
       "Bash(python -c \"import sys; print\\(sys.stdin.buffer.read\\(\\).decode\\(''utf-8'', errors=''replace''\\)\\)\")",
       "Bash(python gen_archive_signals.py --ticker AAPL --dry-run --from-date 2026-01-01)",
-      "Bash(git add gen_archive_signals.py fetch_alpaca_history.py fetch_av_news_history.py run_archive_llm_analysis.py src/alpaca_collector.py src/alphavantage_news_backfill.py)"
+      "Bash(git add gen_archive_signals.py fetch_alpaca_history.py fetch_av_news_history.py run_archive_llm_analysis.py src/alpaca_collector.py src/alphavantage_news_backfill.py)",
+      "Bash(npm run:*)"
     ]
   }
 }

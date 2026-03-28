@@ -790,16 +790,22 @@ class BacktestService:
         arriving in the evening (e.g. 19-22 UTC for US markets) are visible during
         the NEXT trading day's checks (14:30+ UTC), which are in a different UTC day.
 
+        +15 perces végrehajtási késés: a signalt csak a következő 15 perces bar-on
+        lehet végrehajtani, ezért az ellentétes signal keresési ablaka (check_time - 15 min)-ig
+        tart. Ha ez kereskedési időn kívülre esne, a fő loop gondoskodik arról, hogy a
+        következő kereskedési nap nyitóján kerüljön végrehajtásra.
+
         We return the strongest (highest abs score) opposing signal so the most
         decisive reversal wins.
         """
         session_start = self._trading_session_start(check_time_utc, trade.symbol)
+        execution_cutoff = check_time_utc - timedelta(minutes=15)
 
         signals = self.db.query(Signal).filter(
             and_(
                 Signal.ticker_symbol == trade.symbol,
                 Signal.created_at >= session_start,
-                Signal.created_at <= check_time_utc,
+                Signal.created_at <= execution_cutoff,
                 Signal.id != trade.entry_signal_id
             )
         ).all()
