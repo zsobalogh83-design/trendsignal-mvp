@@ -1050,6 +1050,23 @@ async def update_component_weights(updates: ComponentWeightsUpdate):
         }
         update_config_values(config, config_updates)
         logger.info(f"12-component weights updated: {config_updates}")
+
+        # Automatically recalculate all stored scores with the new weights
+        try:
+            import threading
+            from src.recalculate_signals import recalculate_component_scores, recalculate_archive_scores
+            def _recalc():
+                try:
+                    recalculate_component_scores(dry_run=False)
+                    recalculate_archive_scores(dry_run=False)
+                    logger.info("Score recalculation after weight change completed.")
+                except Exception as ex:
+                    logger.error(f"Score recalculation failed: {ex}")
+            threading.Thread(target=_recalc, daemon=True).start()
+            logger.info("Score recalculation triggered in background.")
+        except Exception as e:
+            logger.warning(f"Could not trigger score recalculation: {e}")
+
         return await get_component_weights()
 
     except HTTPException:

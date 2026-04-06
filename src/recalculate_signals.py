@@ -378,6 +378,156 @@ def recalculate_all_signals(
 # COMPONENT SCORE RECALCULATION
 # ─────────────────────────────────────────────
 
+def compute_combined_score_from_indicators(ind: dict, config) -> dict:
+    """
+    Shared utility: compute all 12 component scores + combined_score
+    from a flat dict of indicator values.
+
+    Works for both signal_calculations rows and archive_signals rows.
+    Input keys (all optional, fall back to safe defaults):
+        sma_20, sma_50, rsi, macd_histogram, bb_upper, bb_middle, bb_lower,
+        stoch_k, stoch_d, current_price, atr_pct, nearest_support,
+        nearest_resistance, adx, sentiment_score, sentiment_confidence,
+        decision, risk_reward_ratio
+    Returns dict with all 12 *_score keys + combined_score.
+    """
+    import pandas as pd
+
+    current_price = ind.get("current_price") or 0
+    sma_20 = ind.get("sma_20")
+    sma_50 = ind.get("sma_50")
+
+    current = {
+        "close":          current_price,
+        "sma_20":         sma_20,
+        "sma_50":         sma_50,
+        "rsi":            ind.get("rsi"),
+        "macd_histogram": ind.get("macd_histogram"),
+        "bb_upper":       ind.get("bb_upper"),
+        "bb_middle":      ind.get("bb_middle"),
+        "bb_lower":       ind.get("bb_lower"),
+        "stoch_k":        ind.get("stoch_k"),
+        "stoch_d":        ind.get("stoch_d"),
+    }
+
+    sma_trend_direction = 0
+    if sma_20 is not None and sma_50 is not None and pd.notna(sma_20) and pd.notna(sma_50):
+        sma_trend_direction = 1 if sma_20 > sma_50 else -1
+
+    sma_trend_score, _    = calculate_sma_component_score(current, sma_20, sma_50, "close", config)
+    rsi_momentum_score, _ = calculate_rsi_component_score(ind.get("rsi"), sma_trend_direction, config)
+    macd_signal_score, _  = calculate_macd_component_score(current)
+    bb_position_score, _  = calculate_bollinger_component_score(current, "close", sma_trend_direction)
+    stoch_cross_score, _  = calculate_stochastic_component_score(current, sma_trend_direction, config)
+    volume_confirm_score  = 0  # not persisted in either table
+
+    sentiment_score      = ind.get("sentiment_score") or 0
+    sentiment_confidence = ind.get("sentiment_confidence") or 0.5
+    sentiment_dir        = 1 if sentiment_score >= 0 else -1
+    sentiment_recency_score = max(-100, min(100, (sentiment_confidence * 2 - 1) * 100 * sentiment_dir))
+
+    # Risk sub-scores using _compute_risk_sub_scores logic inline
+    atr_pct = ind.get("atr_pct") or 2.0
+    vl = config.atr_vol_very_low; lo = config.atr_vol_low
+    mo = config.atr_vol_moderate; hi = config.atr_vol_high
+    if atr_pct < vl:
+        vol_raw = +0.8
+    elif atr_pct < lo:
+        vol_raw = 0.8 - ((atr_pct - vl) / (lo - vl)) * 0.4
+    elif atr_pct < mo:
+        vol_raw = 0.4 - ((atr_pct - lo) / (mo - lo)) * 0.4
+    elif atr_pct < hi:
+        vol_raw = 0.0 - ((atr_pct - mo) / (hi - mo)) * 0.4
+    else:
+        vol_raw = max(-0.8, -0.4 - ((atr_pct - hi) / 2.0) * 0.4)
+    volatility_risk_score = max(-100, min(100, vol_raw / 0.8 * 100))
+
+    ns = ind.get("nearest_support")  or (current_price * 0.97 if current_price else 0)
+    nr = ind.get("nearest_resistance") or (current_price * 1.03 if current_price else 0)
+    if current_price and current_price > 0:
+        support_dist    = ((current_price - ns) / current_price) * 100
+        resistance_dist = ((nr - current_price) / current_price) * 100
+        min_distance = min(abs(support_dist), abs(resistance_dist))
+    else:
+        min_distance = 5.0
+    if min_distance < 1.0:
+        prox_raw = -0.8
+    elif min_distance < 2.0:
+        prox_raw = -0.8 + ((min_distance - 1.0) / 1.0) * 0.4
+    elif min_distance < 4.0:
+        prox_raw = -0.4 + ((min_distance - 2.0) / 2.0) * 0.4
+    elif min_distance < 6.0:
+        prox_raw = 0.0  + ((min_distance - 4.0) / 2.0) * 0.4
+    else:
+        prox_raw = min(0.8, 0.4 + ((min_distance - 6.0) / 4.0) * 0.4)
+    sr_proximity_score = max(-100, min(100, prox_raw / 0.8 * 100))
+
+    adx = ind.get("adx")
+    if adx is not None:
+        avs = config.adx_very_strong; as_ = config.adx_strong
+        amo = config.adx_moderate;    aw  = config.adx_weak; avw = config.adx_very_weak
+        if adx > avs:
+            trend_raw = +0.8
+        elif adx > as_:
+            trend_raw = 0.5 + ((adx - as_) / (avs - as_)) * 0.3
+        elif adx > amo:
+            trend_raw = 0.3 + ((adx - amo) / (as_ - amo)) * 0.2
+        elif adx > aw:
+            trend_raw = 0.0 + ((adx - aw)  / (amo - aw))  * 0.3
+        elif adx > avw:
+            trend_raw = -0.3 + ((adx - avw) / (aw - avw)) * 0.3
+        else:
+            trend_raw = max(-0.8, -0.3 - ((avw - adx) / 10) * 0.5)
+    else:
+        trend_raw = 0.0
+    trend_strength_score = max(-100, min(100, trend_raw / 0.8 * 100))
+
+    rr_quality_score = 0
+    rr_ratio  = ind.get("risk_reward_ratio")
+    decision  = ind.get("decision") or ""
+    if rr_ratio is not None and decision not in ("HOLD", ""):
+        direction = 1 if "BUY" in decision.upper() else -1
+        if rr_ratio >= 3.0:
+            rr_quality_score = 100 * direction
+        elif rr_ratio >= 2.5:
+            rr_quality_score = 67 * direction
+        elif rr_ratio >= 2.0:
+            rr_quality_score = 33 * direction
+
+    cw = config.COMPONENT_WEIGHTS
+    combined_score = round(
+        sma_trend_score         * cw["sma_trend"]         +
+        rsi_momentum_score      * cw["rsi_momentum"]      +
+        macd_signal_score       * cw["macd_signal"]       +
+        bb_position_score       * cw["bb_position"]       +
+        stoch_cross_score       * cw["stoch_cross"]       +
+        volume_confirm_score    * cw["volume_confirm"]    +
+        sentiment_score         * cw["sentiment_signal"]  +
+        sentiment_recency_score * cw["sentiment_recency"] +
+        volatility_risk_score   * cw["volatility_risk"]   +
+        sr_proximity_score      * cw["sr_proximity"]      +
+        trend_strength_score    * cw["trend_strength"]    +
+        rr_quality_score        * cw["rr_quality"],
+        2
+    )
+
+    return {
+        "sma_trend_score":         round(sma_trend_score,         2),
+        "rsi_momentum_score":      round(rsi_momentum_score,      2),
+        "macd_signal_score":       round(macd_signal_score,       2),
+        "bb_position_score":       round(bb_position_score,       2),
+        "stoch_cross_score":       round(stoch_cross_score,       2),
+        "volume_confirm_score":    round(volume_confirm_score,    2),
+        "sentiment_recency_score": round(sentiment_recency_score, 2),
+        "volatility_risk_score":   round(volatility_risk_score,   2),
+        "sr_proximity_score":      round(sr_proximity_score,      2),
+        "trend_strength_score":    round(trend_strength_score,    2),
+        "rr_quality_score":        round(rr_quality_score,        2),
+        "_sentiment_signal_score": round(sentiment_score,         2),
+        "combined_score":          combined_score,
+    }
+
+
 def _compute_risk_sub_scores(calc, config):
     """
     Reconstruct volatility_risk / sr_proximity / trend_strength scores
@@ -463,85 +613,32 @@ def _compute_risk_sub_scores(calc, config):
 def compute_component_scores_from_record(calc, config):
     """
     Reconstruct all 12 component scores from a SignalCalculation record.
-
-    Returns dict with keys matching the new column names in signal_calculations.
-    Note: volume_confirm_score = 0 (volume ratio not persisted in calc records).
+    Delegates to compute_combined_score_from_indicators.
     """
-    import pandas as pd
-
-    current_price = calc.current_price or 0
-
-    current = {
-        "close":          current_price,
-        "sma_20":         calc.sma_20,
-        "sma_50":         calc.sma_50,
-        "rsi":            calc.rsi,
-        "macd_histogram": calc.macd_histogram,
-        "bb_upper":       calc.bb_upper,
-        "bb_middle":      calc.bb_middle,
-        "bb_lower":       calc.bb_lower,
-        "stoch_k":        calc.stoch_k,
-        "stoch_d":        calc.stoch_d,
+    ind = {
+        "current_price":       calc.current_price,
+        "sma_20":              calc.sma_20,
+        "sma_50":              calc.sma_50,
+        "rsi":                 calc.rsi,
+        "macd_histogram":      calc.macd_histogram,
+        "bb_upper":            calc.bb_upper,
+        "bb_middle":           calc.bb_middle,
+        "bb_lower":            calc.bb_lower,
+        "stoch_k":             calc.stoch_k,
+        "stoch_d":             calc.stoch_d,
+        "atr_pct":             calc.atr_pct,
+        "nearest_support":     calc.nearest_support,
+        "nearest_resistance":  calc.nearest_resistance,
+        "adx":                 calc.adx,
+        "sentiment_score":     calc.sentiment_score,
+        "sentiment_confidence":calc.sentiment_confidence,
+        "decision":            calc.decision,
+        "risk_reward_ratio":   calc.risk_reward_ratio,
     }
-
-    sma_20 = calc.sma_20
-    sma_50 = calc.sma_50
-
-    sma_trend_direction = 0
-    if pd.notna(sma_20) and pd.notna(sma_50):
-        sma_trend_direction = 1 if sma_20 > sma_50 else -1
-
-    sma_trend_score, _    = calculate_sma_component_score(current, sma_20, sma_50, "close", config)
-    rsi_momentum_score, _ = calculate_rsi_component_score(calc.rsi, sma_trend_direction, config)
-    macd_signal_score, _  = calculate_macd_component_score(current)
-    bb_position_score, _  = calculate_bollinger_component_score(current, "close", sma_trend_direction)
-    stoch_cross_score, _  = calculate_stochastic_component_score(current, sma_trend_direction, config)
-    volume_confirm_score  = 0  # not stored
-
-    sentiment_score      = calc.sentiment_score or 0
-    sentiment_confidence = calc.sentiment_confidence or 0.5
-    sentiment_dir        = 1 if sentiment_score >= 0 else -1
-    sentiment_recency_score = max(-100, min(100, (sentiment_confidence * 2 - 1) * 100 * sentiment_dir))
-
-    volatility_risk_score, sr_proximity_score, trend_strength_score = \
-        _compute_risk_sub_scores(calc, config)
-
-    rr_quality_score = 0
-    rr_ratio = calc.risk_reward_ratio
-    if rr_ratio is not None and calc.decision and calc.decision != "HOLD":
-        direction = 1 if calc.decision == "BUY" else -1
-        tp_method = None
-        if calc.entry_exit_details:
-            try:
-                eed = json.loads(calc.entry_exit_details)
-                if "take_profit" in eed and isinstance(eed["take_profit"], dict):
-                    tp_method = eed["take_profit"].get("method")
-            except Exception:
-                pass
-
-        if tp_method == "rr_target":
-            rr_quality_score = -100 * direction
-        elif rr_ratio >= 3.0:
-            rr_quality_score = 100 * direction
-        elif rr_ratio >= 2.5:
-            rr_quality_score = 67 * direction
-        elif rr_ratio >= 2.0:
-            rr_quality_score = 33 * direction
-
-    return {
-        "sma_trend_score":         round(sma_trend_score,      2),
-        "rsi_momentum_score":      round(rsi_momentum_score,   2),
-        "macd_signal_score":       round(macd_signal_score,    2),
-        "bb_position_score":       round(bb_position_score,    2),
-        "stoch_cross_score":       round(stoch_cross_score,    2),
-        "volume_confirm_score":    round(volume_confirm_score, 2),
-        "sentiment_recency_score": round(sentiment_recency_score, 2),
-        "volatility_risk_score":   round(volatility_risk_score,   2),
-        "sr_proximity_score":      round(sr_proximity_score,      2),
-        "trend_strength_score":    round(trend_strength_score,    2),
-        "rr_quality_score":        round(rr_quality_score,        2),
-        "_sentiment_signal_score": round(sentiment_score,         2),
-    }
+    result = compute_combined_score_from_indicators(ind, config)
+    # Keep backward-compat key used by recalculate_component_scores
+    result["_sentiment_signal_score"] = result.pop("_sentiment_signal_score", 0)
+    return result
 
 
 def recalculate_component_scores(
@@ -653,6 +750,114 @@ def recalculate_component_scores(
     return stats
 
 
+def recalculate_archive_scores(
+    dry_run: bool = False,
+    ticker_filter: str = None,
+) -> dict:
+    """
+    Recompute combined_score for all archive_signals rows using the current
+    12-component formula (same as live signals). Updates archive_signals.combined_score
+    in-place so archive backtest always uses the same formula as live.
+
+    Note: archive_signals has no adx column → trend_strength_score defaults to 0
+    for records that pre-date ADX tracking.
+    """
+    import sqlite3
+    from src.config import get_config
+    config = get_config()
+
+    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "trendsignal.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    stats = {"total": 0, "updated": 0, "skipped": 0, "errors": 0, "score_changed": 0}
+
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(archive_signals)").fetchall()]
+        has_adx = "adx" in cols
+
+        query = "SELECT * FROM archive_signals WHERE decision != 'HOLD'"
+        params = []
+        if ticker_filter:
+            query += " AND ticker_symbol = ?"
+            params.append(ticker_filter.upper())
+        query += " ORDER BY id ASC"
+
+        rows = conn.execute(query, params).fetchall()
+        stats["total"] = len(rows)
+
+        print(f"\n{'='*70}")
+        print(f"  Archive score recalculation {'[DRY RUN] ' if dry_run else ''}-- {len(rows)} signals")
+        print(f"{'='*70}")
+
+        updates = []
+        for row in rows:
+            try:
+                ind = {
+                    "current_price":        row["close_price"] or row["entry_price"],
+                    "sma_20":               row["sma_20"],
+                    "sma_50":               row["sma_50"],
+                    "rsi":                  row["rsi"],
+                    "macd_histogram":       row["macd_hist"],
+                    "bb_upper":             row["bb_upper"],
+                    "bb_middle":            None,  # not in archive_signals
+                    "bb_lower":             row["bb_lower"],
+                    "stoch_k":              row["stoch_k"],
+                    "stoch_d":              row["stoch_d"],
+                    "atr_pct":              row["atr_pct"],
+                    "nearest_support":      row["nearest_support"],
+                    "nearest_resistance":   row["nearest_resistance"],
+                    "adx":                  row["adx"] if has_adx else None,
+                    "sentiment_score":      row["sentiment_score"],
+                    "sentiment_confidence": row["sentiment_confidence"] if "sentiment_confidence" in cols else 0.5,
+                    "decision":             row["decision"],
+                    "risk_reward_ratio":    row["risk_reward_ratio"],
+                }
+                result = compute_combined_score_from_indicators(ind, config)
+                new_score = result["combined_score"]
+                old_score = row["combined_score"] or 0
+
+                if abs(new_score - old_score) > 0.01:
+                    stats["score_changed"] += 1
+                    print(f"  #{row['id']:6d} {row['ticker_symbol']:8s} {row['decision']:12s}: "
+                          f"{old_score:+.2f} -> {new_score:+.2f}")
+
+                if not dry_run:
+                    updates.append((new_score, row["id"]))
+
+                stats["updated"] += 1
+
+            except Exception as e:
+                print(f"  WARNING #{row['id']}: {e}")
+                stats["errors"] += 1
+
+        if not dry_run and updates:
+            conn.executemany("UPDATE archive_signals SET combined_score = ? WHERE id = ?", updates)
+            conn.commit()
+            print(f"\nChanges committed: {len(updates)} archive signals updated.")
+        else:
+            print(f"\n[DRY RUN] No changes written.")
+
+    except Exception as e:
+        print(f"\nFatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+    finally:
+        conn.close()
+
+    print(f"\n{'='*70}")
+    print(f"  SUMMARY (archive)")
+    print(f"{'='*70}")
+    print(f"  Total processed : {stats['total']}")
+    print(f"  Updated         : {stats['updated']}")
+    print(f"  Score changed   : {stats['score_changed']}")
+    print(f"  Skipped         : {stats['skipped']}")
+    print(f"  Errors          : {stats['errors']}")
+    print(f"{'='*70}\n")
+    return stats
+
+
 # ─────────────────────────────────────────────
 # CLI ENTRY POINT
 # ─────────────────────────────────────────────
@@ -663,9 +868,11 @@ def main():
     )
     parser.add_argument(
         "--mode", type=str, default="sl-tp",
-        choices=["sl-tp", "component-scores"],
+        choices=["sl-tp", "component-scores", "archive-scores", "all-scores"],
         help="'sl-tp': recalculate Stop-Loss/Take-Profit (default); "
-             "'component-scores': backfill 12-component scores from stored indicators"
+             "'component-scores': backfill live signal_calculations; "
+             "'archive-scores': recalculate archive_signals combined_score; "
+             "'all-scores': both component-scores + archive-scores"
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -686,6 +893,21 @@ def main():
             dry_run=args.dry_run,
             ticker_filter=args.ticker,
             status_filter=args.status,
+        )
+    elif args.mode == "archive-scores":
+        recalculate_archive_scores(
+            dry_run=args.dry_run,
+            ticker_filter=args.ticker,
+        )
+    elif args.mode == "all-scores":
+        recalculate_component_scores(
+            dry_run=args.dry_run,
+            ticker_filter=args.ticker,
+            status_filter=args.status,
+        )
+        recalculate_archive_scores(
+            dry_run=args.dry_run,
+            ticker_filter=args.ticker,
         )
     else:
         recalculate_all_signals(
