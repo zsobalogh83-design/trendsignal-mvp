@@ -192,8 +192,19 @@ def get_recent_news_from_db(
                 sentiment_label=news_record.sentiment_label,
                 credibility=news_record.source.credibility_weight if news_record.source else 0.8,
                 # LLM Context Checker fields (v2.1)
-                active_score=news_record.active_score,
-                active_score_source=news_record.active_score_source or 'finbert',
+                # FinBERT-primary: use finbert_score as base; only use llm_score when
+                # it is a valid (non-zero) evaluation.  A stored 0.0 means LLM timed
+                # out – ignore it and fall back to finbert_score / sentiment_score.
+                active_score=(
+                    news_record.active_score
+                    if (news_record.active_score is not None and news_record.active_score != 0.0)
+                    else (news_record.finbert_score or news_record.sentiment_score)
+                ),
+                active_score_source=(
+                    news_record.active_score_source
+                    if (news_record.active_score is not None and news_record.active_score != 0.0)
+                    else 'finbert'
+                ),
                 llm_impact_duration=news_record.llm_impact_duration,
             )
             news_items.append(news_item)
@@ -579,6 +590,7 @@ def get_llm_cached_news(url_hashes: List[str], db: Session) -> dict:
             NewsItemModel.url_hash.in_(url_hashes),
             NewsItemModel.active_score_source == 'llm',
             NewsItemModel.llm_score.isnot(None),
+            NewsItemModel.llm_score != 0.0,  # exclude timed-out/failed evaluations
         ).all()
 
         return {r.url_hash: r for r in records}
