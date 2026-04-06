@@ -6,12 +6,29 @@ Version: 2.0 (FinBERT Integration)
 Date: 2024-12-27
 """
 
+import threading
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import numpy as np
 from typing import Dict, Optional
 import warnings
 warnings.filterwarnings('ignore')
+
+# ==========================================
+# MODULE-LEVEL SINGLETON (thread-safe)
+# ==========================================
+
+_global_finbert_lock = threading.Lock()
+_global_finbert_instance: 'Optional[FinBERTAnalyzer]' = None
+
+
+def get_global_finbert() -> 'FinBERTAnalyzer':
+    """Return the single shared FinBERT instance, loading it on first call."""
+    global _global_finbert_instance
+    with _global_finbert_lock:
+        if _global_finbert_instance is None:
+            _global_finbert_instance = FinBERTAnalyzer()
+        return _global_finbert_instance
 
 
 # ==========================================
@@ -46,8 +63,8 @@ class FinBERTAnalyzer:
         model_name = "ProsusAI/finbert"
         
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_name, local_files_only=True)
             self.model.to(self.device)
             self.model.eval()  # Set to evaluation mode
             
@@ -188,12 +205,7 @@ class SentimentAnalyzerFinBERT:
     def __init__(self, config=None, ticker_symbol=None):
         self.config = config
         self.ticker_symbol = ticker_symbol
-        
-        # Initialize FinBERT (singleton pattern)
-        if not hasattr(SentimentAnalyzerFinBERT, '_finbert_instance'):
-            SentimentAnalyzerFinBERT._finbert_instance = FinBERTAnalyzer()
-        
-        self.finbert = SentimentAnalyzerFinBERT._finbert_instance
+        self.finbert = get_global_finbert()
     
     def analyze_text(self, text: str, ticker_symbol: Optional[str] = None) -> Dict[str, float]:
         """
