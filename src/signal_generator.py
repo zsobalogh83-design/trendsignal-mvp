@@ -2203,7 +2203,8 @@ def calculate_technical_score(
             # ✅ ADD: Stochastic
             "stoch_k": float(current['stoch_k']) if pd.notna(current.get('stoch_k')) else None,
             "stoch_d": float(current['stoch_d']) if pd.notna(current.get('stoch_d')) else None,
-            "technical_indicator_id": None  # Will be set if DB save succeeds
+            "technical_indicator_id": None,  # Will be set if DB save succeeds
+            "score_components": score_components
         }
         
         # Save technical indicators to database WITH SCORE AND COMPONENTS
