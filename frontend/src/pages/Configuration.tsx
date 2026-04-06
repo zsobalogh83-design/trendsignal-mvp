@@ -1337,16 +1337,20 @@ export function Configuration() {
     setSaving(true);
     try {
       const total = componentWeights.sentiment + componentWeights.technical + componentWeights.risk;
-      if (total !== 100) {
+      if (Math.abs(total - 100) > 1) {
         alert(`⚠️ Weights must sum to 100%, currently: ${total}%`);
         setSaving(false);
         return;
       }
+      // Normalize to exactly 1.0 to avoid floating-point rounding drift
+      const swNorm = componentWeights.sentiment / total;
+      const twNorm = componentWeights.technical / total;
+      const rwNorm = 1 - swNorm - twNorm;
 
       const signalPayload = {
-        sentiment_weight: componentWeights.sentiment / 100,
-        technical_weight: componentWeights.technical / 100,
-        risk_weight: componentWeights.risk / 100,
+        sentiment_weight: swNorm,
+        technical_weight: twNorm,
+        risk_weight: rwNorm,
         hold_zone_threshold: thresholds.holdZoneThreshold,
         entry_gate_rsi_buy_max: entryGates.rsiBuyMax,
         entry_gate_rsi_sell_min: entryGates.rsiSellMin,
