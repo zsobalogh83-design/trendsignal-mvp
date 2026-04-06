@@ -1,0 +1,236 @@
+C:\Users\ZsoltBalogh\OneDrive - R34DY Zrt\Dokumentumok\GitHub\trendsignal-mvp\one_offs\correlation_analysis_phase3.py:424: FutureWarning: Series.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  sma200    = df["sma_200"].fillna(method="ffill")
+C:\Users\ZsoltBalogh\OneDrive - R34DY Zrt\Dokumentumok\GitHub\trendsignal-mvp\one_offs\correlation_analysis_phase3.py:703: FutureWarning: Series.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  sma200    = df["sma_200"].fillna(method="ffill")
+C:\Users\ZsoltBalogh\OneDrive - R34DY Zrt\Dokumentumok\GitHub\trendsignal-mvp\one_offs\correlation_analysis_phase3.py:805: FutureWarning: Series.fillna with 'method' is deprecated and will raise in a future version. Use obj.ffill() or obj.bfill() instead.
+  sma200 = df["sma_200"].fillna(method="ffill")
+================================================================================
+  TrendSignal — Phase 3: Konfiguráció-optimalizálás és Backtest
+  Dátum: 2026-04-03 07:55  |  Horizon: 4h
+================================================================================
+
+  Betöltés: AAPL, AMZN, GOOGL, IBM, META, MSFT, NVDA, TSLA
+  [1/5] Archive signals...
+  [2/5] 15m árak...
+  [3/5] 1d árak...
+  [4/5] Kereskedések...
+  [5/5] Hír score-ok betöltése...
+         75,165 hír betöltve
+
+  Forward return számítás (4h)...
+  News átlag score hozzáadása...
+  US piaci szűrő után: 97,060 signal  (fwd_ret érvényes: 97,060)
+
+
+================================================================================
+  A) BASELINE — JELENLEGI RENDSZER TELJESÍTMÉNYE
+================================================================================
+
+  Signal-szintű szimuláció (threshold=15, eredeti combined_score):
+  n=63,155  dir=48.6%  win= 47.6%  ret= -0.0159%  PF=0.954  sharpe=-0.312
+
+  Szimulált kereskedések (archive_simulated_trades):
+  n=39,018  win_rate=44.1%  mean_pnl=+0.0122%  total_pnl=+475.12%
+
+--- Exit reason breakdown ---
+  Exit reason                     n   mean_pnl%   win_rate   kum_hatás
+  EOD_AUTO_LIQUIDATION       13,739     +0.1177      51.1%    +1617.55%
+  OPPOSING_SIGNAL             8,872     -0.1917      29.5%    -1700.42%
+  SL_HIT                      8,785     -1.0217      24.6%    -8975.33%
+  STAGNATION_EXIT             5,034     +0.0462      55.8%     +232.59%
+  TP_HIT                      2,588     +3.5938     100.0%    +9300.73%
+
+================================================================================
+  B) EGYEDI JAVÍTÁSOK — A/B TESZT
+================================================================================
+
+  Változtatás                                          Eredmény + delta a baseline-hoz
+  ------------------------------------------------------------------------------------------------------------------------
+
+  B0: Score küszöb hatása                             
+    Score küszöb |score| >= 25                         n=37,900  dir=48.2%  win= 47.2%  ret= -0.0187%  PF=0.947  sharpe=-0.355  [ -0.39pp dir |  -0.39pp win |  -0.0028% ret]
+    Score küszöb |score| >= 40                         n= 7,875  dir=47.7%  win= 46.8%  ret= -0.0659%  PF=0.859  sharpe=-0.979  [ -0.89pp dir |  -0.72pp win |  -0.0499% ret]
+    Score küszöb |score| >= 50                         n= 3,507  dir=44.8%  win= 44.1%  ret= -0.1179%  PF=0.790  sharpe=-1.606  [ -3.83pp dir |  -3.42pp win |  -0.1020% ret]
+    Score küszöb |score| >= 65                         n=   235  dir=55.5%  win= 54.9%  ret= -0.1296%  PF=0.833  sharpe=-1.295  [ +6.87pp dir |  +7.33pp win |  -0.1136% ret]
+
+  B1: RSI alignment szűrők                            
+  B1a. RSI alignment (BUY<55 / SELL>45)                n=13,047  dir=50.1%  win= 48.7%  ret= +0.0059%  PF=1.019  sharpe=0.119  [ +1.43pp dir |  +1.14pp win |  +0.0218% ret]
+  B1b. RSI alignment (BUY<50 / SELL>50)                n= 4,228  dir=51.1%  win= 49.7%  ret= -0.0062%  PF=0.982  sharpe=-0.120  [ +2.49pp dir |  +2.11pp win |  +0.0097% ret]
+  B1c. RSI alignment (BUY<45 / SELL>55)                n= 2,217  dir=51.2%  win= 49.3%  ret= +0.0018%  PF=1.005  sharpe=0.030  [ +2.56pp dir |  +1.78pp win |  +0.0177% ret]
+  B1d. RSI alignment strict (BUY<40 / SELL>60)         n= 2,078  dir=51.6%  win= 49.6%  ret= +0.0108%  PF=1.028  sharpe=0.178  [ +2.92pp dir |  +2.05pp win |  +0.0267% ret]
+
+  B2: MACD alignment szűrők                           
+  B2a. MACD alignment (BUY>0 / SELL<0)                 n=41,296  dir=48.2%  win= 47.5%  ret= -0.0086%  PF=0.976  sharpe=-0.163  [ -0.40pp dir |  -0.11pp win |  +0.0073% ret]
+  B2b. MACD align + |score|>=25                        n=24,209  dir=47.7%  win= 46.9%  ret= -0.0117%  PF=0.969  sharpe=-0.211  [ -0.94pp dir |  -0.63pp win |  +0.0042% ret]
+
+  B3: News átlag score szűrők                         
+  B3a. news_avg_1h > 0                                 n= 1,055  dir=44.8%  win= 44.5%  ret= -0.0463%  PF=0.904  sharpe=-0.631  [ -3.79pp dir |  -3.11pp win |  -0.0304% ret]
+  B3b. news_avg_1h > 0.1                               n=   670  dir=44.9%  win= 44.6%  ret= -0.0836%  PF=0.848  sharpe=-1.012  [ -3.71pp dir |  -2.94pp win |  -0.0677% ret]
+  B3c. Csak ahol van hír az elmúlt 1h-ban              n=14,984  dir=47.6%  win= 47.1%  ret= -0.0236%  PF=0.935  sharpe=-0.454  [ -0.99pp dir |  -0.51pp win |  -0.0077% ret]
+  B3d. news_avg aligned (BUY:pos / SELL:neg)           n=14,307  dir=47.7%  win= 47.1%  ret= -0.0214%  PF=0.940  sharpe=-0.421  [ -0.93pp dir |  -0.45pp win |  -0.0055% ret]
+
+  B4: Trend alignment (SMA200)                        
+  B4a. Trend alignment (BUY>SMA200 / SELL<SMA200)      n=45,782  dir=49.2%  win= 48.1%  ret= -0.0216%  PF=0.938  sharpe=-0.422  [ +0.57pp dir |  +0.52pp win |  -0.0057% ret]
+  B4b. Counter-trend (BUY<SMA200 / SELL>SMA200) [mean-rev] n=17,373  dir=47.1%  win= 46.2%  ret= -0.0009%  PF=0.997  sharpe=-0.018  [ -1.51pp dir |  -1.38pp win |  +0.0150% ret]
+
+  B5: dist_to_resistance szűrők (BUY-ra)              
+  B5. BUY csak ha resistance > 1.0% felett             n=39,750  dir=47.6%  win= 46.6%  ret= -0.0204%  PF=0.945  sharpe=-0.378  [ -1.03pp dir |  -0.92pp win |  -0.0044% ret]
+  B5. BUY csak ha resistance > 2.0% felett             n=38,795  dir=47.6%  win= 46.6%  ret= -0.0192%  PF=0.948  sharpe=-0.354  [ -1.01pp dir |  -0.92pp win |  -0.0033% ret]
+  B5. BUY csak ha resistance > 3.0% felett             n=37,833  dir=47.7%  win= 46.7%  ret= -0.0181%  PF=0.952  sharpe=-0.330  [ -0.98pp dir |  -0.87pp win |  -0.0022% ret]
+  B5. BUY csak ha resistance > 5.0% felett             n=36,283  dir=47.6%  win= 46.6%  ret= -0.0208%  PF=0.945  sharpe=-0.377  [ -1.05pp dir |  -0.94pp win |  -0.0049% ret]
+
+  B6: Momentum alignment                              
+  B6a. Momentum aligned (mom>=1 BUY / mom<=-1 SELL)    n= 6,252  dir=50.5%  win= 49.5%  ret= -0.0150%  PF=0.959  sharpe=-0.270  [ +1.86pp dir |  +1.97pp win |  +0.0009% ret]
+  B6b. Momentum aligned strict (mom>=2 / mom<=-2)      n=   129  dir=55.3%  win= 54.3%  ret= +0.0030%  PF=1.008  sharpe=0.048  [ +6.63pp dir |  +6.70pp win |  +0.0189% ret]
+  B6c. Teljes momentum egyezés (mom=3 / mom=-3)        n=   128  dir=55.3%  win= 54.7%  ret= +0.0031%  PF=1.008  sharpe=0.049  [ +6.63pp dir |  +7.13pp win |  +0.0190% ret]
+
+--- B7: OPPOSING_SIGNAL exit letiltásának szimulált hatása ---
+
+  Jelenlegi rendszer (összes exit):
+    n=39,018  win=44.1%  mean=+0.0122%  sum=+475.12%
+
+  Ha az OPPOSING_SIGNAL exiteket kizárjuk (többi exit marad):
+    n=30,146  win=48.3%  mean=+0.0722%  sum=+2175.54%
+
+  OPPOSING exits statisztika:
+    n=8,872  win=29.5%  mean=-0.1917%  sum=-1700.42%
+    -> Ezek a kereskedések összesen -1700.42% P&L-t termeltek,
+       ami azt jelenti, hogy 1700.42% veszteség keletkezett az OPPOSING exit logikából.
+
+================================================================================
+  C) SENTIMENT / TECHNICAL / RISK SÚLY GRID-SEARCH
+================================================================================
+
+  Jelenleg: sentiment=0.70  technical=0.20  risk=0.10
+  Keresés: minden (ws, wt, wr) ahol ws+wt+wr=1.0
+  Metrika: dir_acc (fő), majd mean_ret (döntetlen esetén)
+
+  Súlyok (sent/tech/risk)            n    dir_acc   win_rate    mean_ret       PF    sharpe
+  -------------------------------------------------------------------------------------
+  sent=0.5 tech=0.0 risk=0.5          28,531      50.5%      49.0%     -0.0109    0.968    -0.212
+  sent=0.4 tech=0.0 risk=0.6          30,098      50.4%      49.0%     -0.0138    0.960    -0.268
+  sent=0.6 tech=0.0 risk=0.4          26,101      50.4%      49.0%     -0.0158    0.954    -0.306
+  sent=0.7 tech=0.0 risk=0.3          23,281      50.4%      48.9%     -0.0154    0.955    -0.297
+  sent=0.0 tech=0.0 risk=1.0          33,435      50.4%      49.0%     -0.0065    0.981    -0.124
+  sent=0.3 tech=0.1 risk=0.6          30,366      50.4%      49.0%     -0.0100    0.971    -0.193
+  sent=0.1 tech=0.1 risk=0.8          32,370      50.3%      49.0%     -0.0111    0.968    -0.214
+  sent=0.1 tech=0.0 risk=0.9          33,020      50.3%      48.9%     -0.0081    0.976    -0.156
+  sent=0.0 tech=0.2 risk=0.8          32,246      50.2%      48.9%     -0.0106    0.969    -0.202
+  sent=0.4 tech=0.1 risk=0.5          28,649      50.2%      48.8%     -0.0124    0.964    -0.237
+  sent=0.0 tech=0.1 risk=0.9          33,002      50.2%      48.9%     -0.0101    0.971    -0.193
+  sent=0.2 tech=0.0 risk=0.8          32,241      50.2%      48.9%     -0.0129    0.963    -0.246
+  sent=0.2 tech=0.1 risk=0.7          31,606      50.2%      48.8%     -0.0151    0.956    -0.289
+  sent=0.3 tech=0.0 risk=0.7          31,241      50.2%      48.8%     -0.0191    0.945    -0.372
+  sent=0.2 tech=0.2 risk=0.6          30,294      50.1%      48.8%     -0.0123    0.965    -0.233
+
+  Jelenlegi (0.7/0.2/0.1): dir_acc=48.6%  mean_ret=-0.0159%
+  Legjobb  (0.5/0.0/0.5): dir_acc=50.5%  mean_ret=-0.0109%
+
+--- Grid-search |score|>=25 kuszobnel ---
+
+  Súlyok (sent/tech/risk)            n    dir_acc    mean_ret       PF
+  -----------------------------------------------------------------
+  sent=0.3 tech=0.0 risk=0.7          26,410      50.6%     -0.0108    0.968
+  sent=0.4 tech=0.0 risk=0.6          24,430      50.4%     -0.0081    0.976
+  sent=0.1 tech=0.0 risk=0.9          28,854      50.4%     -0.0040    0.988
+  sent=0.0 tech=0.0 risk=1.0          29,739      50.4%     -0.0063    0.981
+  sent=0.9 tech=0.1 risk=0.0          11,367      50.4%     +0.0074    1.021
+  sent=0.2 tech=0.1 risk=0.7          26,341      50.3%     -0.0095    0.972
+  sent=0.2 tech=0.0 risk=0.8          27,745      50.3%     -0.0152    0.955
+  sent=1.0 tech=0.0 risk=0.0          11,387      50.3%     -0.0059    0.984
+  sent=0.0 tech=0.1 risk=0.9          29,010      50.2%     -0.0146    0.957
+  sent=0.9 tech=0.0 risk=0.1          10,554      50.1%     -0.0035    0.990
+
+================================================================================
+  D) KOMBINÁLT STRATÉGIÁK
+================================================================================
+
+  Tesztelés: több javítás egyszerre alkalmazva.
+
+  Kombináció                                           n=63,155  dir=48.6%  win= 47.6%  ret= -0.0159%  PF=0.954  sharpe=-0.312  [ +0.00pp dir |  +0.00pp win |  +0.0000% ret]
+  ------------------------------------------------------------------------------------------------------------------------
+  Baseline (eredeti)                                   n=73,605  dir=50.8%  win= 49.4%  ret= -0.0035%  PF=0.989  sharpe=-0.069  [ +2.15pp dir |  +1.83pp win |  +0.0124% ret]
+  RSI align + küszöb 25                                n= 6,904  dir=49.5%  win= 48.0%  ret= +0.0009%  PF=1.003  sharpe=0.019  [ +0.82pp dir |  +0.42pp win |  +0.0168% ret]
+  MACD align + küszöb 25                               n=24,209  dir=47.7%  win= 46.9%  ret= -0.0117%  PF=0.969  sharpe=-0.211  [ -0.94pp dir |  -0.63pp win |  +0.0042% ret]
+  RSI + MACD align + küszöb 25                         n= 2,167  dir=50.6%  win= 49.6%  ret= +0.0395%  PF=1.120  sharpe=0.710  [ +2.00pp dir |  +2.00pp win |  +0.0554% ret]
+  RSI + MACD align + küszöb 40                         n=   419  dir=47.7%  win= 46.8%  ret= +0.0088%  PF=1.021  sharpe=0.141  [ -0.94pp dir |  -0.78pp win |  +0.0247% ret]
+  Momentum align (mom>=1) + küszöb 25                  n= 2,838  dir=50.7%  win= 49.8%  ret= -0.0188%  PF=0.949  sharpe=-0.337  [ +2.03pp dir |  +2.26pp win |  -0.0029% ret]
+  Counter-trend (BUY<SMA200 / SELL>SMA200) + RSI       n= 1,855  dir=48.2%  win= 47.2%  ret= +0.0754%  PF=1.243  sharpe=1.324  [ -0.48pp dir |  -0.39pp win |  +0.0913% ret]
+  Counter-trend + MACD align                           n= 6,561  dir=46.3%  win= 45.5%  ret= +0.0155%  PF=1.048  sharpe=0.313  [ -2.37pp dir |  -2.04pp win |  +0.0314% ret]
+  Legjobb súlyok + RSI align + küszöb 25               n=31,837  dir=52.0%  win= 50.4%  ret= +0.0040%  PF=1.013  sharpe=0.075  [ +3.37pp dir |  +2.88pp win |  +0.0199% ret] <<<
+  Legjobb súlyok + RSI + MACD + küszöb 25              n= 8,293  dir=53.3%  win= 51.3%  ret= +0.0722%  PF=1.262  sharpe=1.434  [ +4.63pp dir |  +3.76pp win |  +0.0881% ret] <<<
+  Legjobb súlyok + RSI + MACD + küszöb 40              n= 3,716  dir=53.8%  win= 51.8%  ret= +0.0998%  PF=1.346  sharpe=1.724  [ +5.13pp dir |  +4.21pp win |  +0.1157% ret] <<<
+  RSI + MACD + news_avg>0 + küszöb 25                  n=   523  dir=50.5%  win= 49.3%  ret= -0.0077%  PF=0.975  sharpe=-0.178  [ +1.89pp dir |  +1.77pp win |  +0.0082% ret]
+
+  Legjobb kombináció: 'Legjobb súlyok + RSI + MACD + küszöb 40'
+  n= 3,716  dir=53.8%  win= 51.8%  ret= +0.0998%  PF=1.346  sharpe=1.724
+
+================================================================================
+  E) VÉGSŐ CONFIG JAVASLAT
+================================================================================
+
+  ╔══════════════════════════════════════════════════════════════════════════╗
+  ║  AJÁNLOTT CONFIG VÁLTOZTATÁSOK                                          ║
+  ╠══════════════════════════════════════════════════════════════════════════╣
+  ║                                                                          ║
+  ║  [1] SÚLYOK MÓDOSÍTÁSA (config.json)                                    ║
+  ║      Jelenlegi: weight_sentiment=0.70  weight_technical=0.20            ║
+  ║                 weight_risk=0.10                                         ║
+  ║      Javasolt:  weight_sentiment=0.50  weight_technical=0.00            ║
+  ║                 weight_risk=0.50                                         ║
+  ║                                                                          ║
+  ║  [2] DÖNTÉSI KÜSZÖB EMELÉSE                                             ║
+  ║      Jelenlegi: threshold_buy=15  threshold_sell=-15                    ║
+  ║      Javasolt:  threshold_buy=25  threshold_sell=-25                    ║
+  ║                                                                          ║
+  ║  [3] RSI ALIGNMENT SZŰRŐ (ÚJ)                                          ║
+  ║      BUY signal csak ha: RSI < 55                                       ║
+  ║      SELL signal csak ha: RSI > 45                                      ║
+  ║                                                                          ║
+  ║  [4] MACD ALIGNMENT SZŰRŐ (ÚJ)                                         ║
+  ║      BUY signal csak ha: MACD_histogram > 0                             ║
+  ║      SELL signal csak ha: MACD_histogram < 0                            ║
+  ║                                                                          ║
+  ║  [5] OPPOSING_SIGNAL EXIT LETILTÁSA                                     ║
+  ║      Az OPPOSING_SIGNAL exit átlagos P&L = -0.19%                      ║
+  ║      Az exit jelek csak 46.4%-ban mutatnak helyes irányt                ║
+  ║      -> Tiltsd le ezt az exit módot, vagy emeld a küszöbét              ║
+  ║                                                                          ║
+  ║  [6] news_avg_score_1h SZŰRŐ (ÚJ - opcionális)                         ║
+  ║      Ha az elmúlt 1h hírek átlagos score-ja elérhető:                   ║
+  ║      BUY signal csak ha: news_avg_1h >= 0                               ║
+  ║      SELL signal csak ha: news_avg_1h <= 0                              ║
+  ║      (Ez a 2. legerősebb predictor: r=+0.035***)                        ║
+  ║                                                                          ║
+  ╠══════════════════════════════════════════════════════════════════════════╣
+  ║  SZIMULÁLT EREDMÉNY AZ AJÁNLOTT CONFIGGAL (4h horizon):           ║
+  ╠══════════════════════════════════════════════════════════════════════════╣
+  ║  Baseline:   n=63,155  dir=48.6%  win=47.6%  ret=-0.0159%      ║
+  ║  Javasolt:   n= 8,293  dir=53.3%  win=51.3%  ret=+0.0722%      ║
+  ║  Delta:                  dir=+4.6pp  win=+3.8pp  ret=+0.0881%      ║
+  ╚══════════════════════════════════════════════════════════════════════════╝
+
+  CONFIG.JSON SNIPPET (javasolt értékek):
+  ----------------------------------------
+  {
+    "weight_sentiment": 0.50,
+    "weight_technical": 0.00,
+    "weight_risk":      0.50,
+    "threshold_buy":    25,
+    "threshold_sell":  -25,
+    "signal_filters": {
+      "rsi_buy_max":        55,
+      "rsi_sell_min":       45,
+      "require_macd_align": true,
+      "opposing_signal_exit_enabled": false
+    }
+  }
+
+
+================================================================================
+  KÉSZ
+  Egyéb futtatási lehetőségek:
+    python one_offs/correlation_analysis_phase3.py --horizon 4h
+    python one_offs/correlation_analysis_phase3.py --horizon 1d
+    python one_offs/correlation_analysis_phase3.py --ticker NVDA TSLA
+================================================================================

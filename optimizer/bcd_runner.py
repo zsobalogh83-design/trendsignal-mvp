@@ -42,7 +42,7 @@ from optimizer.atomic_units import ATOMIC_UNITS, sample_active_dims
 from optimizer.fitness import compute_fitness_for_subset, split_rows
 from optimizer.parameter_space import (
     LOWER_BOUNDS, UPPER_BOUNDS, BASELINE_VECTOR, N_DIMS,
-    decode_vector, vector_to_config_diff,
+    decode_vector, vector_to_config_diff, get_current_baseline_vector,
 )
 from optimizer.signal_data import load_all_sim_data
 
@@ -322,7 +322,8 @@ def run_bcd_optimizer(
     # ------------------------------------------------------------------
     # Initialize from baseline
     # ------------------------------------------------------------------
-    current_best = list(BASELINE_VECTOR)
+    # Mindig az aktuális config.json-t használjuk kiindulópontként
+    current_best = get_current_baseline_vector()
     baseline_fitness, baseline_train, baseline_val = _evaluate_full(
         current_best, train, val, score_timeline
     )
@@ -433,7 +434,7 @@ def run_bcd_optimizer(
     cfg_best = decode_vector(current_best)
     test_fit, test_stats = compute_fitness_for_subset(test, score_timeline, cfg_best)
 
-    cfg_baseline = decode_vector(BASELINE_VECTOR)
+    cfg_baseline = decode_vector(get_current_baseline_vector())
     baseline_test_fit, baseline_test_stats = compute_fitness_for_subset(
         test, score_timeline, cfg_baseline
     )

@@ -1,8 +1,7 @@
 """
 Alpaca Historical Price Data Collector
 
-Fetches OHLCV bars from Alpaca Markets API and saves to price_data_alpaca table.
-The table structure is identical to price_data, so all existing queries/tools work.
+Fetches OHLCV bars from Alpaca Markets API and saves to price_data table.
 
 Usage (standalone):
     ALPACA_API_KEY=... ALPACA_API_SECRET=... python -m src.alpaca_collector
@@ -62,40 +61,16 @@ INTERVAL_MAP = {
 # ── Table setup ───────────────────────────────────────────────────────────────
 
 def create_table(db_path: str = "trendsignal.db") -> None:
-    """Creates price_data_alpaca table (identical structure to price_data)."""
+    """Ensures the unique index exists on price_data (no-op if already present)."""
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.executescript("""
-        CREATE TABLE IF NOT EXISTS price_data_alpaca (
-            id               INTEGER NOT NULL,
-            ticker_id        INTEGER,
-            ticker_symbol    VARCHAR(10) NOT NULL,
-            timestamp        DATETIME NOT NULL,
-            interval         VARCHAR(5) NOT NULL,
-            open             FLOAT NOT NULL,
-            high             FLOAT NOT NULL,
-            low              FLOAT NOT NULL,
-            close            FLOAT NOT NULL,
-            volume           BIGINT NOT NULL,
-            price_change     FLOAT,
-            price_change_pct FLOAT,
-            fetched_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            FOREIGN KEY(ticker_id) REFERENCES tickers (id)
-        );
-
-        CREATE INDEX IF NOT EXISTS ix_price_data_alpaca_id
-            ON price_data_alpaca (id);
-        CREATE INDEX IF NOT EXISTS ix_price_data_alpaca_timestamp
-            ON price_data_alpaca (timestamp);
-        CREATE INDEX IF NOT EXISTS ix_price_data_alpaca_ticker_symbol
-            ON price_data_alpaca (ticker_symbol);
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_price_data_alpaca_symbol_ts_interval
-            ON price_data_alpaca (ticker_symbol, timestamp, interval);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_price_data_symbol_ts_interval
+            ON price_data (ticker_symbol, timestamp, interval);
     """)
     conn.commit()
     conn.close()
-    print("✅ price_data_alpaca table ready")
+    print("✅ price_data table ready")
 
 
 # ── Alpaca API ────────────────────────────────────────────────────────────────
@@ -185,7 +160,7 @@ def save_bars(
     db_path: str = "trendsignal.db",
 ) -> int:
     """
-    Save Alpaca bars to price_data_alpaca table.
+    Save Alpaca bars to price_data table.
 
     Returns:
         Number of rows inserted
@@ -228,7 +203,7 @@ def save_bars(
         try:
             cur.execute(
                 """
-                INSERT INTO price_data_alpaca
+                INSERT INTO price_data
                     (ticker_id, ticker_symbol, timestamp, interval,
                      open, high, low, close, volume,
                      price_change, price_change_pct)
@@ -261,7 +236,7 @@ def fetch_and_save(
     feed: str = "iex",
 ) -> dict[str, int]:
     """
-    Fetch historical bars from Alpaca and persist to price_data_alpaca.
+    Fetch historical bars from Alpaca and persist to price_data.
 
     Args:
         symbols:    List of ticker symbols (US stocks only)

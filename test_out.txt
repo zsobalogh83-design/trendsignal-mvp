@@ -1,0 +1,27 @@
+Traceback (most recent call last):
+  File "<string>", line 41, in <module>
+    print(f'  confidence:      {result.confidence:.4f}')
+                                ^^^^^^^^^^^^^^^^^
+AttributeError: 'TradingSignal' object has no attribute 'confidence'
+[OK] Configuration loaded from C:\Users\ZsoltBalogh\OneDrive - R34DY Zrt\Dokumentumok\GitHub\trendsignal-mvp\config.json
+[OK] Config loaded from file with custom weights
+[OK] Configuration loaded from C:\Users\ZsoltBalogh\OneDrive - R34DY Zrt\Dokumentumok\GitHub\trendsignal-mvp\config.json
+[OK] Config reloaded from file
+[AAPL] BASE SCORE: 83.44
+[AAPL] ALIGNMENT BONUS: +6 (BUY components aligned)
+[AAPL] FINAL COMBINED SCORE: 89.44
+[AAPL] OVERALL CONFIDENCE: 79.08%
+  🎯 TP pushed to meet R:R≥1.5: 195.19 → R:R=1.50
+  📊 Final: SL=179.04 [sr], TP=195.19 [rr_target], R:R=1:1.50
+[AAPL] 📊 Entry/Exit Levels:
+   Entry: $185.5
+   Stop-Loss: $179.04 (-3.48%)
+   Take-Profit: $195.19 (+5.22%)
+   R:R Ratio: 1.5 | SL: sr | TP: rr_target
+[AAPL] R:R CORRECTION: -3 (tp_method=rr_target, rr=1.50) → SCORE: 86.44
+[AAPL] DECISION: STRONG BUY (Conf: 79%)
+
+=== SIGNAL EREDMENY ===
+  decision:        BUY
+  strength:        STRONG
+  combined_score:  86.4400

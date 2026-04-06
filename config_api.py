@@ -23,15 +23,23 @@ class SignalConfigUpdate(BaseModel):
     sentiment_weight: Optional[float] = Field(None, ge=0, le=1)
     technical_weight: Optional[float] = Field(None, ge=0, le=1)
     risk_weight: Optional[float] = Field(None, ge=0, le=1)
-    
-    strong_buy_score: Optional[int] = Field(None, ge=0, le=100)
+    hold_zone_threshold: Optional[int] = Field(None, ge=0, le=100)
+    entry_gate_rsi_buy_max: Optional[float] = Field(None, ge=0, le=100)
+    entry_gate_rsi_sell_min: Optional[float] = Field(None, ge=0, le=100)
+    entry_gate_macd_hist_buy_min: Optional[float] = None
+    entry_gate_macd_hist_sell_max: Optional[float] = None
+    entry_gate_sma200_buy_max_pct: Optional[float] = None
+    entry_gate_sma200_sell_min_pct: Optional[float] = None
+    entry_gate_dist_resist_buy_max_pct: Optional[float] = Field(None, ge=0)
+
+    strong_buy_score: Optional[float] = Field(None, ge=0, le=100)
     strong_buy_confidence: Optional[float] = Field(None, ge=0, le=1)
-    moderate_buy_score: Optional[int] = Field(None, ge=0, le=100)
+    moderate_buy_score: Optional[float] = Field(None, ge=0, le=100)
     moderate_buy_confidence: Optional[float] = Field(None, ge=0, le=1)
-    
-    strong_sell_score: Optional[int] = Field(None, ge=-100, le=0)
+
+    strong_sell_score: Optional[float] = Field(None, ge=-100, le=0)
     strong_sell_confidence: Optional[float] = Field(None, ge=0, le=1)
-    moderate_sell_score: Optional[int] = Field(None, ge=-100, le=0)
+    moderate_sell_score: Optional[float] = Field(None, ge=-100, le=0)
     moderate_sell_confidence: Optional[float] = Field(None, ge=0, le=1)
 
 class SignalConfigResponse(BaseModel):
@@ -39,14 +47,22 @@ class SignalConfigResponse(BaseModel):
     sentiment_weight: float
     technical_weight: float
     risk_weight: float
-    strong_buy_score: int
+    hold_zone_threshold: int
+    strong_buy_score: float    # float: optimizer törtszámot adhat vissza
     strong_buy_confidence: float
-    moderate_buy_score: int
+    moderate_buy_score: float  # float: optimizer törtszámot adhat vissza
     moderate_buy_confidence: float
-    strong_sell_score: int
+    strong_sell_score: float   # float: optimizer törtszámot adhat vissza
     strong_sell_confidence: float
-    moderate_sell_score: int
+    moderate_sell_score: float # float: optimizer törtszámot adhat vissza
     moderate_sell_confidence: float
+    entry_gate_rsi_buy_max: float
+    entry_gate_rsi_sell_min: float
+    entry_gate_macd_hist_buy_min: float
+    entry_gate_macd_hist_sell_max: float
+    entry_gate_sma200_buy_max_pct: float
+    entry_gate_sma200_sell_min_pct: float
+    entry_gate_dist_resist_buy_max_pct: float
 
 class DecayWeightsUpdate(BaseModel):
     """Model for updating decay weights (as percentages 0-100)"""
@@ -222,13 +238,21 @@ class RiskParametersResponse(BaseModel):
 async def get_signal_config():
     """Get current signal configuration"""
     try:
-        from src.config import get_config
+        from config import get_config
         config = get_config()
         
         return SignalConfigResponse(
             sentiment_weight=config.SENTIMENT_WEIGHT,
             technical_weight=config.TECHNICAL_WEIGHT,
             risk_weight=config.RISK_WEIGHT,
+            hold_zone_threshold=config.hold_zone_threshold,
+            entry_gate_rsi_buy_max=config.entry_gate_rsi_buy_max,
+            entry_gate_rsi_sell_min=config.entry_gate_rsi_sell_min,
+            entry_gate_macd_hist_buy_min=config.entry_gate_macd_hist_buy_min,
+            entry_gate_macd_hist_sell_max=config.entry_gate_macd_hist_sell_max,
+            entry_gate_sma200_buy_max_pct=config.entry_gate_sma200_buy_max_pct,
+            entry_gate_sma200_sell_min_pct=config.entry_gate_sma200_sell_min_pct,
+            entry_gate_dist_resist_buy_max_pct=config.entry_gate_dist_resist_buy_max_pct,
             strong_buy_score=config.STRONG_BUY_SCORE,
             strong_buy_confidence=config.STRONG_BUY_CONFIDENCE,
             moderate_buy_score=config.MODERATE_BUY_SCORE,
@@ -249,7 +273,7 @@ async def get_signal_config():
 async def update_signal_config(config_update: SignalConfigUpdate):
     """Update signal configuration"""
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         
         config = get_config()
         updates = {}
@@ -275,6 +299,22 @@ async def update_signal_config(config_update: SignalConfigUpdate):
             updates["RISK_WEIGHT"] = config_update.risk_weight
         
         # Add threshold updates
+        if config_update.hold_zone_threshold is not None:
+            updates["HOLD_ZONE_THRESHOLD"] = config_update.hold_zone_threshold
+        if config_update.entry_gate_rsi_buy_max is not None:
+            updates["ENTRY_GATE_RSI_BUY_MAX"] = config_update.entry_gate_rsi_buy_max
+        if config_update.entry_gate_rsi_sell_min is not None:
+            updates["ENTRY_GATE_RSI_SELL_MIN"] = config_update.entry_gate_rsi_sell_min
+        if config_update.entry_gate_macd_hist_buy_min is not None:
+            updates["ENTRY_GATE_MACD_HIST_BUY_MIN"] = config_update.entry_gate_macd_hist_buy_min
+        if config_update.entry_gate_macd_hist_sell_max is not None:
+            updates["ENTRY_GATE_MACD_HIST_SELL_MAX"] = config_update.entry_gate_macd_hist_sell_max
+        if config_update.entry_gate_sma200_buy_max_pct is not None:
+            updates["ENTRY_GATE_SMA200_BUY_MAX_PCT"] = config_update.entry_gate_sma200_buy_max_pct
+        if config_update.entry_gate_sma200_sell_min_pct is not None:
+            updates["ENTRY_GATE_SMA200_SELL_MIN_PCT"] = config_update.entry_gate_sma200_sell_min_pct
+        if config_update.entry_gate_dist_resist_buy_max_pct is not None:
+            updates["ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT"] = config_update.entry_gate_dist_resist_buy_max_pct
         if config_update.strong_buy_score is not None:
             updates["STRONG_BUY_SCORE"] = config_update.strong_buy_score
         if config_update.strong_buy_confidence is not None:
@@ -319,23 +359,32 @@ async def update_signal_config(config_update: SignalConfigUpdate):
 async def reset_signal_config():
     """Reset configuration to defaults"""
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         
         config = get_config()
         
-        # Default values
+        # Default values – read from src/config.py constants (single source of truth)
+        import config as _cfg_module
         updates = {
-            "SENTIMENT_WEIGHT": 0.7,
-            "TECHNICAL_WEIGHT": 0.2,
-            "RISK_WEIGHT": 0.1,
-            "STRONG_BUY_SCORE": 65,
-            "STRONG_BUY_CONFIDENCE": 0.75,
-            "MODERATE_BUY_SCORE": 50,
-            "MODERATE_BUY_CONFIDENCE": 0.65,
-            "STRONG_SELL_SCORE": -65,
-            "STRONG_SELL_CONFIDENCE": 0.75,
-            "MODERATE_SELL_SCORE": -50,
-            "MODERATE_SELL_CONFIDENCE": 0.65,
+            "SENTIMENT_WEIGHT": _cfg_module.SENTIMENT_WEIGHT,
+            "TECHNICAL_WEIGHT": _cfg_module.TECHNICAL_WEIGHT,
+            "RISK_WEIGHT": _cfg_module.RISK_WEIGHT,
+            "HOLD_ZONE_THRESHOLD": _cfg_module.HOLD_ZONE_THRESHOLD,
+            "STRONG_BUY_SCORE": _cfg_module.STRONG_BUY_SCORE,
+            "STRONG_BUY_CONFIDENCE": _cfg_module.STRONG_BUY_CONFIDENCE,
+            "MODERATE_BUY_SCORE": _cfg_module.MODERATE_BUY_SCORE,
+            "MODERATE_BUY_CONFIDENCE": _cfg_module.MODERATE_BUY_CONFIDENCE,
+            "STRONG_SELL_SCORE": _cfg_module.STRONG_SELL_SCORE,
+            "STRONG_SELL_CONFIDENCE": _cfg_module.STRONG_SELL_CONFIDENCE,
+            "MODERATE_SELL_SCORE": _cfg_module.MODERATE_SELL_SCORE,
+            "MODERATE_SELL_CONFIDENCE": _cfg_module.MODERATE_SELL_CONFIDENCE,
+            "ENTRY_GATE_RSI_BUY_MAX": _cfg_module.ENTRY_GATE_RSI_BUY_MAX,
+            "ENTRY_GATE_RSI_SELL_MIN": _cfg_module.ENTRY_GATE_RSI_SELL_MIN,
+            "ENTRY_GATE_MACD_HIST_BUY_MIN": _cfg_module.ENTRY_GATE_MACD_HIST_BUY_MIN,
+            "ENTRY_GATE_MACD_HIST_SELL_MAX": _cfg_module.ENTRY_GATE_MACD_HIST_SELL_MAX,
+            "ENTRY_GATE_SMA200_BUY_MAX_PCT": _cfg_module.ENTRY_GATE_SMA200_BUY_MAX_PCT,
+            "ENTRY_GATE_SMA200_SELL_MIN_PCT": _cfg_module.ENTRY_GATE_SMA200_SELL_MIN_PCT,
+            "ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT": _cfg_module.ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT,
         }
         
         update_config_values(config, updates)
@@ -358,7 +407,7 @@ async def reset_signal_config():
 async def reload_configuration():
     """Reload configuration from file"""
     try:
-        from src.config import reload_config
+        from config import reload_config
         
         reload_config()
         
@@ -383,7 +432,7 @@ async def reload_configuration():
 async def get_decay_weights():
     """Get current sentiment decay weights"""
     try:
-        from src.config import get_config
+        from config import get_config
         config = get_config()
         
         # Convert from decimal (0-1) to percentage (0-100)
@@ -404,7 +453,7 @@ async def get_decay_weights():
 async def update_decay_weights(updates: DecayWeightsUpdate):
     """Update sentiment decay weights"""
     try:
-        from src.config import get_config, save_config_to_file
+        from config import get_config, save_config_to_file
         
         config = get_config()
         
@@ -439,7 +488,7 @@ async def update_decay_weights(updates: DecayWeightsUpdate):
 async def get_technical_weights():
     """Get current technical component weights"""
     try:
-        from src.config import get_config
+        from config import get_config
         config = get_config()
         
         return TechnicalWeightsResponse(
@@ -466,7 +515,7 @@ async def get_technical_weights():
 async def update_technical_weights(updates: TechnicalWeightsUpdate):
     """Update technical component weights"""
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         
         config = get_config()
         config_updates = {}
@@ -522,7 +571,7 @@ async def update_technical_weights(updates: TechnicalWeightsUpdate):
 async def get_indicator_parameters():
     """Get current technical indicator parameters"""
     try:
-        from src.config import get_config
+        from config import get_config
         config = get_config()
         
         return IndicatorParametersResponse(
@@ -577,7 +626,7 @@ async def get_indicator_parameters():
 async def update_indicator_parameters(updates: IndicatorParametersUpdate):
     """Update technical indicator parameters"""
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         
         config = get_config()
         config_updates = {}
@@ -688,7 +737,7 @@ async def update_indicator_parameters(updates: IndicatorParametersUpdate):
 async def get_risk_parameters():
     """Get current risk management parameters"""
     try:
-        from src.config import get_config
+        from config import get_config
         config = get_config()
         
         return RiskParametersResponse(
@@ -716,7 +765,7 @@ async def get_risk_parameters():
 async def update_risk_parameters(updates: RiskParametersUpdate):
     """Update risk management parameters"""
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         
         config = get_config()
         config_updates = {}
@@ -820,7 +869,7 @@ class TechnicalComponentWeightsResponse(BaseModel):
 async def get_technical_component_weights():
     """Get current technical component percentage weights"""
     try:
-        from src.config import get_config
+        from config import get_config
         config = get_config()
         
         return TechnicalComponentWeightsResponse(
@@ -844,7 +893,7 @@ async def get_technical_component_weights():
 async def update_technical_component_weights(updates: TechnicalComponentWeightsUpdate):
     """Update technical component percentage weights"""
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         
         config = get_config()
         config_updates = {}
@@ -963,7 +1012,7 @@ class AdvancedSignalParamsResponse(BaseModel):
 @router.get("/advanced-signal", response_model=AdvancedSignalParamsResponse)
 async def get_advanced_signal_params():
     try:
-        from src.config import get_config
+        from config import get_config
         c = get_config()
         return AdvancedSignalParamsResponse(
             rsi_overbought=c.rsi_overbought, rsi_oversold=c.rsi_oversold,
@@ -986,7 +1035,7 @@ async def get_advanced_signal_params():
 @router.put("/advanced-signal", response_model=AdvancedSignalParamsResponse)
 async def update_advanced_signal_params(updates: AdvancedSignalParamsUpdate):
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         config_updates = {}
         for field, key in [
             ("rsi_overbought", "RSI_OVERBOUGHT"), ("rsi_oversold", "RSI_OVERSOLD"),
@@ -1046,7 +1095,7 @@ class AdvancedRiskScoringResponse(BaseModel):
 @router.get("/advanced-risk-scoring", response_model=AdvancedRiskScoringResponse)
 async def get_advanced_risk_scoring():
     try:
-        from src.config import get_config
+        from config import get_config
         c = get_config()
         return AdvancedRiskScoringResponse(
             atr_vol_very_low=c.atr_vol_very_low, atr_vol_low=c.atr_vol_low,
@@ -1060,7 +1109,7 @@ async def get_advanced_risk_scoring():
 @router.put("/advanced-risk-scoring", response_model=AdvancedRiskScoringResponse)
 async def update_advanced_risk_scoring(updates: AdvancedRiskScoringUpdate):
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         config_updates = {}
         for field, key in [
             ("atr_vol_very_low", "ATR_VOL_VERY_LOW"), ("atr_vol_low", "ATR_VOL_LOW"),
@@ -1124,7 +1173,7 @@ class AdvancedConfidenceResponse(BaseModel):
 @router.get("/advanced-confidence", response_model=AdvancedConfidenceResponse)
 async def get_advanced_confidence():
     try:
-        from src.config import get_config
+        from config import get_config
         c = get_config()
         return AdvancedConfidenceResponse(
             tech_conf_rsi_bullish=c.tech_conf_rsi_bullish,
@@ -1149,7 +1198,7 @@ async def get_advanced_confidence():
 @router.put("/advanced-confidence", response_model=AdvancedConfidenceResponse)
 async def update_advanced_confidence(updates: AdvancedConfidenceUpdate):
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         config_updates = {}
         for field, key in [
             ("tech_conf_rsi_bullish", "TECH_CONF_RSI_BULLISH"),
@@ -1211,7 +1260,7 @@ class TradeManagementResponse(BaseModel):
 @router.get("/trade-management", response_model=TradeManagementResponse)
 async def get_trade_management():
     try:
-        from src.config import get_config
+        from config import get_config
         c = get_config()
         return TradeManagementResponse(
             min_risk_reward=c.min_risk_reward,
@@ -1231,7 +1280,7 @@ async def get_trade_management():
 @router.put("/trade-management", response_model=TradeManagementResponse)
 async def update_trade_management(updates: TradeManagementUpdate):
     try:
-        from src.config import get_config, update_config_values
+        from config import get_config, update_config_values
         config_updates = {}
         for field, key in [
             ("min_risk_reward",              "MIN_RISK_REWARD"),

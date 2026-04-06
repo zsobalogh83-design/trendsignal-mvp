@@ -94,12 +94,8 @@ class MultilingualSentimentAnalyzer:
         self.finbert_available = False
         if USE_FINBERT:
             try:
-                from finbert_analyzer import FinBERTAnalyzer
-                with _multilingual_finbert_lock:
-                    if not hasattr(MultilingualSentimentAnalyzer, '_finbert_instance'):
-                        print("🧠 Loading FinBERT for English sentiment...")
-                        MultilingualSentimentAnalyzer._finbert_instance = FinBERTAnalyzer()
-                self.finbert = MultilingualSentimentAnalyzer._finbert_instance
+                from finbert_analyzer import get_global_finbert
+                self.finbert = get_global_finbert()
                 self.finbert_available = True
                 print("   ✅ FinBERT ready for English news")
             except Exception as e:

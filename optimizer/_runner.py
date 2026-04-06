@@ -31,7 +31,7 @@ sys.path.insert(0, str(BASE_DIR))
 from optimizer.backtester import load_signal_rows, load_trade_outcomes
 from optimizer.fitness import split_rows, compute_fitness_for_subset
 from optimizer.genetic import run_optimizer
-from optimizer.parameter_space import decode_vector, vector_to_config_diff, BASELINE_VECTOR
+from optimizer.parameter_space import decode_vector, vector_to_config_diff, BASELINE_VECTOR, get_current_baseline_vector
 from optimizer.validation import (
     bootstrap_test,
     walk_forward_validation,
@@ -215,9 +215,27 @@ def _validate_and_save_proposals(
     Run full validation pipeline on each proposal from the GA result,
     save to config_proposals table. Returns count of saved proposals.
     Uses v2 SignalSimRow pipeline throughout.
+
+    test_rows: gate_test_rows = val + test (50% held-out).
+    A GA csak a train seten optimalizált; val+test együtt érvényes
+    held-out halmaz → megbízhatóbb gate statisztikák, több trade.
+    Az itt kiszámított test metrikák felülírják a genetic.py-ból jövő
+    20%-os test értékeket, mivel ott csak a kis test szett szerepelt.
     """
-    cfg_baseline = decode_vector(BASELINE_VECTOR)
+    # Mindig az aktuális config.json-ból olvassuk a baseline-t,
+    # nem a hardcoded BASELINE_VECTOR-ból (ami elavult lehet).
+    current_baseline_vector = get_current_baseline_vector()
+    cfg_baseline = decode_vector(current_baseline_vector)
+
+    # Baseline metrikák a gate_test_rows-on (val+test = 50% held-out)
     baseline_pnls_test = _get_active_pnls(test_rows, score_timeline, cfg_baseline)
+    baseline_gate_fit, baseline_gate_stats = compute_fitness_for_subset(
+        test_rows, score_timeline, cfg_baseline
+    )
+    print(f"[Runner] Baseline on gate set (val+test): "
+          f"fit={baseline_gate_fit:.4f}  "
+          f"trades={baseline_gate_stats['total_trades']}  "
+          f"PF={baseline_gate_stats['profit_factor']:.2f}")
 
     saved = 0
     for proposal in result.get("proposals", []):
@@ -225,6 +243,31 @@ def _validate_and_save_proposals(
 
         prop_vector = proposal["vector"]
         prop_cfg    = decode_vector(prop_vector)
+
+        # --- Gate metrikák újraszámolása val+test kombinált halmazon ---
+        # A genetic.py-ból jövő test_fitness/test_trade_count csak a 20%-os
+        # test szettből számolt → kis minta, nagy variancia.
+        # A gate_test_rows (val+test = 50%) megbízhatóbb képet ad.
+        gate_fit, gate_stats = compute_fitness_for_subset(
+            test_rows, score_timeline, prop_cfg
+        )
+        improvement_pct = (
+            (gate_fit - baseline_gate_fit) / baseline_gate_fit * 100
+            if baseline_gate_fit > 0 else 0.0
+        )
+        print(f"  Gate set (val+test): fit={gate_fit:.4f}  "
+              f"trades={gate_stats['total_trades']}  "
+              f"PF={gate_stats['profit_factor']:.2f}  "
+              f"improvement={improvement_pct:+.1f}%")
+
+        # A proposal test metrikáit felülírjuk a kombinált halmaz értékeivel
+        proposal["test_fitness"]            = round(gate_fit, 6)
+        proposal["test_trade_count"]        = gate_stats["total_trades"]
+        proposal["test_win_rate"]           = gate_stats["win_rate"]
+        proposal["test_profit_factor"]      = gate_stats["profit_factor"]
+        proposal["baseline_fitness"]        = round(baseline_gate_fit, 6)
+        proposal["baseline_profit_factor"]  = baseline_gate_stats["profit_factor"]
+        proposal["fitness_improvement_pct"] = round(improvement_pct, 2)
 
         # --- Bootstrap ---
         prop_pnls = _get_active_pnls(test_rows, score_timeline, prop_cfg)
@@ -317,6 +360,15 @@ def main():
     parser.add_argument("--mutation",    type=float, default=0.20)
     parser.add_argument("--stop-flag",   type=str,   default=None)
     parser.add_argument("--db-path",     type=str,   default=str(DATABASE_PATH))
+    parser.add_argument("--trade-mode",  type=str,   default="all",
+                        choices=["all", "long", "short"],
+                        help="all=minden irány, long=csak BUY, short=csak SELL")
+    parser.add_argument("--phase",       type=str,   default="all",
+                        choices=["all", "score_only", "thresholds_only"],
+                        help="all=teljes tér, score_only=küszöbök befagyasztva, "
+                             "thresholds_only=score-params befagyasztva")
+    parser.add_argument("--include-archive", action="store_true", default=False,
+                        help="Archive CLOSED trade jelzések bevonása a tanítóadatba")
     args = parser.parse_args()
 
     db_path   = Path(args.db_path)
@@ -334,12 +386,15 @@ def main():
 
     print("=" * 60)
     print(f"TrendSignal Optimizer - run_id={run_id}")
-    print(f"  Population:  {args.population}")
-    print(f"  Generations: {args.generations}")
-    print(f"  Crossover:   {args.crossover}")
-    print(f"  Mutation:    {args.mutation}")
-    print(f"  DB:          {db_path}")
-    print(f"  Stop flag:   {stop_flag}")
+    print(f"  Population:       {args.population}")
+    print(f"  Generations:      {args.generations}")
+    print(f"  Crossover:        {args.crossover}")
+    print(f"  Mutation:         {args.mutation}")
+    print(f"  Trade mode:       {args.trade_mode}")
+    print(f"  Phase:            {args.phase}")
+    print(f"  Include archive:  {args.include_archive}")
+    print(f"  DB:               {db_path}")
+    print(f"  Stop flag:        {stop_flag}")
     print("=" * 60)
 
     import time
@@ -355,6 +410,9 @@ def main():
             mutation_prob=args.mutation,
             stop_flag_path=stop_flag,
             db_path=db_path,
+            trade_mode=args.trade_mode,
+            include_archive=args.include_archive,
+            phase=args.phase,
         )
 
         elapsed = time.time() - t_start
@@ -366,13 +424,26 @@ def main():
         print(f"  Proposals to save:  {len(result['proposals'])}")
 
         # Load split data for validation (reuse the same split, v2 pipeline)
+        # Fontos: ugyanazokkal a paraméterekkel töltünk, mint a GA futtatáskor,
+        # hogy a validáció konzisztens legyen a tanítással.
         from optimizer.signal_data import load_all_sim_data
-        all_rows, score_timeline = load_all_sim_data(db_path)
-        _, _, test_rows = split_rows(all_rows)
+        all_rows, score_timeline = load_all_sim_data(
+            db_path,
+            include_archive=args.include_archive,
+            trade_mode=args.trade_mode,
+        )
+        _, val_rows, test_rows = split_rows(all_rows, random_seed=run_id)
+
+        # A végső gate értékeléshez a val+test kombinált halmazt használjuk.
+        # Indoklás: a GA kizárólag a train seten optimalizál; val csak overfitting
+        # monitorozásra szolgált (fitness-ben nem szerepelt). Így val+test együtt
+        # érvényes held-out halmaz a gate statisztikákhoz — és elegendő trade-et
+        # biztosít magas HOLD_ZONE_THRESHOLD esetén is (50%→20% helyett 50% held-out).
+        gate_test_rows = val_rows + test_rows
 
         # Validate and save proposals
         saved = _validate_and_save_proposals(
-            result, run_id, all_rows, score_timeline, test_rows, db_path
+            result, run_id, all_rows, score_timeline, gate_test_rows, db_path
         )
         print(f"\n[Runner] Saved {saved} proposal(s) to config_proposals.")
 

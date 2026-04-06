@@ -1,0 +1,305 @@
+==============================================================================
+  TrendSignal — Korreláció-keresési elemzés
+  Dátum: 2026-04-02 19:01
+==============================================================================
+
+  Betöltés: AAPL, AMZN, GOOGL, IBM, META, MSFT, NVDA, TSLA
+  [1/5] Archive signals betöltése...
+         108,228 signal
+  [2/5] Árfolyam adatok betöltése (15m)...
+         116,921 15m gyertya
+  [3/5] Napi árak betöltése (1d)...
+  [4/5] Forward return számítás...
+         2h forward return: 105,771 db (97.7%)
+  [5/5] Hír-timing adatok betöltése...
+         75,165 archív hír
+
+  US piaci óra szűrő: 108,228 -> 97,060 signal
+
+==============================================================================
+  1. ADATMINŐSÉG FELMÉRÉS
+==============================================================================
+
+  Tickers elemzésben: AAPL, AMZN, GOOGL, IBM, META, MSFT, NVDA, TSLA
+  Összes signal: 97,060
+
+  [AAPL]
+    Signalok:   12,115  (BUY=2,782 SELL=1,890 HOLD=7,443)
+    Időszak:    2024-03-20 19:30:00+00:00 -> 2026-03-06 19:45:00+00:00
+    Fwd ret 2h adat: 12,115 (100.0%)
+
+  [AMZN]
+    Signalok:   12,063  (BUY=2,602 SELL=2,251 HOLD=7,210)
+    Időszak:    2024-03-21 13:45:00+00:00 -> 2026-03-06 19:45:00+00:00
+    Fwd ret 2h adat: 12,063 (100.0%)
+
+  [GOOGL]
+    Signalok:   12,149  (BUY=2,742 SELL=1,970 HOLD=7,437)
+    Időszak:    2024-03-20 19:45:00+00:00 -> 2026-03-06 19:45:00+00:00
+    Fwd ret 2h adat: 12,149 (100.0%)
+
+  [IBM]
+    Signalok:   11,972  (BUY=2,457 SELL=2,032 HOLD=7,483)
+    Időszak:    2024-03-21 14:00:00+00:00 -> 2026-03-06 19:45:00+00:00
+    Fwd ret 2h adat: 11,972 (100.0%)
+
+  [META]
+    Signalok:   12,050  (BUY=2,032 SELL=2,467 HOLD=7,551)
+    Időszak:    2024-03-21 14:00:00+00:00 -> 2026-03-06 19:45:00+00:00
+    Fwd ret 2h adat: 12,050 (100.0%)
+
+  [MSFT]
+    Signalok:   12,118  (BUY=2,763 SELL=1,763 HOLD=7,592)
+    Időszak:    2024-03-21 13:45:00+00:00 -> 2026-03-06 19:45:00+00:00
+    Fwd ret 2h adat: 12,118 (100.0%)
+
+  [NVDA]
+    Signalok:   12,379  (BUY=2,536 SELL=2,565 HOLD=7,278)
+    Időszak:    2024-03-20 19:45:00+00:00 -> 2026-03-06 19:45:00+00:00
+    Fwd ret 2h adat: 12,379 (100.0%)
+
+  [TSLA]
+    Signalok:   12,214  (BUY=1,331 SELL=3,604 HOLD=7,279)
+    Időszak:    2024-03-21 13:30:00+00:00 -> 2026-03-06 19:45:00+00:00
+    Fwd ret 2h adat: 12,214 (100.0%)
+
+  fwd_ret_1h      n=97,060  mean= +0.004%  std= 0.654%  win_rate=49.7%  p25= -0.251  p75= +0.267
+  fwd_ret_2h      n=97,060  mean= +0.011%  std= 0.881%  win_rate=50.2%  p25= -0.327  p75= +0.355
+  fwd_ret_4h      n=97,060  mean= +0.022%  std= 1.149%  win_rate=50.9%  p25= -0.386  p75= +0.428
+  fwd_ret_1d      n=97,060  mean= +0.099%  std= 2.957%  win_rate=53.2%  p25= -1.092  p75= +1.314
+
+==============================================================================
+  2. UNIVARIÁT KORRELÁCIÓ – KIMENET: fwd_ret_4h  (n=97,060)
+==============================================================================
+
+  Feature                                  n   Pearson r   Spearman ρ        p   sig   dir_acc
+  ----------------------------------------------------------------------------------------
+  Távolság resistance-tól (%)         30,503     +0.0758      +0.0461   0.0000  ***     52.9%
+  Átlagos hír score az elmúlt 1h-ban  22,550     +0.0349      +0.0030   0.0000  ***      7.5%
+  Risk/reward arány                   39,396     +0.0274      +0.0194   0.0000  ***     52.2%
+  Risk score                          97,060     -0.0221      -0.0211   0.0000  ***     50.6%
+  Hét napja (0=H)                     97,060     -0.0199      -0.0295   0.0000  ***     42.2%
+  Technical score                     97,060     -0.0168      -0.0237   0.0000  ***     49.1%
+  Kombinált score (-100..+100)        97,060     -0.0146      -0.0229   0.0000  ***     48.9%
+  MACD                                97,060     -0.0144      -0.0256   0.0000  ***     48.8%
+  Alap combined score (alignment előtt) 97,060     -0.0143      -0.0236   0.0000  ***     48.9%
+  Sentiment score                     97,060     +0.0137      +0.0011   0.0000  ***     41.1%
+  Ár > SMA200 (trend)                 97,060     -0.0135      -0.0014   0.0000  ***     29.3%
+  Momentum konzisztencia (-3..+3)     97,060     +0.0113      +0.0198   0.0004  ***     50.9%
+  Hírek száma (signal inputja)        97,060     -0.0101      -0.0151   0.0016  **      47.6%
+  Napszak (UTC óra)                   97,060     -0.0064      -0.0210   0.0476  *       52.3%
+  Kombinált score abs értéke          97,060     -0.0064      -0.0015   0.0465  *       52.3%
+  RSI (14)                            97,047     -0.0058      -0.0181   0.0730          52.3%
+  ATR % (volatilitás)                 97,060     +0.0052      +0.0216   0.1023          52.3%
+  Ár > SMA20                          97,060     -0.0044      -0.0214   0.1667          27.0%
+  Sentiment confidence                97,060     -0.0039      -0.0090   0.2258          52.3%
+  Technical confidence                97,060     +0.0029      +0.0044   0.3650          52.3%
+  Hírek száma az elmúlt 1h-ban        97,060     -0.0029      -0.0152   0.3671          11.8%
+  Bollinger Band pozíció (0=alsó, 1=felső) 97,060     -0.0027      -0.0197   0.4012          52.0%
+  MACD histogram                      97,060     -0.0017      -0.0064   0.5869          49.4%
+  Távolság supporttól (%)             33,843     +0.0016      +0.0011   0.7745          50.4%
+  Overall confidence                  97,060     -0.0008      -0.0072   0.7924          52.3%
+  Perc az utolsó hír óta              97,060     +0.0005      +0.0045   0.8811          52.0%
+  Stochastic %K                       97,060     -0.0004      -0.0190   0.8928          51.8%
+
+--- Kategorikus változók ---
+
+  Decision (BUY/SELL/HOLD):
+  Kategória                      n   mean_ret   win_rate    dir_acc
+  --------------------------------------------------------------
+  BUY                       19,245    -0.0115      48.9%      50.5%
+  HOLD                      59,273    +0.0333      51.0%      49.3%
+  SELL                      18,542    +0.0190      52.4%      46.4%
+
+  Signal strength:
+  Kategória                      n   mean_ret   win_rate    dir_acc
+  --------------------------------------------------------------
+  MODERATE                   9,766    -0.0043      48.3%      50.0%
+  NEUTRAL                   59,273    +0.0333      51.0%      49.3%
+  STRONG                        54    +0.0429      64.8%      34.0%
+  WEAK                      27,967    +0.0061      51.4%      47.9%
+
+  RSI zóna (-2..+2):
+  Kategória                      n   mean_ret   win_rate    dir_acc
+  --------------------------------------------------------------
+  -2.0                      12,973    +0.0170      52.8%      46.3%
+  -1.0                      23,401    +0.0333      51.5%      46.8%
+  0.0                       19,533    +0.0315      51.3%      49.9%
+  1.0                       25,854    +0.0152      49.6%      50.9%
+  2.0                       15,286    +0.0063      49.7%      49.9%
+
+==============================================================================
+  3. SCORE BUCKET ELEMZÉS – fwd_ret_4h
+==============================================================================
+
+--- Combined score buckets ---
+  Bucket                              n   mean_ret   win_rate    dir_acc      std
+  ---------------------------------------------------------------------------
+  Közepes LONG  50..65              569    +0.0392      48.7%      50.2%   1.0348
+  Gyenge LONG   25..50           17,577    -0.0159      49.1%      50.5%   1.0029
+  Semleges     -25..25           59,160    +0.0324      50.9%      49.4%   1.1255
+  Gyenge SHORT -50..-25          16,816    +0.0010      52.0%      46.7%   1.2431
+  Közepes SHORT-65..-50           2,703    +0.1500      55.8%      42.8%   1.6907
+  Erős SHORT  score <= -65          217    +0.1197      41.9%      57.1%   2.3400
+
+--- Sentiment–Technical irány egyezés vs. kimenet ---
+  Sentiment + Technical AZONOS irányú           n=40,508  mean= +0.0096%  win_rate=49.9%
+  Sentiment + Technical ELLENTÉTES irányú       n=56,552  mean= +0.0303%  win_rate=51.6%
+
+==============================================================================
+  4. INTERAKCIÓS ANALÍZIS – fwd_ret_4h
+==============================================================================
+
+--- RSI zóna × Momentum alignment -> mean forward return ---
+  RSI \ Mom     mom=-3    mom=-2    mom=-1    mom= 0    mom=+1    mom=+2    mom=+3
+  --------------------------------------------------------------------------------
+  RSI<30           ---       ---       ---       ---    +0.014       ---    +0.062
+  30-45            ---       ---    +0.032       ---    +0.020       ---    +0.102
+  45-55         +0.009    +0.040    +0.033    -0.069    +0.032       ---    +0.055
+  55-70         +0.002       ---    +0.014       ---    +0.068       ---       ---
+  RSI>70        -0.024       ---    +0.009       ---    +0.150       ---       ---
+
+--- Signal decision × above_sma200 -> kimenet ---
+  Decision          Trend      n   mean_ret   win_rate    dir_acc
+  ------------------------------------------------------------
+  BUY            trend UP 15,209    -0.0155      49.0%      50.6%
+  BUY          trend DOWN  4,036    +0.0038      48.6%      49.9%
+  SELL           trend UP  4,607    -0.0465      53.8%      44.6%
+  SELL         trend DOWN 13,935    +0.0407      51.9%      46.9%
+  HOLD           trend UP 34,765    +0.0256      51.4%      49.8%
+  HOLD         trend DOWN 24,508    +0.0442      50.5%      48.4%
+
+--- Különleges setupok ---
+
+  Setup                                                   n   mean_ret   win_rate
+  --------------------------------------------------------------------------------
+  RSI<35 + MACD_hist>0 (bullish reversal)             1,514    +0.0525      48.2%
+  RSI>65 + MACD_hist<0 (bearish reversal)             2,673    -0.0234      49.5%
+  |combined_score|>65 (extrém jel)                      235    +0.0916      42.1%
+  Momentum alignment = +3 (minden bullish)            5,405    +0.0855      51.7%
+  Momentum alignment = -3 (minden bearish)            8,333    +0.0001      48.8%
+  news_count_1h>2 + |score|>40                          462    +0.0265      45.2%
+  news_delay<30min + |score|>40                       1,170    +0.0674      48.4%
+
+==============================================================================
+  5. IDŐBELI MINTÁK – fwd_ret_4h
+==============================================================================
+
+--- Napszak (UTC óra) hatása ---
+    Óra       n   mean_ret   win_rate    dir_acc
+  ------------------------------------------------
+     13h   5,643    +0.0348      51.8%      49.2%
+     14h  13,596    +0.0210      52.2%      49.2%
+     15h  15,663    +0.0361      53.4%      49.1%
+     16h  15,642    +0.0281      52.4%      48.9%
+     17h  15,596    +0.0186      52.1%      48.6%
+     18h  15,462    +0.0088      51.3%      48.7%
+     19h  15,458    +0.0125      43.5%      49.1%
+
+--- Hét napja ---
+  Nap                n   mean_ret   win_rate
+  ------------------------------------------
+  Hétfő         18,392    +0.0433      51.8%
+  Kedd          20,226    +0.0357      52.9%
+  Szerda        19,567    +0.1006      52.5%
+  Csütörtök     19,105    -0.1044      46.3%
+  Péntek        19,770    +0.0311      50.7%
+
+==============================================================================
+  6. TICKER-SZINTŰ BONTÁS – fwd_ret_4h
+==============================================================================
+
+  Ticker           n   Pearson r        p   sig   mean_ret   win_rate    dir_acc
+  --------------------------------------------------------------------------------
+  AAPL        12,115     -0.0165   0.0689         +0.0134      49.9%      47.7%
+  AMZN        12,063     -0.0445   0.0000  ***    +0.0183      49.8%      47.8%
+  GOOGL       12,149     -0.0342   0.0002  ***    +0.0473      51.9%      49.0%
+  IBM         11,972     -0.0155   0.0907         +0.0448      53.8%      48.9%
+  META        12,050     -0.0428   0.0000  ***    +0.0120      49.7%      49.1%
+  MSFT        12,118     +0.0015   0.8682         +0.0077      50.5%      48.2%
+  NVDA        12,379     -0.0115   0.2007         +0.0120      50.7%      49.4%
+  TSLA        12,214     +0.0177   0.0510         +0.0183      50.5%      51.0%
+
+==============================================================================
+  7. ARCHIVE SZIMULÁLT KERESKEDÉSEK ELEMZÉSE
+==============================================================================
+
+  Összes zárt kereskedés: 39,018
+
+--- Exit reason megoszlás + átlagos P&L ---
+  Exit reason                     n   mean_pnl%   win_rate
+  -------------------------------------------------------
+  EOD_AUTO_LIQUIDATION       13,739     +0.1177      51.1%
+  OPPOSING_SIGNAL             8,872     -0.1917      29.5%
+  SL_HIT                      8,785     -1.0217      24.6%
+  STAGNATION_EXIT             5,034     +0.0462      55.8%
+  TP_HIT                      2,588     +3.5938     100.0%
+
+--- 2h iránypontosság – score quartilisek szerint ---
+
+  Score quartilis            n   dir_2h_acc   mean_2h_pct
+  ------------------------------------------------------
+  Q1 (leggyengébb)       9,737        48.8%       +0.0128%
+  Q2                     9,729        48.7%       -0.0096%
+  Q3                     9,725        50.0%       -0.0062%
+  Q4 (legerősebb)        9,712        48.1%       +0.0282%
+
+--- is_real_trade (|score|>=25) vs. alacsony score ---
+  Valós trade (|score|>=25)      n=36,622  2h_acc=48.7%  win_rate=44.1%  mean_pnl=+0.0045%
+  Alacsony score                 n=2,396  2h_acc=51.9%  win_rate=43.2%  mean_pnl=+0.1295%
+
+==============================================================================
+  8. ÖSSZEFOGLALÓ RANGLISTA
+==============================================================================
+
+  Korreláció a 'fwd_ret_4h' kimenettel (Pearson r, abszolút érték szerint rendezve):
+
+    #  Feature                              n      |r|   Spearman        p   sig
+  ------------------------------------------------------------------------
+    1.  dist_to_resistance_pct          30,503   0.0758    +0.0461   0.0000  ***
+    2.  news_avg_score_1h               22,550   0.0349    +0.0030   0.0000  ***
+    3.  risk_score                      97,060   0.0221    -0.0211   0.0000  ***
+    4.  technical_score                 97,060   0.0168    -0.0237   0.0000  ***
+    5.  combined_score                  97,060   0.0146    -0.0229   0.0000  ***
+    6.  sentiment_score                 97,060   0.0137    +0.0011   0.0000  ***
+    7.  above_sma200                    97,060   0.0135    -0.0014   0.0000  ***
+    8.  mom_alignment                   97,060   0.0113    +0.0198   0.0004  ***
+    9.  abs_combined_score              97,060   0.0064    -0.0015   0.0465  *  
+   10.  rsi                             97,047   0.0058    -0.0181   0.0730     
+   11.  atr_pct                         97,060   0.0052    +0.0216   0.1023     
+   12.  news_count_1h                   97,060   0.0029    -0.0152   0.3671     
+   13.  bb_position                     97,060   0.0027    -0.0197   0.4012     
+   14.  macd_hist                       97,060   0.0017    -0.0064   0.5869     
+   15.  dist_to_support_pct             33,843   0.0016    +0.0011   0.7745     
+   16.  overall_confidence              97,060   0.0008    -0.0072   0.7924     
+   17.  news_delay_min                  97,060   0.0005    +0.0045   0.8811     
+   18.  stoch_k                         97,060   0.0004    -0.0190   0.8928     
+
+
+--- Megállapítások ---
+
+  Szignifikáns (p<0.05) feature-ök: 9
+    • dist_to_resistance_pct: r=+0.0758 (pozitív összefüggés, p=0.0000)
+    • news_avg_score_1h: r=+0.0349 (pozitív összefüggés, p=0.0000)
+    • risk_score: r=-0.0221 (negatív összefüggés, p=0.0000)
+    • technical_score: r=-0.0168 (negatív összefüggés, p=0.0000)
+    • combined_score: r=-0.0146 (negatív összefüggés, p=0.0000)
+
+  Erősen szignifikáns (p<0.01): 8
+    • dist_to_resistance_pct: r=+0.0758  p=0.0000
+    • news_avg_score_1h: r=+0.0349  p=0.0000
+    • risk_score: r=-0.0221  p=0.0000
+    • technical_score: r=-0.0168  p=0.0000
+    • combined_score: r=-0.0146  p=0.0000
+    • sentiment_score: r=+0.0137  p=0.0000
+    • above_sma200: r=-0.0135  p=0.0000
+    • mom_alignment: r=+0.0113  p=0.0004
+
+==============================================================================
+  KÉSZ
+  Tipp: futtasd más horizontokra is:
+    python one_offs/correlation_analysis.py --horizon 1h
+    python one_offs/correlation_analysis.py --horizon 4h
+    python one_offs/correlation_analysis.py --horizon 1d
+    python one_offs/correlation_analysis.py --ticker NVDA --horizon 2h
+==============================================================================

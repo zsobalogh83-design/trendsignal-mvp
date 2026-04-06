@@ -1,0 +1,20 @@
+TrendSignal Hír–Árfolyam Korreláció Elemzés
+Futtatva: 2026-04-02 09:42
+Elemzési alap: 24,838 hír-árfolyam pár
+
+Globális irány-pontosság (2h): 22.9% (n=19,090)
+Magnitudó-korreláció (2h): r=0.0118
+
+Javaslatok (12 db):
+  [HIGH] llm_confidence_low: llm_confidence='low' irány-pontosság 26.0% (2h ablak) — nem szignifikánsan jobb 
+  [LOW] decay_weights_2_6h: 0-2h accuracy 21.2% vs 2-6h 24.5% — különbség csak -3.3pp, a jelenlegi 0.85 deca
+  [HIGH] divergence_LLM_up_FB_down: Divergens hírek (LLM_up_FB_down): LLM accuracy csak 43.8%, avg_pct=0.1415
+  [HIGH] divergence_LLM_down_FB_up: Divergens hírek (LLM_down_FB_up): LLM accuracy csak 34.5%, avg_pct=0.2524
+  [MEDIUM] catalyst_analyst: catalyst='analyst': 36.2% accuracy (n=174, 2h ablak)
+  [MEDIUM] catalyst_corporate_action: catalyst='corporate_action': 28.4% accuracy (n=1878, 2h ablak)
+  [MEDIUM] catalyst_earnings: catalyst='earnings': 32.4% accuracy (n=176, 2h ablak)
+  [MEDIUM] catalyst_macro: catalyst='macro': 24.0% accuracy (n=533, 2h ablak)
+  [MEDIUM] catalyst_other: catalyst='other': 21.5% accuracy (n=15429, 2h ablak)
+  [MEDIUM] catalyst_regulatory: catalyst='regulatory': 26.9% accuracy (n=674, 2h ablak)
+  [MEDIUM] catalyst_sector: catalyst='sector': 43.8% accuracy (n=226, 2h ablak)
+  [HIGH] magnitude_calibration: llm_score magnitudó-korrelációja csak r=0.0118 (2h ablak) — az LLM score nagyság

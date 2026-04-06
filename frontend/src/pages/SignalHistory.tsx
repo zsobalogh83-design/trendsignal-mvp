@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { FiFilter, FiX, FiCalendar, FiTrendingUp, FiTrendingDown, FiMinus, FiChevronDown, FiChevronRight, FiPlay } from 'react-icons/fi';
@@ -23,6 +23,15 @@ function getExitCategory(trade: Signal['simulated_trade']): ExitReasonFilter {
   return 'NONE';
 }
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState<T>(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
 export function SignalHistory() {
   const [viewMode, setViewMode] = useState<'live' | 'archive'>('live');
 
@@ -35,13 +44,95 @@ export function SignalHistory() {
     exit_reasons: [],
   });
 
+  // Archive módban debounce-oljuk a szűrőket, hogy gyors kattintásokra ne indítson azonnal kérést
+  const debouncedFilters = useDebounce(filters, viewMode === 'archive' ? 350 : 0);
+
   const [showFilters, setShowFilters] = useState(true);
   const [simulateStatus, setSimulateStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [simulateStats, setSimulateStats] = useState<Record<string, number> | null>(null);
   const [archiveBacktestStatus, setArchiveBacktestStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [archiveBacktestStats, setArchiveBacktestStats] = useState<Record<string, unknown> | null>(null);
+  const [recalcProgress, setRecalcProgress] = useState<{
+    phase: string | null;
+    current_ticker: string | null;
+    ticker_index: number;
+    ticker_total: number;
+    elapsed_seconds: number | null;
+  }>({ phase: null, current_ticker: null, ticker_index: 0, ticker_total: 0, elapsed_seconds: null });
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const queryClient = useQueryClient();
+
+  // POST helper – újrafelhasználható (gomb kattintás + restart esetén is)
+  const startRecalcTask = async () => {
+    const body: Record<string, unknown> = {};
+    if (filters.ticker_symbols && filters.ticker_symbols.length > 0) {
+      body.symbols = filters.ticker_symbols;
+    }
+    const res = await fetch(`${API_BASE}/simulated-trades/recalculate-and-resimulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      if (res.status !== 409) throw new Error(err.detail || 'start failed');
+      // 409 = már fut → polling rendesen fogja kezelni
+    }
+  };
+
+  // Polling: ha running → 2 másodpercenként lekérdezi az állapotot
+  useEffect(() => {
+    if (archiveBacktestStatus !== 'running') {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/simulated-trades/recalculate-status`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Szerver-restart detektálás: running=false + phase=null →
+        // a szerver újraindult és elveszett a task state → újraindítás
+        if (!data.running && !data.phase) {
+          console.warn('[Recalc] Server restarted mid-run — auto-restart...');
+          setRecalcProgress({ phase: 'recalc', current_ticker: null, ticker_index: 0, ticker_total: 0, elapsed_seconds: null });
+          try {
+            await startRecalcTask();
+          } catch {
+            setArchiveBacktestStatus('error');
+            if (pollRef.current) clearInterval(pollRef.current);
+          }
+          return;
+        }
+
+        setRecalcProgress({
+          phase: data.phase,
+          current_ticker: data.current_ticker,
+          ticker_index: data.ticker_index ?? 0,
+          ticker_total: data.ticker_total ?? 0,
+          elapsed_seconds: data.elapsed_seconds,
+        });
+
+        if (data.phase === 'done') {
+          setArchiveBacktestStatus('done');
+          setArchiveBacktestStats(data.backtest_stats);
+          queryClient.invalidateQueries({ queryKey: ['signal-history'] });
+          if (pollRef.current) clearInterval(pollRef.current);
+        } else if (data.phase === 'error') {
+          setArchiveBacktestStatus('error');
+          if (pollRef.current) clearInterval(pollRef.current);
+        }
+      } catch {
+        // hálózati hiba → folytatja a pollozást
+      }
+    }, 2000);
+
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [archiveBacktestStatus]);
 
   const { data: tickersData } = useQuery({
     queryKey: ['tickers'],
@@ -54,24 +145,24 @@ export function SignalHistory() {
   });
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['signal-history', filters, viewMode],
+    queryKey: ['signal-history', debouncedFilters, viewMode],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (filters.from_date) params.append('from_date', filters.from_date);
-      if (filters.to_date) params.append('to_date', filters.to_date);
-      if (filters.ticker_symbols && filters.ticker_symbols.length > 0) {
-        filters.ticker_symbols.forEach(s => params.append('ticker_symbols', s));
+      if (debouncedFilters.from_date) params.append('from_date', debouncedFilters.from_date);
+      if (debouncedFilters.to_date) params.append('to_date', debouncedFilters.to_date);
+      if (debouncedFilters.ticker_symbols && debouncedFilters.ticker_symbols.length > 0) {
+        debouncedFilters.ticker_symbols.forEach(s => params.append('ticker_symbols', s));
       }
-      if (filters.decisions && filters.decisions.length > 0) {
-        filters.decisions.forEach(d => params.append('decisions', d));
+      if (debouncedFilters.decisions && debouncedFilters.decisions.length > 0) {
+        debouncedFilters.decisions.forEach(d => params.append('decisions', d));
       }
-      if (filters.strengths && filters.strengths.length > 0) {
-        filters.strengths.forEach(s => params.append('strengths', s));
+      if (debouncedFilters.strengths && debouncedFilters.strengths.length > 0) {
+        debouncedFilters.strengths.forEach(s => params.append('strengths', s));
       }
-      if (filters.min_score !== undefined) params.append('min_score', String(filters.min_score));
-      if (filters.max_score !== undefined) params.append('max_score', String(filters.max_score));
-      if (filters.exit_reasons && filters.exit_reasons.length > 0) {
-        filters.exit_reasons.forEach(r => params.append('exit_reasons', r));
+      if (debouncedFilters.min_score !== undefined) params.append('min_score', String(debouncedFilters.min_score));
+      if (debouncedFilters.max_score !== undefined) params.append('max_score', String(debouncedFilters.max_score));
+      if (debouncedFilters.exit_reasons && debouncedFilters.exit_reasons.length > 0) {
+        debouncedFilters.exit_reasons.forEach(r => params.append('exit_reasons', r));
       }
       const endpoint = viewMode === 'archive'
         ? `${API_BASE}/signals/archive/history`
@@ -173,21 +264,10 @@ export function SignalHistory() {
   const handleArchiveBacktest = async () => {
     setArchiveBacktestStatus('running');
     setArchiveBacktestStats(null);
+    setRecalcProgress({ phase: 'recalc', current_ticker: null, ticker_index: 0, ticker_total: 0, elapsed_seconds: null });
     try {
-      const body: Record<string, unknown> = {};
-      if (filters.ticker_symbols && filters.ticker_symbols.length > 0) {
-        body.symbols = filters.ticker_symbols;
-      }
-      const response = await fetch(`${API_BASE}/simulated-trades/archive-backtest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error('Archive backtest failed');
-      const result = await response.json();
-      setArchiveBacktestStatus('done');
-      setArchiveBacktestStats(result.stats);
-      queryClient.invalidateQueries({ queryKey: ['signal-history'] });
+      await startRecalcTask();
+      // A szerver azonnal visszatér "started" állapottal; a polling veszi át
     } catch {
       setArchiveBacktestStatus('error');
     }
@@ -358,12 +438,21 @@ export function SignalHistory() {
                       border: '2px solid rgba(255,255,255,0.3)',
                       borderTop: '2px solid white',
                       borderRadius: '50%',
-                      animation: 'spin 1s linear infinite'
+                      animation: 'spin 1s linear infinite',
+                      flexShrink: 0,
                     }} />
-                    Running...
+                    <span style={{ fontSize: '12px' }}>
+                      {recalcProgress.phase === 'recalc' && recalcProgress.current_ticker
+                        ? `Recalc: ${recalcProgress.current_ticker} (${recalcProgress.ticker_index}/${recalcProgress.ticker_total})`
+                        : recalcProgress.phase === 'backtest' && recalcProgress.current_ticker
+                        ? `Backtest: ${recalcProgress.current_ticker} (${recalcProgress.ticker_index}/${recalcProgress.ticker_total})`
+                        : recalcProgress.phase === 'recalc' ? 'Recalc indul...'
+                        : recalcProgress.phase === 'backtest' ? 'Backtest indul...'
+                        : 'Indítás...'}
+                    </span>
                   </>
                 ) : archiveBacktestStatus === 'done' ? (
-                  <>✓ Done ({(archiveBacktestStats as Record<string, number>)?.trades_created ?? 0} trades)</>
+                  <>✓ Done ({(archiveBacktestStats as Record<string, number>)?.trades_created ?? 0} trades{recalcProgress.elapsed_seconds ? `, ${recalcProgress.elapsed_seconds.toFixed(0)}s` : ''})</>
                 ) : archiveBacktestStatus === 'error' ? (
                   <>✗ Error</>
                 ) : (
@@ -729,51 +818,104 @@ export function SignalHistory() {
         }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(99, 102, 241, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#e0e7ff', margin: 0 }}>
-              {isLoading ? 'Loading...' : `${data?.total || 0} signals found`}
+              {isLoading ? 'Loading...' : (() => {
+                const total = data?.total || 0;
+                const tradeCount = data?.pnl_summary?.closed_count ?? 0;
+                if (viewMode === 'archive' && tradeCount > 0) {
+                  return `${total} signal (${tradeCount} trade)`;
+                }
+                return `${total} signals found`;
+              })()}
             </h2>
             {!isLoading && data?.signals && data.signals.length > 0 && (() => {
-              let closedCount: number;
-              let openCount: number;
-              let totalHuf: number;
-              let totalPct: number | null;
-              let hasAnyHuf: boolean;
+              const backendSummary = data.pnl_summary;
+              const closedCount = backendSummary?.closed_count ?? 0;
+              const openCount   = backendSummary?.open_count ?? 0;
+              const hasOpen     = openCount > 0;
 
-              {
-                const backendSummary = data.pnl_summary;
-                closedCount = backendSummary?.closed_count ?? 0;
-                openCount = backendSummary?.open_count ?? 0;
-                totalHuf = backendSummary?.total_pnl_huf ?? 0;
-                totalPct = backendSummary?.total_pnl_percent ?? null;
-                hasAnyHuf = backendSummary?.total_pnl_huf !== null && backendSummary?.total_pnl_huf !== undefined;
-                // Add unrealized PnL for open trades using the exact trade IDs from the backend summary
-                if (openPnlData && backendSummary?.open_trade_ids?.length) {
-                  for (const tradeId of backendSummary.open_trade_ids) {
-                    const live = openPnlData[tradeId];
-                    if (live?.unrealized_pnl_huf !== null && live?.unrealized_pnl_huf !== undefined) {
-                      totalHuf += live.unrealized_pnl_huf;
-                      hasAnyHuf = true;
-                    }
-                    if (live?.unrealized_pnl_percent !== null && live?.unrealized_pnl_percent !== undefined) {
-                      totalPct = (totalPct ?? 0) + live.unrealized_pnl_percent;
-                    }
+              // Archive mode: live-stílusú összesítés (átlag %/trade, HUF, WR)
+              if (viewMode === 'archive') {
+                const avgPct    = backendSummary?.total_net_pnl_percent ?? null;  // átlag trade-enkénti nettó %
+                const totalHufA = backendSummary?.total_pnl_huf ?? null;
+                const winRate   = backendSummary?.win_rate ?? null;
+                if (closedCount === 0 && !hasOpen) return null;
+                const isProfit    = totalHufA !== null ? totalHufA >= 0 : (avgPct !== null ? avgPct >= 0 : true);
+                const color       = isProfit ? '#34d399' : '#f87171';
+                const borderColor = isProfit ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)';
+                const bg          = isProfit ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)';
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: bg, border: `1px solid ${borderColor}`, borderRadius: '8px', padding: '5px 12px' }}>
+                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
+                      {closedCount} lezárt{hasOpen ? ` + ${openCount} nyitott` : ''}
+                    </span>
+                    {avgPct !== null && (
+                      <span style={{ fontSize: '12px', fontWeight: '700', fontFamily: 'monospace', color }}
+                        title="Átlagos nettó eredmény trade-enként (nem kumulatív!)">
+                        átlag {avgPct >= 0 ? '+' : ''}{avgPct.toFixed(3)}%/trade
+                      </span>
+                    )}
+                    {totalHufA !== null && (
+                      <span style={{ fontSize: '13px', fontWeight: '700', fontFamily: 'monospace', color, whiteSpace: 'nowrap' }}
+                        title="Becsült kumulatív HUF (700 000 Ft pozícióméret alapján, ~380 USD/HUF)">
+                        {totalHufA >= 0 ? '+' : ''}{formatHuf(totalHufA)}
+                      </span>
+                    )}
+                    {winRate !== null && (
+                      <span style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}
+                        title="Nyerő tradek aránya">
+                        WR: {winRate.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                );
+              }
+
+              // Live mode: átlag %/trade + HUF + WR (nyitott trade-ek unrealized értékével)
+              const _TARGET_POS_HUF = 700_000;
+              let totalHuf  = backendSummary?.total_pnl_huf ?? 0;
+              let hasAnyHuf = backendSummary?.total_pnl_huf !== null && backendSummary?.total_pnl_huf !== undefined;
+              let openHufSum = 0;
+              let openCount2 = 0;
+              if (openPnlData && backendSummary?.open_trade_ids?.length) {
+                for (const tradeId of backendSummary.open_trade_ids) {
+                  const live = openPnlData[tradeId];
+                  if (live?.unrealized_pnl_huf !== null && live?.unrealized_pnl_huf !== undefined) {
+                    totalHuf += live.unrealized_pnl_huf;
+                    openHufSum += live.unrealized_pnl_huf;
+                    hasAnyHuf = true;
+                    openCount2++;
                   }
                 }
               }
+              // Átlag %/trade: összes HUF / trade-szám / target pozícióméret
+              // (backend total_net_pnl_percent = avg closed HUF/trade / 700k * 100)
+              const closedNetPct = backendSummary?.total_net_pnl_percent ?? null;
+              const totalTradeCount = closedCount + openCount2;
+              let avgPctLive: number | null = null;
+              if (totalTradeCount > 0) {
+                const closedHufSum = closedNetPct !== null ? closedNetPct / 100 * _TARGET_POS_HUF * closedCount : null;
+                if (closedHufSum !== null) {
+                  avgPctLive = (closedHufSum + openHufSum) / totalTradeCount / _TARGET_POS_HUF * 100;
+                } else if (openCount2 > 0) {
+                  avgPctLive = openHufSum / openCount2 / _TARGET_POS_HUF * 100;
+                }
+              }
+              const winRate = backendSummary?.win_rate ?? null;
 
-              if (!hasAnyHuf && totalPct === null) return null;
-              const isProfit = totalHuf >= 0;
-              const hasOpen = openCount > 0;
-              const color = isProfit ? '#34d399' : '#f87171';
+              if (!hasAnyHuf && avgPctLive === null) return null;
+              const isProfit    = totalHuf >= 0;
+              const color       = isProfit ? '#34d399' : '#f87171';
               const borderColor = isProfit ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)';
-              const bg = isProfit ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)';
+              const bg          = isProfit ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)';
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: bg, border: `1px solid ${borderColor}`, borderRadius: '8px', padding: '5px 12px' }}>
                   <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
                     {closedCount} lezárt{hasOpen ? ` + ${openCount} nyitott` : ''}
                   </span>
-                  {totalPct !== null && (
-                    <span style={{ fontSize: '12px', fontWeight: '700', fontFamily: 'monospace', color }}>
-                      {totalPct >= 0 ? '+' : ''}{totalPct.toFixed(2)}%
+                  {avgPctLive !== null && (
+                    <span style={{ fontSize: '12px', fontWeight: '700', fontFamily: 'monospace', color }}
+                      title={hasOpen ? 'Átlagos nettó %/trade (nyitott unrealized értékkel együtt)' : 'Átlagos nettó eredmény trade-enként (nem kumulatív!)'}>
+                      átlag {avgPctLive >= 0 ? '+' : ''}{avgPctLive.toFixed(3)}%/trade
                       {hasOpen && <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>~</span>}
                     </span>
                   )}
@@ -782,6 +924,12 @@ export function SignalHistory() {
                       title={hasOpen ? 'Tartalmaz nyitott (nem realizált) HUF összeget is' : undefined}>
                       {totalHuf >= 0 ? '+' : ''}{formatHuf(totalHuf)}
                       {hasOpen && <span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>~</span>}
+                    </span>
+                  )}
+                  {winRate !== null && (
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontFamily: 'monospace' }}
+                      title="Nyerő tradek aránya (lezárt)">
+                      WR: {winRate.toFixed(1)}%
                     </span>
                   )}
                 </div>
@@ -933,7 +1081,7 @@ export function SignalHistory() {
                         {renderPnl(signal.simulated_trade, openPnlData, signal)}
                       </td>
                       <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: '12px', fontWeight: '600', fontFamily: 'monospace' }}>
-                        {renderHuf(signal.simulated_trade, openPnlData)}
+                        {renderHuf(signal.simulated_trade, openPnlData, signal.entry_price)}
                       </td>
                     </tr>
                   ))}
@@ -1080,9 +1228,21 @@ function renderPnl(
   );
 }
 
+// USD/HUF közelítés az archive periódusra
+const _ARCHIVE_USD_HUF = 380;
+const _TARGET_POS_HUF  = 700_000;
+
+function calcArchiveHuf(netPct: number, entryPrice: number): number {
+  // Tényleges részvényszám (floor) × entry × USD/HUF × net%/100
+  const shares = Math.floor(_TARGET_POS_HUF / _ARCHIVE_USD_HUF / entryPrice);
+  if (shares === 0) return netPct / 100 * _TARGET_POS_HUF; // fallback ha nagyon drága
+  return shares * entryPrice * _ARCHIVE_USD_HUF * netPct / 100;
+}
+
 function renderHuf(
   trade: Signal['simulated_trade'],
-  openPnlMap: OpenPnlMap | undefined
+  openPnlMap: OpenPnlMap | undefined,
+  entryPrice?: number
 ): React.ReactNode {
   if (!trade) return null;
 
@@ -1112,7 +1272,18 @@ function renderHuf(
   // CLOSED
   const huf = trade.pnl_amount_huf;
   if (huf === null || huf === undefined) {
-    return <span style={{ color: '#475569', fontSize: '11px' }}>—</span>;
+    // Archive trade: pozíció-korrigált HUF becslés (tényleges részvényszám × 380 USD/HUF)
+    const netPct = trade.pnl_net_percent;
+    if (netPct === null || netPct === undefined) {
+      return <span style={{ color: '#475569', fontSize: '11px' }}>—</span>;
+    }
+    const approxHuf = entryPrice ? calcArchiveHuf(netPct, entryPrice) : netPct / 100 * _TARGET_POS_HUF;
+    const color = approxHuf >= 0 ? '#34d399' : '#f87171';
+    return (
+      <span style={{ color, fontSize: '12px' }} title={`Becsült HUF (~380 USD/HUF): ${netPct >= 0 ? '+' : ''}${netPct.toFixed(3)}% nettó`}>
+        {fmt(approxHuf)} Ft~
+      </span>
+    );
   }
   const color = huf >= 0 ? '#34d399' : '#f87171';
   return <span style={{ color, fontSize: '12px' }}>{fmt(huf)} Ft</span>;

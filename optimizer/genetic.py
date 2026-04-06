@@ -78,6 +78,8 @@ from optimizer.parameter_space import (
     BASELINE_VECTOR,
     decode_vector,
     vector_to_config_diff,
+    get_mode_bounds,
+    get_current_baseline_vector,
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -227,6 +229,9 @@ def run_optimizer(
     stop_flag_path: Optional[Path] = None,
     db_path: Path = DATABASE_PATH,
     n_workers: Optional[int] = None,
+    trade_mode: str = "all",
+    include_archive: bool = False,
+    phase: str = "all",
 ) -> dict:
     """
     Run the genetic optimizer and return results.
@@ -247,6 +252,19 @@ def run_optimizer(
         Number of parallel worker processes for fitness evaluation.
         Defaults to os.cpu_count() - 1 (all cores minus one).
         Set to 1 to disable parallelism (useful for debugging).
+    trade_mode : str
+        "all"   → minden BUY+SELL jelzés optimalizálása
+        "long"  → csak BUY jelzések (LONG trade paraméterek finomhangolása)
+        "short" → csak SELL jelzések (SHORT trade paraméterek finomhangolása)
+    include_archive : bool
+        Ha True, az archive_signals CLOSED trade-jeit is bevonja a tanítóadatba
+        (alapértelmezetten max 4000 legutóbbi jel).
+    phase : str
+        Kétfázisú optimalizáció vezérlése:
+        "all"             → teljes tér (nincs phase-alapú befagyasztás)
+        "score_only"      → signal küszöbök (HOLD_ZONE, BUY_SCORE, CONFIDENCE)
+                            befagyasztva → csak score-kalkulációs paraméterek optimalizálódnak
+        "thresholds_only" → score-kalkuláció befagyasztva → csak küszöbök finomhangolódnak
 
     Returns
     -------
@@ -261,17 +279,34 @@ def run_optimizer(
 
     # --- Load data (v2: single pass, includes price candles for full sim) ---
     print(f"[GA] Loading signal data for run_id={run_id}...")
-    all_rows, score_timeline = load_all_sim_data(db_path)
+    print(f"[GA] trade_mode={trade_mode}  phase={phase}  include_archive={include_archive}")
+    all_rows, score_timeline = load_all_sim_data(
+        db_path,
+        include_archive=include_archive,
+        trade_mode=trade_mode,
+    )
     print(f"[GA] {len(all_rows)} signals loaded with price data")
 
-    train, val, test = split_rows(all_rows)
+    train, val, test = split_rows(all_rows, random_seed=run_id)
     print(f"[GA] Split: train={len(train)}, val={len(val)}, test={len(test)}")
 
     # Update run record with split info
     _update_run_splits(run_id, train, val, test, db_path)
 
+    # --- Mode- és phase-specifikus bounds ---
+    # trade_mode=long        → SHORT SL/TP dimenziók (46-51) befagyasztva
+    # trade_mode=short       → LONG  SL/TP dimenziók (40-45) befagyasztva
+    # phase=score_only       → signal küszöbök (dim 2-5) befagyasztva
+    # phase=thresholds_only  → minden dim befagyasztva a küszöbök kivételével
+    mode_lower, mode_upper = get_mode_bounds(trade_mode, phase)
+    frozen = [i for i in range(N_DIMS) if mode_lower[i] == mode_upper[i]]
+    if frozen:
+        from optimizer.parameter_space import PARAM_DEFS as _PD
+        frozen_names = [_PD[i].config_key for i in frozen]
+        print(f"[GA] Frozen dims ({len(frozen)}): {', '.join(frozen_names)}")
+
     # --- Toolbox ---
-    toolbox = _make_toolbox(LOWER_BOUNDS, UPPER_BOUNDS)
+    toolbox = _make_toolbox(mode_lower, mode_upper)
 
     # Single-process min-evaluate — same formula as _worker_evaluate (v2.3.1).
     # Used for the baseline seed individual (pop[0]) to stay consistent.
@@ -291,8 +326,9 @@ def run_optimizer(
 
     pop = toolbox.population(n=population_size)
 
-    # Seed population with baseline vector (individual 0)
-    pop[0][:] = list(BASELINE_VECTOR)
+    # Seed population with current config vector (individual 0)
+    # Mindig az aktuális config.json-t használjuk, nem a hardcoded BASELINE_VECTOR-t
+    pop[0][:] = get_current_baseline_vector()
 
     print(f"[GA] Starting parallel fitness evaluation with {n_workers} worker(s)...")
 
@@ -414,11 +450,32 @@ def run_optimizer(
     # --- Compute test fitness for top-3 individuals ---
     print(f"\n[GA] Evaluating top-3 candidates on test set...")
     proposals = []
-    cfg_baseline = decode_vector(BASELINE_VECTOR)
+    # Baseline: mindig az aktuális config.json értékei alapján számolódik
+    cfg_baseline = decode_vector(get_current_baseline_vector())
     baseline_fit, baseline_stats = compute_fitness_for_subset(test, score_timeline, cfg_baseline)
     baseline_train_fit, _ = compute_fitness_for_subset(train, score_timeline, cfg_baseline)
 
-    for rank, ind in enumerate(hof, start=1):
+    # Deduplicate HoF: csak akkor veszünk fel új jelöltet, ha vektora kellően
+    # különbözik az eddig felvettektől. Ha a GA nagyon konvergált, a HoF
+    # top-3 tagja szinte azonos lehet → ugyanaz a proposal háromszor.
+    # Küszöb: az L∞ norma (max abszolút eltérés bármely dimenzióban) > 0.01.
+    # (1e-6 túl szigorú volt: numerikusan eltérő de funkcionálisan azonos vektorokat
+    #  külön javaslatként kezelt → háromszor ugyanaz a konfig.)
+    def _is_duplicate(candidate, accepted_list, tol=0.01):
+        for prev in accepted_list:
+            if max(abs(a - b) for a, b in zip(candidate, prev)) <= tol:
+                return True
+        return False
+
+    unique_hof = []
+    for ind in hof:
+        if not _is_duplicate(list(ind), unique_hof):
+            unique_hof.append(list(ind))
+
+    print(f"[GA] HoF size: {len(list(hof))}  unique after dedup: {len(unique_hof)}")
+
+    for rank, ind_vec in enumerate(unique_hof, start=1):
+        ind = ind_vec  # list of floats
         cfg = decode_vector(ind)
         train_fit, train_stats = compute_fitness_for_subset(train, score_timeline, cfg)
         val_fit,   val_stats   = compute_fitness_for_subset(val,   score_timeline, cfg)
@@ -453,7 +510,7 @@ def run_optimizer(
             "baseline_profit_factor": baseline_stats["profit_factor"],
             "train_val_gap":          round(train_val_gap, 2),
             "overfitting_ok":         1 if overfitting_ok else 0,
-            "config_diff":            vector_to_config_diff(ind),
+            "config_diff":            vector_to_config_diff(ind, trade_mode=trade_mode),
         })
 
     elapsed = time.time() - t_start

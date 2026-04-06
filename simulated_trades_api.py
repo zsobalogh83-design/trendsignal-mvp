@@ -13,15 +13,38 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from src.database import get_db
-from src.models import SimulatedTrade
+from src.models import SimulatedTrade, Signal
 from src.backtest_service import BacktestService
 from src.price_service import PriceService
 from src.archive_backtest_service import ArchiveBacktestService
+from src.live_to_archive_migrator import (
+    migrate_closed_trade_to_archive,
+    migrate_signal_without_trade,
+)
 import sqlite3
 import os
 import logging
+import threading
+import time
 
 logger = logging.getLogger(__name__)
+
+# ── Háttérfeladat állapot ────────────────────────────────────────────────────
+# Egyetlen globális state — egyszerre csak egy recalc futhat
+_task_lock = threading.Lock()
+_task: dict = {
+    "running": False,
+    "phase": None,          # "recalc" | "backtest" | "done" | "error"
+    "current_ticker": None,
+    "ticker_index": 0,
+    "ticker_total": 0,
+    "recalc_stats": None,
+    "backtest_stats": None,
+    "error": None,
+    "started_at": None,
+    "finished_at": None,
+    "elapsed_seconds": None,
+}
 
 router = APIRouter(prefix="/api/v1/simulated-trades", tags=["Simulated Trades"])
 
@@ -125,6 +148,23 @@ def run_backtest(
                 hour=23, minute=59, second=59
             )
 
+        # ── Orphan signal lista BACKTEST ELŐTT összeállítva ─────────────────
+        # Fontos: csak a már eleve nem-live státuszú signalokat migráljuk.
+        # Ha a lista a backtest UTÁN kerülne összeállításra, a backtest által
+        # frissen no_data / parallel_skip / no_sl_tp státuszra állított
+        # aktív BUY/SELL signalok is belekerülnének és azonnal archive-ba
+        # kerülnének (elveszítenék a következő szimulációs újrapróbálkozás
+        # lehetőségét).
+        _MIGRATABLE = ['expired', 'archived',
+                       'skip_hours', 'parallel_skip', 'no_sl_tp',
+                       'no_data', 'invalid_levels']
+        orphan_ids = [
+            s.id for s in db.query(Signal).filter(
+                (Signal.status.in_(_MIGRATABLE)) |
+                ((Signal.status == 'active') & (Signal.decision == 'HOLD'))
+            ).all()
+        ]
+
         # Run backtest
         service = BacktestService(db)
         result = service.run_backtest(
@@ -132,13 +172,45 @@ def run_backtest(
             date_to=date_to,
             symbols=request.symbols,
         )
-        
+
+        # Lezárt trade-ek migrálása archive táblákba
+        closed_ids = [
+            t.id for t in db.query(SimulatedTrade)
+            .filter(SimulatedTrade.status == 'CLOSED').all()
+        ]
+        migrated = migration_errors = 0
+        for tid in closed_ids:
+            try:
+                if migrate_closed_trade_to_archive(tid):
+                    migrated += 1
+            except Exception as mig_err:
+                migration_errors += 1
+                logger.debug(f"[Migration] Trade {tid} error: {mig_err}")
+        if migrated > 0 or migration_errors > 0:
+            logger.info(
+                f"[Migration] {migrated}/{len(closed_ids)} trade áthelyezve archive-ba"
+                + (f" ({migration_errors} hiba)" if migration_errors else "")
+            )
+        migrated_signals = signal_errors = 0
+        for sid in orphan_ids:
+            try:
+                if migrate_signal_without_trade(sid):
+                    migrated_signals += 1
+            except Exception as sig_err:
+                signal_errors += 1
+                logger.debug(f"[Migration] Signal {sid} error: {sig_err}")
+        if migrated_signals > 0 or signal_errors > 0:
+            logger.info(
+                f"[Migration] {migrated_signals}/{len(orphan_ids)} signal (trade nélkül) → archive"
+                + (f" ({signal_errors} hiba)" if signal_errors else "")
+            )
+
         return {
             "status": "completed",
             "execution_time_seconds": result['execution_time_seconds'],
             "stats": result['stats']
         }
-    
+
     except Exception as e:
         logger.error(f"Backtest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -344,40 +416,6 @@ def get_open_pnl(
     return result
 
 
-@router.get("/{trade_id}", response_model=TradeResponse)
-def get_trade(
-    trade_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    Get detailed information for a single trade.
-    """
-    trade = db.query(SimulatedTrade).filter(SimulatedTrade.id == trade_id).first()
-
-    if not trade:
-        raise HTTPException(status_code=404, detail="Trade not found")
-
-    return {
-        "id": trade.id,
-        "symbol": trade.symbol,
-        "direction": trade.direction,
-        "status": trade.status,
-        "entry_price": trade.entry_price,
-        "entry_execution_time": trade.entry_execution_time.isoformat(),
-        "entry_score": trade.entry_score,
-        "entry_confidence": trade.entry_confidence,
-        "stop_loss_price": trade.stop_loss_price,
-        "take_profit_price": trade.take_profit_price,
-        "exit_price": trade.exit_price,
-        "exit_execution_time": trade.exit_execution_time.isoformat() if trade.exit_execution_time else None,
-        "exit_reason": trade.exit_reason,
-        "pnl_percent": trade.pnl_percent,
-        "pnl_amount_huf": trade.pnl_amount_huf,
-        "duration_minutes": trade.duration_minutes,
-        "created_at": trade.created_at.isoformat()
-    }
-
-
 # ==========================================
 # ARCHIVE BACKTEST ENDPOINTS
 # ==========================================
@@ -408,6 +446,118 @@ def run_archive_backtest(request: ArchiveBacktestRequest):
     except Exception as e:
         logger.error(f"Archive backtest error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/recalculate-and-resimulate")
+def recalculate_and_resimulate(request: ArchiveBacktestRequest):
+    """
+    Kétlépéses pipeline (háttérszálon fut, azonnal visszatér):
+    1. archive_signals score-ok újraszámolása az aktuális config alapján
+    2. archive_simulated_trades újragenerálása a frissített score-okból
+
+    Progress követéshez: GET /recalculate-status
+    """
+    global _task
+    with _task_lock:
+        if _task["running"]:
+            raise HTTPException(
+                status_code=409,
+                detail="Már fut egy recalculate folyamat. Várj amíg befejezi, vagy kövesd: GET /recalculate-status"
+            )
+        _task = {
+            "running": True,
+            "phase": "recalc",
+            "current_ticker": None,
+            "ticker_index": 0,
+            "ticker_total": 0,
+            "recalc_stats": None,
+            "backtest_stats": None,
+            "error": None,
+            "started_at": datetime.utcnow().isoformat(),
+            "finished_at": None,
+            "elapsed_seconds": None,
+        }
+
+    def _run():
+        global _task
+        t0 = time.time()
+        try:
+            from src.signal_recalculator import SignalRecalculator
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trendsignal.db")
+
+            # ── Step 1: recalculate component scores ────────────────────────
+            def recalc_progress(ticker, idx, total):
+                with _task_lock:
+                    _task["phase"] = "recalc"
+                    _task["current_ticker"] = ticker
+                    _task["ticker_index"] = idx
+                    _task["ticker_total"] = total
+
+            recalc = SignalRecalculator(db_path)
+            recalc_stats = recalc.run(
+                symbols=request.symbols,
+                progress_callback=recalc_progress,
+            )
+            with _task_lock:
+                _task["recalc_stats"] = recalc_stats
+                _task["phase"] = "backtest"
+                _task["current_ticker"] = None
+                _task["ticker_index"] = 0
+                _task["ticker_total"] = 0
+
+            # ── Step 2: re-simulate trades ───────────────────────────────────
+            def backtest_progress(ticker, idx, total):
+                with _task_lock:
+                    _task["phase"] = "backtest"
+                    _task["current_ticker"] = ticker
+                    _task["ticker_index"] = idx
+                    _task["ticker_total"] = total
+
+            backtest = ArchiveBacktestService(db_path)
+            backtest_stats = backtest.run(
+                symbols=request.symbols,
+                score_threshold=request.score_threshold,
+                progress_callback=backtest_progress,
+            )
+
+            elapsed = round(time.time() - t0, 2)
+            with _task_lock:
+                _task["running"] = False
+                _task["phase"] = "done"
+                _task["backtest_stats"] = backtest_stats
+                _task["finished_at"] = datetime.utcnow().isoformat()
+                _task["elapsed_seconds"] = elapsed
+                _task["current_ticker"] = None
+
+        except Exception as e:
+            logger.error(f"Recalculate+resimulate error: {e}", exc_info=True)
+            with _task_lock:
+                _task["running"] = False
+                _task["phase"] = "error"
+                _task["error"] = str(e)
+                _task["finished_at"] = datetime.utcnow().isoformat()
+                _task["elapsed_seconds"] = round(time.time() - t0, 2)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return {"status": "started", "message": "Recalculate+resimulate elindult. Kövesd: GET /recalculate-status"}
+
+
+@router.get("/recalculate-status")
+def get_recalculate_status():
+    """
+    Visszaadja az aktuálisan futó (vagy utoljára befejezett) recalculate folyamat állapotát.
+
+    phase értékek:
+    - "recalc"   → archive_signals score-ok újraszámolása
+    - "backtest" → archive_simulated_trades újragenerálása
+    - "done"     → sikeresen befejezett
+    - "error"    → hiba (error mező tartalmazza)
+    - null       → még nem indult el semmi
+    """
+    with _task_lock:
+        return dict(_task)
 
 
 @router.get("/archive/stats")
@@ -530,4 +680,41 @@ def clear_all_trades(
         "status": "success",
         "deleted_trades": count,
         "message": f"Deleted {count} simulated trades"
+    }
+
+
+# ── FONTOS: /{trade_id} catch-all route — mindig az összes specifikus route UTÁN kell! ──
+# FastAPI sorban egyezteti a route-okat; ha ez előbb lenne, a /recalculate-status és
+# /archive/* URL-eket is megpróbálná trade_id (int) paraméterként értelmezni → 422.
+@router.get("/{trade_id}", response_model=TradeResponse)
+def get_trade(
+    trade_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed information for a single trade.
+    """
+    trade = db.query(SimulatedTrade).filter(SimulatedTrade.id == trade_id).first()
+
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    return {
+        "id": trade.id,
+        "symbol": trade.symbol,
+        "direction": trade.direction,
+        "status": trade.status,
+        "entry_price": trade.entry_price,
+        "entry_execution_time": trade.entry_execution_time.isoformat(),
+        "entry_score": trade.entry_score,
+        "entry_confidence": trade.entry_confidence,
+        "stop_loss_price": trade.stop_loss_price,
+        "take_profit_price": trade.take_profit_price,
+        "exit_price": trade.exit_price,
+        "exit_execution_time": trade.exit_execution_time.isoformat() if trade.exit_execution_time else None,
+        "exit_reason": trade.exit_reason,
+        "pnl_percent": trade.pnl_percent,
+        "pnl_amount_huf": trade.pnl_amount_huf,
+        "duration_minutes": trade.duration_minutes,
+        "created_at": trade.created_at.isoformat()
     }

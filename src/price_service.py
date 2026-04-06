@@ -6,7 +6,7 @@ ASSUMPTIONS:
 - Signal.created_at = UTC (timezone-naive)
 - PriceData.timestamp = UTC (timezone-naive)
 - NO timezone conversion needed
-- Trading hours check: 9:30-16:00 ET (14:30-21:00 UTC), 9:00-17:00 CET (8:00-16:00 UTC)
+- Trading hours check: 9:30-16:00 ET (DST-aware via pytz), 8:00-16:00 UTC (BÉT)
 
 Version: 3.0 - Simplified
 Date: 2026-02-17
@@ -24,6 +24,13 @@ from src.models import PriceData
 
 logger = logging.getLogger(__name__)
 
+_ET_TZ = pytz.timezone('America/New_York')
+
+# Module-level cache: set of (symbol, date) pairs where yfinance returned no data
+# (e.g. market holidays like Good Friday).  Prevents hammering yfinance with
+# dozens of repeated calls that all fail for the same calendar day.
+_no_data_date_cache: set = set()
+
 
 class PriceService:
     """Simple price service - UTC only, no timezone games"""
@@ -34,26 +41,22 @@ class PriceService:
     
     def _is_trading_hours(self, utc_time: datetime, symbol: str) -> bool:
         """
-        Check if UTC time is during market trading hours.
-        
-        Args:
-            utc_time: UTC timestamp
-            symbol: Ticker symbol
-        
-        Returns:
-            True if during trading hours
+        DST-aware kereskedési idő ellenőrzés.
+
+        US piacok: 9:30–16:00 ET (pytz konverzió).
+          - EST (téli): 14:30–21:00 UTC
+          - EDT (nyári, ~márc.–nov.): 13:30–20:00 UTC
+        BÉT: 8:00–16:00 UTC (CET/CEST = azonos UTC-offszet .BD tickereknél).
+
+        utc_time: naive UTC datetime.
         """
-        # Get hour in UTC
-        hour = utc_time.hour
-        minute = utc_time.minute
-        time_decimal = hour + minute / 60.0
-        
         if symbol.endswith('.BD'):
-            # BÉT: 9:00-17:00 CET = 8:00-16:00 UTC
-            return 8.0 <= time_decimal < 16.0
-        else:
-            # US: 9:30-16:00 ET = 14:30-21:00 UTC
-            return 14.5 <= time_decimal < 21.0
+            td = utc_time.hour + utc_time.minute / 60.0
+            return 8.0 <= td < 16.0
+        # US: DST-aware konverzió
+        et_time = pytz.utc.localize(utc_time).astimezone(_ET_TZ)
+        td = et_time.hour + et_time.minute / 60.0
+        return 9.5 <= td < 16.0  # 9:30–16:00 ET
     
     def _is_weekend(self, utc_time: datetime) -> bool:
         """Check if weekend (Saturday=5, Sunday=6)"""
@@ -231,8 +234,16 @@ class PriceService:
             raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
         
         # If here: trading hours, query yfinance
+        # -- Holiday guard: skip if this (symbol, date) already returned no data --
+        exec_date = execution_time_utc.date()
+        if (symbol, exec_date) in _no_data_date_cache:
+            logger.debug(
+                f"   {symbol}: {exec_date} is in no-data cache (holiday/closure), skip yfinance"
+            )
+            raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
+
         logger.info(f"   ⚠️  DB miss for {symbol}, querying yfinance...")
-        
+
         try:
             # Localize to UTC so yfinance.history() gets correct Unix timestamps.
             # Naive datetimes are interpreted as local time by Python's .timestamp(),
@@ -243,8 +254,11 @@ class PriceService:
 
             ticker = yf.Ticker(symbol)
             df = ticker.history(start=start_time, end=end_time, interval="5m")
-            
+
             if df.empty:
+                # Cache this date so subsequent candles on the same day skip yfinance
+                _no_data_date_cache.add((symbol, exec_date))
+                logger.debug(f"   {symbol}: {exec_date} added to no-data cache (empty response)")
                 raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
 
             # Convert timezone-aware index to timezone-naive UTC
@@ -284,6 +298,10 @@ class PriceService:
         except InsufficientDataError:
             raise
         except Exception as e:
+            # yfinance "possibly delisted" / network errors → cache the date so
+            # the same holiday/closure day isn't retried for every single candle.
+            _no_data_date_cache.add((symbol, exec_date))
+            logger.debug(f"   {symbol}: {exec_date} added to no-data cache (yfinance error)")
             logger.error(f"   yfinance error: {e}")
             raise InsufficientDataError(symbol, execution_time_utc.isoformat(), "5m")
     

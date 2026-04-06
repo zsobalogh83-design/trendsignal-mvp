@@ -174,6 +174,7 @@ export interface Signal {
     status: 'OPEN' | 'CLOSED';
     direction: 'LONG' | 'SHORT';
     pnl_percent: number | null;
+    pnl_net_percent?: number | null;
     pnl_amount_huf: number | null;
     exit_reason: string | null;
     entry_price: number;
@@ -354,6 +355,8 @@ export interface SignalHistoryPnlSummary {
   open_trade_ids: number[];
   total_pnl_huf: number | null;
   total_pnl_percent: number | null;
+  total_net_pnl_percent?: number | null;
+  win_rate?: number | null;
 }
 
 export interface SignalHistoryResponse {
@@ -499,6 +502,9 @@ export interface StartRunRequest {
   max_generations?: number;
   crossover_prob?: number;
   mutation_prob?: number;
+  trade_mode?: 'all' | 'long' | 'short';
+  include_archive?: boolean;
+  phase?: 'all' | 'score_only' | 'thresholds_only';
 }
 
 export interface StartRunResponse {

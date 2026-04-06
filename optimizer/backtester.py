@@ -331,8 +331,50 @@ def replay_and_simulate(
         # Stage 1: Score replay
         replay = replay_signal(row, cfg)
 
-        # Stage 2: Filter
+        # Stage 2a: Filter — HOLD or below threshold
         if replay.new_decision == "HOLD" or abs(replay.new_combined_score) < sim_cfg.signal_threshold:
+            results.append(TradeSimResult(
+                signal_id=row.signal_id,
+                ticker=row.ticker,
+                calculated_at=row.calculated_at,
+                original_decision=row.original_decision,
+                new_decision=replay.new_decision,
+                new_combined_score=replay.new_combined_score,
+                trade_active=False,
+            ))
+            continue
+
+        # Stage 2b: Entry gate filters (configurable thresholds from cfg)
+        _blocked = False
+        _direction = replay.new_decision  # "BUY" or "SELL"
+        _rsi   = row.rsi
+        _mhst  = row.macd_histogram
+        _sma200 = row.sma_200
+        _price  = row.current_price
+        _resist = row.nearest_resistance
+
+        _rsi_buy_max   = cfg.get("ENTRY_GATE_RSI_BUY_MAX",             55.0)
+        _rsi_sell_min  = cfg.get("ENTRY_GATE_RSI_SELL_MIN",            45.0)
+        _macd_buy_min  = cfg.get("ENTRY_GATE_MACD_HIST_BUY_MIN",       0.0)
+        _macd_sell_max = cfg.get("ENTRY_GATE_MACD_HIST_SELL_MAX",      0.0)
+        _sma200_buy    = cfg.get("ENTRY_GATE_SMA200_BUY_MAX_PCT",       5.0)
+        _sma200_sell   = cfg.get("ENTRY_GATE_SMA200_SELL_MIN_PCT",     -5.0)
+        _dist_r_buy    = cfg.get("ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT", 15.0)
+
+        if _direction == "BUY":
+            if _rsi  is not None and _rsi  >= _rsi_buy_max:   _blocked = True
+            if _mhst is not None and _mhst <= _macd_buy_min:  _blocked = True
+            if not _blocked and _sma200 and _sma200 > 0 and _price and _price > 0:
+                if (_price - _sma200) / _sma200 * 100 > _sma200_buy:  _blocked = True
+            if not _blocked and _resist and _price and _price > 0:
+                if (_resist - _price) / _price * 100 > _dist_r_buy:   _blocked = True
+        else:  # SELL
+            if _rsi  is not None and _rsi  <= _rsi_sell_min:  _blocked = True
+            if _mhst is not None and _mhst >= _macd_sell_max: _blocked = True
+            if not _blocked and _sma200 and _sma200 > 0 and _price and _price > 0:
+                if (_price - _sma200) / _sma200 * 100 < _sma200_sell: _blocked = True
+
+        if _blocked:
             results.append(TradeSimResult(
                 signal_id=row.signal_id,
                 ticker=row.ticker,

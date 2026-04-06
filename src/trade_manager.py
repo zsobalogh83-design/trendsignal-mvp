@@ -17,8 +17,9 @@ from sqlalchemy.orm import Session
 import logging
 import math
 
-from src.models import SimulatedTrade, Signal
+from src.models import SimulatedTrade, Signal, SignalCalculation
 from src.price_service import PriceService
+from config import get_config
 from src.exceptions import (
     PositionAlreadyExistsError,
     InsufficientDataError,
@@ -47,6 +48,7 @@ class TradeManager:
         """Initialize trade manager"""
         self.db = db
         self.price_service = PriceService()
+        self.config = get_config()
     
     def open_position(self, signal: Signal) -> Optional[SimulatedTrade]:
         """
@@ -224,6 +226,61 @@ class TradeManager:
                         signal.id,
                         f"Entry filter [NoGO]: price dropped -{signal.entry_price - entry_price:.2f} "
                         f"vs ATR proxy {atr_proxy:.2f} — selling at bottom, skip"
+                    )
+
+        # 5c–5e. ENTRY FILTERS: RSI / MACD / SMA200 — thresholds from config
+        cfg = self.config
+        signal_calc = self.db.query(SignalCalculation).filter(
+            SignalCalculation.signal_id == signal.id
+        ).first()
+        if signal_calc is not None:
+            rsi  = signal_calc.rsi
+            mhst = signal_calc.macd_histogram
+            sma200 = signal_calc.sma_200
+            price  = signal_calc.current_price
+
+            # 5c. RSI gate
+            if direction == "LONG" and rsi is not None and rsi >= cfg.entry_gate_rsi_buy_max:
+                signal.status = 'rsi_filtered'
+                raise InvalidSignalError(
+                    signal.id,
+                    f"Entry filter [RSI]: RSI={rsi:.1f} >= {cfg.entry_gate_rsi_buy_max} for BUY — overbought, skip"
+                )
+            if direction == "SHORT" and rsi is not None and rsi <= cfg.entry_gate_rsi_sell_min:
+                signal.status = 'rsi_filtered'
+                raise InvalidSignalError(
+                    signal.id,
+                    f"Entry filter [RSI]: RSI={rsi:.1f} <= {cfg.entry_gate_rsi_sell_min} for SELL — oversold, skip"
+                )
+
+            # 5d. MACD histogram gate
+            if direction == "LONG" and mhst is not None and mhst <= cfg.entry_gate_macd_hist_buy_min:
+                signal.status = 'macd_filtered'
+                raise InvalidSignalError(
+                    signal.id,
+                    f"Entry filter [MACD]: hist={mhst:.4f} <= {cfg.entry_gate_macd_hist_buy_min} for BUY — bearish momentum, skip"
+                )
+            if direction == "SHORT" and mhst is not None and mhst >= cfg.entry_gate_macd_hist_sell_max:
+                signal.status = 'macd_filtered'
+                raise InvalidSignalError(
+                    signal.id,
+                    f"Entry filter [MACD]: hist={mhst:.4f} >= {cfg.entry_gate_macd_hist_sell_max} for SELL — bullish momentum, skip"
+                )
+
+            # 5e. SMA200 gate (price vs SMA200 %)
+            if sma200 and sma200 > 0 and price and price > 0:
+                pct_vs_sma200 = (price - sma200) / sma200 * 100
+                if direction == "LONG" and pct_vs_sma200 > cfg.entry_gate_sma200_buy_max_pct:
+                    signal.status = 'sma200_filtered'
+                    raise InvalidSignalError(
+                        signal.id,
+                        f"Entry filter [SMA200]: price {pct_vs_sma200:+.1f}% vs SMA200 > {cfg.entry_gate_sma200_buy_max_pct}% for BUY — too extended, skip"
+                    )
+                if direction == "SHORT" and pct_vs_sma200 < cfg.entry_gate_sma200_sell_min_pct:
+                    signal.status = 'sma200_filtered'
+                    raise InvalidSignalError(
+                        signal.id,
+                        f"Entry filter [SMA200]: price {pct_vs_sma200:+.1f}% vs SMA200 < {cfg.entry_gate_sma200_sell_min_pct}% for SELL — too oversold, skip"
                     )
 
         # 6. CALCULATE POSITION SIZE

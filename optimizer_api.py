@@ -49,6 +49,9 @@ class RunRequest(BaseModel):
     max_generations: int = 100
     crossover_prob:  float = 0.70
     mutation_prob:   float = 0.20
+    trade_mode:      str   = "all"     # "all" | "long" | "short"
+    include_archive: bool  = False     # archive_signals CLOSED trade-ek bevonása
+    phase:           str   = "all"     # "all" | "score_only" | "thresholds_only"
 
 
 class RunResponse(BaseModel):
@@ -167,7 +170,11 @@ async def start_optimizer(req: RunRequest):
         "--crossover",   str(req.crossover_prob),
         "--mutation",    str(req.mutation_prob),
         "--stop-flag",   str(STOP_FLAG),
+        "--trade-mode",  req.trade_mode,
+        "--phase",       req.phase,
     ]
+    if req.include_archive:
+        cmd.append("--include-archive")
 
     log_path = BASE_DIR / f"optimizer_run_{run_id}.log"
     global _active_proc
@@ -273,26 +280,87 @@ async def get_progress(run_id: int):
 # POST /runs/{run_id}/stop
 # ---------------------------------------------------------------------------
 
+def _kill_runner_processes() -> int:
+    """
+    Find and kill all running _runner.py subprocess instances.
+    Returns the number of processes killed.
+    Falls back gracefully if psutil is not available.
+    """
+    killed = 0
+    try:
+        import psutil
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                cmdline = proc.info.get("cmdline") or []
+                if any("_runner.py" in str(arg) for arg in cmdline):
+                    proc.kill()
+                    killed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+    except ImportError:
+        pass  # psutil not installed — fall through to _active_proc only
+    return killed
+
+
 @router.post("/runs/{run_id}/stop")
 async def stop_optimizer(run_id: int):
+    """
+    Stop a running optimization.
+
+    Robust against server restarts (deploy): even if _active_proc is None
+    (lost on restart), we still write the stop flag and search for the
+    _runner.py subprocess via OS process list.
+
+    Also handles stale RUNNING records: if the DB says RUNNING but no
+    process is found, the record is marked FAILED so a new run can start.
+    """
     run_id_active = _running_run_id()
     if run_id_active != run_id:
         raise HTTPException(
             status_code=400,
             detail=f"Run {run_id} is not currently running.",
         )
-    # 1. Stop flag írása — subprocess ellenőrzi generációk között
+
+    # 1. Stop flag — subprocess ellenőrzi generációk között
     STOP_FLAG.touch()
 
-    # 2. Azonnali SIGTERM a subprocess-re (nem vár a következő generációig)
+    killed = 0
+
+    # 2. _active_proc alapú terminálás (normál eset, nincs restart)
     global _active_proc
     if _active_proc is not None and _active_proc.poll() is None:
         try:
             _active_proc.terminate()
+            killed += 1
         except Exception:
-            pass  # folyamat már leállt
+            pass
 
-    return {"message": f"Stop signal sent to run {run_id}. Terminating process."}
+    # 3. OS-szintű keresés: deploy/restart után _active_proc=None,
+    #    de a subprocess még futhat → megkeressük és leállítjuk
+    if killed == 0:
+        killed += _kill_runner_processes()
+
+    # 4. Ha nincs élő process de DB-ben RUNNING van → stale record → FAILED
+    if killed == 0:
+        conn = _db()
+        conn.execute("""
+            UPDATE optimization_runs
+            SET status = 'FAILED', completed_at = CURRENT_TIMESTAMP,
+                error_message = 'Process not found — likely killed by server restart. Marked FAILED by stop request.'
+            WHERE id = ? AND status = 'RUNNING'
+        """, (run_id,))
+        conn.commit()
+        conn.close()
+        return {
+            "message": f"Run {run_id}: no live process found (server restart?). "
+                       f"Record marked FAILED — you can start a new run.",
+            "killed": 0,
+        }
+
+    return {
+        "message": f"Stop signal sent to run {run_id}. Terminated {killed} process(es).",
+        "killed": killed,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -306,11 +374,19 @@ async def list_proposals(run_id: Optional[int] = None, limit: int = 10):
         rows = conn.execute("""
             SELECT id, run_id, rank, verdict, review_status,
                    train_fitness, val_fitness, test_fitness, baseline_fitness,
-                   fitness_improvement_pct, test_trade_count, test_profit_factor,
+                   fitness_improvement_pct,
+                   test_trade_count, test_win_rate, test_profit_factor,
                    baseline_profit_factor, train_val_gap, overfitting_ok,
-                   bootstrap_p_value, bootstrap_significant,
-                   wf_result_json, wf_consistent,
-                   regime_trending_pf, regime_sideways_pf, regime_highvol_pf,
+                   bootstrap_p_value, bootstrap_significant, bootstrap_iterations,
+                   wf_window_count, wf_positive_count, wf_result_json, wf_consistent,
+                   regime_trending_pf, regime_trending_trades,
+                   regime_sideways_pf, regime_sideways_trades,
+                   regime_highvol_pf,  regime_highvol_trades,
+                   gate_min_trades_ok, gate_fitness_improvement_ok,
+                   gate_bootstrap_ok, gate_overfitting_ok,
+                   gate_profit_factor_ok, gate_sideways_pf_ok,
+                   verdict_reason,
+                   config_diff_json,
                    created_at, reviewed_at
             FROM config_proposals
             WHERE run_id=?
@@ -321,18 +397,37 @@ async def list_proposals(run_id: Optional[int] = None, limit: int = 10):
         rows = conn.execute("""
             SELECT id, run_id, rank, verdict, review_status,
                    train_fitness, val_fitness, test_fitness, baseline_fitness,
-                   fitness_improvement_pct, test_trade_count, test_profit_factor,
+                   fitness_improvement_pct,
+                   test_trade_count, test_win_rate, test_profit_factor,
                    baseline_profit_factor, train_val_gap, overfitting_ok,
-                   bootstrap_p_value, bootstrap_significant,
-                   wf_result_json, wf_consistent,
-                   regime_trending_pf, regime_sideways_pf, regime_highvol_pf,
+                   bootstrap_p_value, bootstrap_significant, bootstrap_iterations,
+                   wf_window_count, wf_positive_count, wf_result_json, wf_consistent,
+                   regime_trending_pf, regime_trending_trades,
+                   regime_sideways_pf, regime_sideways_trades,
+                   regime_highvol_pf,  regime_highvol_trades,
+                   gate_min_trades_ok, gate_fitness_improvement_ok,
+                   gate_bootstrap_ok, gate_overfitting_ok,
+                   gate_profit_factor_ok, gate_sideways_pf_ok,
+                   verdict_reason,
+                   config_diff_json,
                    created_at, reviewed_at
             FROM config_proposals
             ORDER BY id DESC
             LIMIT ?
         """, (limit,)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        # Parse JSON fields
+        for key in ("config_diff_json", "wf_result_json"):
+            if d.get(key) and isinstance(d[key], str):
+                try:
+                    d[key] = json.loads(d[key])
+                except Exception:
+                    pass
+        result.append(d)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +522,11 @@ async def approve_proposal(proposal_id: int):
     with open(config_path, "w") as f:
         json.dump(current_cfg, f, indent=2)
 
+    # In-memory singleton frissítése — nélküle az API a régi értékeket adná vissza
+    # egészen az alkalmazás következő újraindításáig.
+    from src.config import reload_config
+    reload_config()
+
     # Mark proposal as approved
     conn.execute(
         "UPDATE config_proposals SET review_status='APPROVED', reviewed_at=CURRENT_TIMESTAMP WHERE id=?",
@@ -486,13 +586,22 @@ async def optimizer_status():
         ORDER BY id DESC LIMIT 1
     """).fetchone()
 
-    # Counts
-    signal_count = conn.execute(
+    # Counts — signal_calculations (live) + archive_signals (historikus)
+    live_signal_count = conn.execute(
         "SELECT COUNT(*) FROM signal_calculations"
     ).fetchone()[0]
-    trade_count = conn.execute(
+    archive_signal_count = conn.execute(
+        "SELECT COUNT(*) FROM archive_signals"
+    ).fetchone()[0]
+    signal_count = live_signal_count + archive_signal_count
+    # Live CLOSED trade-ek + archive CLOSED trade-ek összesen
+    live_trade_count = conn.execute(
         "SELECT COUNT(*) FROM simulated_trades WHERE status='CLOSED'"
     ).fetchone()[0]
+    archive_trade_count = conn.execute(
+        "SELECT COUNT(*) FROM archive_simulated_trades WHERE status='CLOSED'"
+    ).fetchone()[0]
+    trade_count = live_trade_count + archive_trade_count
 
     conn.close()
 

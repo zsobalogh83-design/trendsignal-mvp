@@ -3,33 +3,35 @@ TrendSignal Self-Tuning Engine - Trade Simulator
 
 Performs full in-memory trade simulation for a given config variant:
   1. compute_sl_tp()   : Reproduces signal_generator.py SL/TP logic exactly
-  2. simulate_trade()  : Candle-by-candle price walk (mirrors backtest_service.py)
+  2. simulate_trade()  : Delegál a src.trade_simulator_core.simulate_exit()-hez
+                         → ugyanaz a szimulációs logika mint az archive_backtest_service-ben
 
 Key design:
   - Zero DB access during simulation (all data pre-loaded by signal_data.py)
-  - Handles all 9 direction-change scenarios (HOLD→BUY, BUY→SELL, etc.)
-  - Opposing signal detection uses pre-loaded score_timeline
-  - EOD trailing SL for LONG trades (mirrors backtest_service._apply_eod_trailing_sl)
+  - simulate_trade() a kanonikus core-t hívja → soha nem divergál a live/archive logikától
+  - compute_sl_tp() és SimConfig megmaradnak (SL/TP számításhoz szükségesek)
 
-Version: 2.0
-Date: 2026-02-24
+Version: 3.0 – simulate_trade() → trade_simulator_core delegálás
+Date: 2026-03-29
 """
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
+
+from src.trade_simulator_core import (
+    simulate_exit as _core_simulate_exit,
+    ALERT_THRESHOLD as _ALERT_THRESHOLD,
+)
 
 from optimizer.signal_data import PriceCandle
 
 # ---------------------------------------------------------------------------
-# Constants (mirrors backtest_service.py)
+# Constants
 # ---------------------------------------------------------------------------
 
 # Minimum |combined_score| for a trade to be opened
 SIGNAL_THRESHOLD = 15.0
-
-# Minimum |combined_score| for opposing signal to close a trade
-OPPOSING_SIGNAL_THRESHOLD = 25.0
 
 # SL cannot be wider than this % of entry price
 SL_MAX_PCT = 0.05          # 5%
@@ -39,14 +41,6 @@ MIN_RISK_REWARD = 1.5
 
 # S/R discount for TP: pull TP slightly inside the S/R level for realistic fill
 TAKE_PROFIT_SR_DISCOUNT = 0.005  # 0.5%
-
-# US market trading hours (UTC)
-US_MARKET_OPEN_UTC  = time(14, 30)
-US_MARKET_CLOSE_UTC = time(21,  0)
-
-# BÉT (Budapest) market trading hours (UTC)
-BET_MARKET_OPEN_UTC  = time(8,  0)
-BET_MARKET_CLOSE_UTC = time(15, 30)
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +407,7 @@ def _enforce_sl_tp_bounds(
 
 
 # ---------------------------------------------------------------------------
-# Trade simulation  (mirrors backtest_service.py _check_and_close_trade)
+# Trade simulation — delegál a src.trade_simulator_core-hoz
 # ---------------------------------------------------------------------------
 
 def simulate_trade(
@@ -423,132 +417,57 @@ def simulate_trade(
     take_profit: float,
     entry_ts: datetime,                 # Signal timestamp (UTC naive)
     ticker: str,
-    future_candles: List[PriceCandle],  # All 5m candles after entry (pre-loaded)
+    future_candles: List[PriceCandle],  # All 15m candles after entry (pre-loaded)
     score_timeline: List[Tuple[datetime, float, Optional[float], Optional[float]]],
     # ^ [(ts, combined_score, sl, tp)] for this ticker, all time
     sim_cfg: Optional[SimConfig] = None,
 ) -> Tuple[str, float, float]:
     """
-    Walk candles to find trade exit. Mirrors backtest_service.py logic.
-
-    Priority per candle:
-      1. SL_HIT  (checked on candle low/high)
-      2. TP_HIT  (checked on candle high/low)
-      3. OPPOSING_SIGNAL (|score| >= 25, correct direction)
-      4. EOD_AUTO_LIQUIDATION  (SHORT only, at market close)
-      5. MAX_HOLD_LIQUIDATION  (LONG only, ha trading_days_held > long_max_hold_days)
-      6. EOD trailing SL update  (LONG only, tighten_factor a késői napokon)
+    Kanonikus exit szimuláció — delegál a src.trade_simulator_core.simulate_exit()-hez.
+    Azonos logikát futtat mint az archive_backtest_service és a live trade szimuláció.
 
     Returns
     -------
     (exit_reason, exit_price, pnl_percent)
-    exit_reason ∈ {SL_HIT, TP_HIT, OPPOSING_SIGNAL, EOD_LIQUIDATION, MAX_HOLD_LIQUIDATION, NO_EXIT}
     """
-    if sim_cfg is None:
-        sim_cfg = SimConfig()
-
     if not future_candles:
         return "NO_EXIT", entry_price, 0.0
 
-    current_sl = stop_loss
-    current_tp = take_profit
-    initial_sl = stop_loss
-    is_us = not ticker.endswith(".BD")
-
-    # Session start for opposing signal detection (previous trading day open)
-    session_start = _trading_session_start(entry_ts, is_us)
-
-    # Pre-filter score timeline to signals from session_start onward
-    # (opposing signal detection window)
-    relevant_scores = [
-        (ts, score, sl, tp)
-        for ts, score, sl, tp in score_timeline
-        if ts > session_start
-    ]
-
-    prev_date = None
-    trading_days_held = 1          # belépés napja = nap 1
-    last_counted_date = entry_ts.date()
-
-    for candle in future_candles:
-        ts = candle.timestamp
-
-        # Skip non-trading hours
-        if not _is_trading_hours(ts, is_us):
-            continue
-
-        candle_date = ts.date()
-
-        # --- EOD trailing SL + max hold (LONG only) — at market close ---
-        if direction == "LONG" and prev_date is not None and candle_date != prev_date:
-            # Napszámláló: minden új kereskedési nap +1
-            if candle_date != last_counted_date:
-                trading_days_held += 1
-                last_counted_date = candle_date
-
-            # Max hold kényszerzárás — az előző nap close-án zárunk
-            if trading_days_held > sim_cfg.long_max_hold_days:
-                exit_price = _get_day_close(future_candles, prev_date) or entry_price
-                pnl = _pnl(direction, entry_price, exit_price)
-                return "MAX_HOLD_LIQUIDATION", exit_price, pnl
-
-            # Start of a new day → apply trailing SL using previous day's close
-            # (We already passed the last candle of the previous day)
-            current_sl = _apply_trailing_sl(
-                current_sl, initial_sl, entry_price,
-                _get_day_close(future_candles, prev_date),
-                current_tp,
-                trading_days_held=trading_days_held,
-                tighten_day=sim_cfg.long_trailing_tighten_day,
-                tighten_factor=sim_cfg.long_trailing_tighten_factor,
-            )
-
-        prev_date = candle_date
-
-        # --- Priority 1: SL_HIT ---
-        if _is_sl_hit(direction, candle, current_sl):
-            exit_price = current_sl
-            pnl = _pnl(direction, entry_price, exit_price)
-            return "SL_HIT", exit_price, pnl
-
-        # --- Priority 2: TP_HIT ---
-        if _is_tp_hit(direction, candle, current_tp):
-            exit_price = current_tp
-            pnl = _pnl(direction, entry_price, exit_price)
-            return "TP_HIT", exit_price, pnl
-
-        # --- Priority 3: OPPOSING_SIGNAL ---
-        opposing = _find_opposing_signal(direction, session_start, ts, relevant_scores)
-        if opposing:
-            exit_price = candle.close
-            pnl = _pnl(direction, entry_price, exit_price)
-            return "OPPOSING_SIGNAL", exit_price, pnl
-
-        # --- Priority 4: EOD_AUTO_LIQUIDATION (SHORT only) ---
-        if direction == "SHORT" and _is_eod(ts, is_us):
-            exit_price = candle.close
-            pnl = _pnl(direction, entry_price, exit_price)
-            return "EOD_LIQUIDATION", exit_price, pnl
-
-    return "NO_EXIT", entry_price, 0.0
-
-
-# ---------------------------------------------------------------------------
-# Helpers: SL/TP hit detection
-# ---------------------------------------------------------------------------
-
-def _is_sl_hit(direction: str, candle: PriceCandle, stop_loss: float) -> bool:
+    # score_timeline → opp_list + same_dir_signals (ahogy az archive backtest csinálja)
     if direction == "LONG":
-        return candle.low <= stop_loss
+        opp_list = sorted([ts for ts, s, _, _ in score_timeline if s <= -_ALERT_THRESHOLD])
+        same_dir_signals = sorted(
+            [(ts, sl) for ts, s, sl, _ in score_timeline
+             if s >= _ALERT_THRESHOLD and sl is not None],
+            key=lambda x: x[0],
+        )
     else:
-        return candle.high >= stop_loss
+        opp_list = sorted([ts for ts, s, _, _ in score_timeline if s >= _ALERT_THRESHOLD])
+        same_dir_signals = sorted(
+            [(ts, sl) for ts, s, sl, _ in score_timeline
+             if s <= -_ALERT_THRESHOLD and sl is not None],
+            key=lambda x: x[0],
+        )
 
+    orig_sl_pct = abs(entry_price - stop_loss) / entry_price if entry_price > 0 else 0.0
 
-def _is_tp_hit(direction: str, candle: PriceCandle, take_profit: float) -> bool:
-    if direction == "LONG":
-        return candle.high >= take_profit
-    else:
-        return candle.low <= take_profit
+    result = _core_simulate_exit(
+        bars=future_candles,          # PriceCandle duck-typed: timestamp/open/high/low/close
+        direction=direction,
+        entry_price=entry_price,
+        sl=stop_loss,
+        tp=take_profit,
+        orig_sl_pct=orig_sl_pct,
+        signal_ts=entry_ts,
+        opp_list=opp_list,
+        same_dir_signals=same_dir_signals,
+        symbol=ticker,
+    )
+
+    exit_reason = result["exit_reason"]
+    exit_price  = result["exit_price"] if result["exit_price"] is not None else entry_price
+    pnl = _pnl(direction, entry_price, exit_price)
+    return exit_reason, exit_price, pnl
 
 
 def _pnl(direction: str, entry: float, exit_p: float) -> float:
@@ -562,114 +481,13 @@ def _pnl(direction: str, entry: float, exit_p: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Helpers: Opposing signal detection
+# (Eltávolított helpers: _is_sl_hit, _is_tp_hit, _find_opposing_signal,
+#  _apply_trailing_sl, _get_day_close, _is_trading_hours, _is_eod,
+#  _trading_session_start — ezek a trade_simulator_core-ban vannak.)
 # ---------------------------------------------------------------------------
-
-def _find_opposing_signal(
-    direction: str,
-    session_start: datetime,
-    check_time: datetime,
-    score_timeline: List[Tuple[datetime, float, Optional[float], Optional[float]]],
-) -> bool:
-    """
-    Return True if there is an opposing signal with |score| >= 25
-    between session_start and check_time.
-    Mirrors backtest_service._find_opposing_signal().
-    """
-    best_score = 0.0
-    for ts, score, _sl, _tp in score_timeline:
-        if ts <= session_start or ts > check_time:
-            continue
-        if abs(score) < OPPOSING_SIGNAL_THRESHOLD:
-            continue
-        if direction == "LONG" and score <= -OPPOSING_SIGNAL_THRESHOLD:
-            if abs(score) > abs(best_score):
-                best_score = score
-        elif direction == "SHORT" and score >= OPPOSING_SIGNAL_THRESHOLD:
-            if abs(score) > abs(best_score):
-                best_score = score
-    return best_score != 0.0
-
-
-# ---------------------------------------------------------------------------
-# Helpers: EOD trailing SL
-# ---------------------------------------------------------------------------
-
-def _apply_trailing_sl(
-    current_sl: float,
-    initial_sl: float,
-    entry_price: float,
-    day_close: Optional[float],
-    current_tp: float,
-    trading_days_held: int = 1,
-    tighten_day: int = 3,
-    tighten_factor: float = 0.6,
-) -> float:
-    """
-    Apply EOD trailing SL for LONG trades.
-    Mirrors backtest_service._apply_eod_trailing_sl().
-
-    trading_days_held >= tighten_day esetén a sl_distance_pct szűkül
-    (tighten_factor szorzóval), így az SL közelebb húzódik az árhoz —
-    agresszívabb profit lock-in a tartási idő végén.
-    """
-    if day_close is None or day_close <= entry_price:
-        return current_sl
-
-    if initial_sl >= entry_price:
-        return current_sl
-
-    sl_distance_pct = (entry_price - initial_sl) / entry_price
-
-    # Késői napokban szűkebb trailing SL — profit lock-in agresszívabb
-    if trading_days_held >= tighten_day:
-        sl_distance_pct *= tighten_factor
-
-    trailing_sl = day_close * (1.0 - sl_distance_pct)
-
-    if trailing_sl <= current_sl:
-        return current_sl
-
-    # Don't cross TP
-    trailing_sl = min(trailing_sl, current_tp * 0.999)
-    return trailing_sl
-
-
-def _get_day_close(candles: List[PriceCandle], date) -> Optional[float]:
-    """Get the closing price of the last candle on a given date."""
-    last = None
-    for c in candles:
-        if c.timestamp.date() == date:
-            last = c
-    return last.close if last else None
-
-
-# ---------------------------------------------------------------------------
-# Helpers: Trading hours and session
-# ---------------------------------------------------------------------------
-
-def _is_trading_hours(ts: datetime, is_us: bool) -> bool:
-    t = ts.time()
-    if is_us:
-        return US_MARKET_OPEN_UTC <= t < US_MARKET_CLOSE_UTC
-    else:
-        return BET_MARKET_OPEN_UTC <= t < BET_MARKET_CLOSE_UTC
-
-
-def _is_eod(ts: datetime, is_us: bool) -> bool:
-    """Is this candle at or after market close?"""
-    t = ts.time()
-    if is_us:
-        return t >= US_MARKET_CLOSE_UTC
-    else:
-        return t >= BET_MARKET_CLOSE_UTC
-
 
 def _trading_session_start(signal_ts: datetime, is_us: bool) -> datetime:
-    """
-    Session start = previous trading day's market open.
-    Mirrors backtest_service._trading_session_start().
-    """
+    """DEPRECATED — megtartva backward compat miatt (külső kód nem hívja)."""
     if is_us:
         open_hour, open_minute = 14, 30
     else:

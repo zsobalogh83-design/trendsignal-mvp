@@ -525,7 +525,7 @@ function TechnicalTab({ weights, setWeights, indicatorParams: ip, setIndicatorPa
 }
 
 function SignalsTab({ componentWeights: cw, setComponentWeights: setCw, thresholds: th, setThresholds: setTh,
-  advSignal: as, setAdvSignal: setAs }: any) {
+  advSignal: as, setAdvSignal: setAs, entryGates, setEntryGates }: any) {
   const cwTotal = cw.sentiment + cw.technical + cw.risk;
   const conf = (v: number) => Math.round(v * 100);
   const pct  = (v: number) => v / 100;
@@ -631,6 +631,67 @@ function SignalsTab({ componentWeights: cw, setComponentWeights: setCw, threshol
         </table>
         <div className="info-bar">
           ℹ️ HOLD ha −{th.holdZoneThreshold} &lt; score &lt; +{th.holdZoneThreshold} · MODERATE BUY ha ≥{th.moderateBuyScore} &amp; conf ≥{conf(th.moderateBuyConfidence)}% · STRONG BUY ha ≥{th.strongBuyScore} &amp; conf ≥{conf(th.strongBuyConfidence)}%
+        </div>
+      </div>
+
+      {/* Entry Gates */}
+      <div className="cfg-section">
+        <div className="cfg-section-title">🚦 Entry Gate Szűrők</div>
+        <div className="cfg-section-desc">Technikai feltételek, amelyeknek teljesülniük kell a trade megnyitásához. Ha egy signal nem felel meg, nem nyílik pozíció.</div>
+        <table className="sig-table">
+          <thead>
+            <tr>
+              <th>Indikátor</th>
+              <th>BUY feltétel</th>
+              <th>SELL feltétel</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>RSI</strong></td>
+              <td>
+                RSI &lt; <input className="ind-input" type="number" step="1" value={entryGates.rsiBuyMax} style={{ width: '60px' }}
+                  onChange={(e) => setEntryGates({...entryGates, rsiBuyMax: parseFloat(e.target.value) || 0})} />
+              </td>
+              <td>
+                RSI &gt; <input className="ind-input" type="number" step="1" value={entryGates.rsiSellMin} style={{ width: '60px' }}
+                  onChange={(e) => setEntryGates({...entryGates, rsiSellMin: parseFloat(e.target.value) || 0})} />
+              </td>
+            </tr>
+            <tr>
+              <td><strong>MACD Hist</strong></td>
+              <td>
+                Hist &gt; <input className="ind-input" type="number" step="0.01" value={entryGates.macdHistBuyMin} style={{ width: '70px' }}
+                  onChange={(e) => setEntryGates({...entryGates, macdHistBuyMin: parseFloat(e.target.value) || 0})} />
+              </td>
+              <td>
+                Hist &lt; <input className="ind-input" type="number" step="0.01" value={entryGates.macdHistSellMax} style={{ width: '70px' }}
+                  onChange={(e) => setEntryGates({...entryGates, macdHistSellMax: parseFloat(e.target.value) || 0})} />
+              </td>
+            </tr>
+            <tr>
+              <td><strong>SMA200 távolság</strong></td>
+              <td>
+                Ár max. <input className="ind-input" type="number" step="0.5" value={entryGates.sma200BuyMaxPct} style={{ width: '60px' }}
+                  onChange={(e) => setEntryGates({...entryGates, sma200BuyMaxPct: parseFloat(e.target.value) || 0})} /> % felett
+              </td>
+              <td>
+                Ár max. <input className="ind-input" type="number" step="0.5" value={entryGates.sma200SellMinPct} style={{ width: '60px' }}
+                  onChange={(e) => setEntryGates({...entryGates, sma200SellMinPct: parseFloat(e.target.value) || 0})} /> % alatt
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Ellenállástól</strong></td>
+              <td>
+                Max. <input className="ind-input" type="number" step="0.5" value={entryGates.distResistBuyMaxPct} style={{ width: '60px' }}
+                  onChange={(e) => setEntryGates({...entryGates, distResistBuyMaxPct: parseFloat(e.target.value) || 0})} /> % távolság
+              </td>
+              <td style={{ color: '#475569', fontSize: '12px' }}>– (nincs)</td>
+            </tr>
+          </tbody>
+        </table>
+        <div className="info-bar">
+          ℹ️ RSI BUY: &lt;{entryGates.rsiBuyMax} · RSI SELL: &gt;{entryGates.rsiSellMin} · MACD Hist BUY: &gt;{entryGates.macdHistBuyMin} · MACD Hist SELL: &lt;{entryGates.macdHistSellMax} · SMA200 BUY: max +{entryGates.sma200BuyMaxPct}% · SMA200 SELL: max {entryGates.sma200SellMinPct}% · Resistance BUY: max {entryGates.distResistBuyMaxPct}%
         </div>
       </div>
 
@@ -956,6 +1017,13 @@ export function Configuration() {
     moderateSellScore: -50,moderateSellConfidence: 0.65,
   });
 
+  const [entryGates, setEntryGates] = useState({
+    rsiSellMin: 45, rsiBuyMax: 55,
+    macdHistBuyMin: 0.0, macdHistSellMax: 0.0,
+    sma200BuyMaxPct: 5.0, sma200SellMinPct: -5.0,
+    distResistBuyMaxPct: 15.0,
+  });
+
   const [technicalWeights, setTechnicalWeights] = useState({
     sma20Bullish: 25, sma20Bearish: 15, sma50Bullish: 20, sma50Bearish: 10,
     goldenCross: 15, deathCross: 15,
@@ -1047,6 +1115,15 @@ export function Configuration() {
           strongSellConfidence: config.strong_sell_confidence,
           moderateSellScore: config.moderate_sell_score,
           moderateSellConfidence: config.moderate_sell_confidence,
+        });
+        setEntryGates({
+          rsiBuyMax: config.entry_gate_rsi_buy_max ?? 55,
+          rsiSellMin: config.entry_gate_rsi_sell_min ?? 45,
+          macdHistBuyMin: config.entry_gate_macd_hist_buy_min ?? 0.0,
+          macdHistSellMax: config.entry_gate_macd_hist_sell_max ?? 0.0,
+          sma200BuyMaxPct: config.entry_gate_sma200_buy_max_pct ?? 5.0,
+          sma200SellMinPct: config.entry_gate_sma200_sell_min_pct ?? -5.0,
+          distResistBuyMaxPct: config.entry_gate_dist_resist_buy_max_pct ?? 15.0,
         });
       }
 
@@ -1208,6 +1285,13 @@ export function Configuration() {
         technical_weight: componentWeights.technical / 100,
         risk_weight: componentWeights.risk / 100,
         hold_zone_threshold: thresholds.holdZoneThreshold,
+        entry_gate_rsi_buy_max: entryGates.rsiBuyMax,
+        entry_gate_rsi_sell_min: entryGates.rsiSellMin,
+        entry_gate_macd_hist_buy_min: entryGates.macdHistBuyMin,
+        entry_gate_macd_hist_sell_max: entryGates.macdHistSellMax,
+        entry_gate_sma200_buy_max_pct: entryGates.sma200BuyMaxPct,
+        entry_gate_sma200_sell_min_pct: entryGates.sma200SellMinPct,
+        entry_gate_dist_resist_buy_max_pct: entryGates.distResistBuyMaxPct,
         strong_buy_score: thresholds.strongBuyScore,
         strong_buy_confidence: thresholds.strongBuyConfidence,
         moderate_buy_score: thresholds.moderateBuyScore,
@@ -1452,6 +1536,7 @@ export function Configuration() {
             componentWeights={componentWeights} setComponentWeights={setComponentWeights}
             thresholds={thresholds} setThresholds={setThresholds}
             advSignal={advSignal} setAdvSignal={setAdvSignal}
+            entryGates={entryGates} setEntryGates={setEntryGates}
           />
         )}
         {activeTab === 5 && (

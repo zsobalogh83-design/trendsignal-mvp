@@ -285,7 +285,7 @@ function ProposalCard({
             { label: 'Min. 50 trade',      ok: proposal.gate_min_trades_ok,           val: `${proposal.test_trade_count ?? 0} db` },
             { label: 'Fitness +10%',       ok: proposal.gate_fitness_improvement_ok,  val: fmtPct(proposal.fitness_improvement_pct) },
             { label: 'PF delta ≥ 0.10',    ok: proposal.gate_profit_factor_ok,        val: fmt2((proposal.test_profit_factor ?? 0) - (proposal.baseline_profit_factor ?? 0)) },
-            { label: 'Bootstrap p<0.05',   ok: proposal.gate_bootstrap_ok,            val: `p=${fmt4(proposal.bootstrap_p_value)}` },
+            { label: 'Bootstrap p<0.10',   ok: proposal.gate_bootstrap_ok,            val: `p=${fmt4(proposal.bootstrap_p_value)}` },
             { label: 'Overfitting ≤20%',   ok: proposal.gate_overfitting_ok,          val: fmtPct(proposal.train_val_gap) },
             { label: 'Sideways PF ≥1.0',   ok: proposal.gate_sideways_pf_ok,         val: fmt2(proposal.regime_sideways_pf) + ' (warn)' },
           ].map(({ label, ok, val }) => (
@@ -389,12 +389,15 @@ function IdlePanel({
 }: {
   signalCount: number;
   tradeCount: number;
-  onStart: (pop: number, gen: number) => void;
+  onStart: (pop: number, gen: number, tradeMode: 'all' | 'long' | 'short', includeArchive: boolean, phase: 'all' | 'score_only' | 'thresholds_only') => void;
   starting: boolean;
 }) {
   const [population, setPopulation] = useState(80);
   const [generations, setGenerations] = useState(100);
   const [advanced, setAdvanced] = useState(false);
+  const [tradeMode, setTradeMode] = useState<'all' | 'long' | 'short'>('all');
+  const [includeArchive, setIncludeArchive] = useState(false);
+  const [phase, setPhase] = useState<'all' | 'score_only' | 'thresholds_only'>('all');
 
   const minTrades = 50; // acceptance gate minimum
   const ready = tradeCount >= minTrades;
@@ -447,12 +450,101 @@ function IdlePanel({
           </div>
         </div>
 
+        {/* Trade mode selector */}
+        <div>
+          <label className="text-xs text-gray-400">Optimalizálás iránya</label>
+          <div className="mt-1 grid grid-cols-3 gap-1">
+            {(['all', 'long', 'short'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setTradeMode(mode)}
+                className={`py-2 px-2 rounded-lg text-xs font-medium transition-colors border ${
+                  tradeMode === mode
+                    ? mode === 'long'
+                      ? 'bg-emerald-700 border-emerald-500 text-emerald-100'
+                      : mode === 'short'
+                      ? 'bg-red-800 border-red-600 text-red-100'
+                      : 'bg-blue-700 border-blue-500 text-blue-100'
+                    : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                {mode === 'all' ? 'Összes' : mode === 'long' ? '↑ Csak LONG' : '↓ Csak SHORT'}
+              </button>
+            ))}
+          </div>
+          {tradeMode !== 'all' && (
+            <p className="text-xs text-amber-400 mt-1">
+              {tradeMode === 'long'
+                ? 'Csak BUY jelzések alapján optimalizál — SHORT paraméterek változatlanok maradnak.'
+                : 'Csak SELL jelzések alapján optimalizál — LONG paraméterek változatlanok maradnak.'}
+            </p>
+          )}
+        </div>
+
+        {/* Archive data toggle */}
+        <div className="flex items-start gap-3 bg-gray-900/40 rounded-lg p-3">
+          <button
+            onClick={() => setIncludeArchive(a => !a)}
+            className={`mt-0.5 flex-shrink-0 w-9 h-5 rounded-full transition-colors relative ${
+              includeArchive ? 'bg-blue-600' : 'bg-gray-600'
+            }`}
+          >
+            <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+              includeArchive ? 'translate-x-4' : 'translate-x-0.5'
+            }`} />
+          </button>
+          <div>
+            <p className="text-xs text-gray-300 font-medium">Archive adatok bevonása</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {includeArchive
+                ? 'Max 50 000 archive CLOSED trade (+live) — kb. 3× lassabb futás.'
+                : 'Csak live signal_calculations (~2 000 jel). Gyors, de kevesebb tanítóadat.'}
+            </p>
+          </div>
+        </div>
+
+        {/* Phase selector */}
+        <div>
+          <label className="text-xs text-gray-400">Optimalizálási fázis</label>
+          <div className="mt-1 grid grid-cols-3 gap-1">
+            {([
+              { value: 'all',              label: 'Teljes tér' },
+              { value: 'score_only',       label: '1. Score params' },
+              { value: 'thresholds_only',  label: '2. Küszöbök' },
+            ] as const).map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setPhase(value)}
+                className={`py-2 px-2 rounded-lg text-xs font-medium transition-colors border ${
+                  phase === value
+                    ? 'bg-violet-700 border-violet-500 text-violet-100'
+                    : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {phase === 'score_only' && (
+            <p className="text-xs text-violet-400 mt-1">
+              1. fázis: HOLD_ZONE és BUY küszöbök rögzítve — csak a score-kalkuláció
+              (súlyok, decay, RSI/tech paraméterek, SL/TP) optimalizálódik.
+            </p>
+          )}
+          {phase === 'thresholds_only' && (
+            <p className="text-xs text-violet-400 mt-1">
+              2. fázis: minden score-paraméter rögzítve — csak a HOLD_ZONE és BUY küszöbök
+              finomhangolódnak a meglévő score-kalkuláció felett.
+            </p>
+          )}
+        </div>
+
         {/* Estimated runtime */}
         <div className="flex items-center gap-2 text-xs text-gray-500">
           <FiClock className="w-3.5 h-3.5" />
           <span>
-            Becsült futásidő: ~{Math.round(population * generations * 0.032 / 60)}–
-            {Math.round(population * generations * 0.06 / 60)} perc
+            Becsült futásidő: ~{Math.round(population * generations * (includeArchive ? 0.09 : 0.032) / 60)}–
+            {Math.round(population * generations * (includeArchive ? 0.18 : 0.06) / 60)} perc
           </span>
         </div>
 
@@ -486,7 +578,7 @@ function IdlePanel({
         )}
 
         <button
-          onClick={() => onStart(population, generations)}
+          onClick={() => onStart(population, generations, tradeMode, includeArchive, phase)}
           disabled={starting}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl
                      bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed
@@ -527,6 +619,15 @@ function RunningPanel({
     ? Math.round((progress.generations_run / progress.max_generations) * 100)
     : 0;
 
+  // Ha stopSignalSent után 20s-nál több telik el és még mindig fut,
+  // megjelenítjük a kényszer-leállítás gombot (deploy utáni elakadáshoz).
+  const [forceStopVisible, setForceStopVisible] = useState(false);
+  useEffect(() => {
+    if (!stopSignalSent) { setForceStopVisible(false); return; }
+    const t = setTimeout(() => setForceStopVisible(true), 20_000);
+    return () => clearTimeout(t);
+  }, [stopSignalSent]);
+
   return (
     <div className="max-w-2xl mx-auto space-y-5">
       {/* Header: progress + stop */}
@@ -542,20 +643,33 @@ function RunningPanel({
               {progress.elapsed_seconds != null && ` · ${fmtDuration(progress.elapsed_seconds)} eltelt`}
             </p>
           </div>
-          <button
-            onClick={onStop}
-            disabled={stopping || stopSignalSent}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-900/40
-                       hover:bg-red-900/70 text-red-400 text-xs font-medium border border-red-800
-                       transition-colors disabled:opacity-50"
-          >
-            <FiSquare className="w-3.5 h-3.5" />
-            {stopping
-              ? 'Jelzés küldése...'
-              : stopSignalSent
-                ? 'Leállítás folyamatban...'
-                : 'Leállítás'}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={onStop}
+              disabled={stopping || stopSignalSent}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-900/40
+                         hover:bg-red-900/70 text-red-400 text-xs font-medium border border-red-800
+                         transition-colors disabled:opacity-50"
+            >
+              <FiSquare className="w-3.5 h-3.5" />
+              {stopping
+                ? 'Jelzés küldése...'
+                : stopSignalSent
+                  ? 'Leállítás folyamatban...'
+                  : 'Leállítás'}
+            </button>
+            {forceStopVisible && (
+              <button
+                onClick={onStop}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-700/60
+                           hover:bg-red-700 text-red-200 text-xs font-medium border border-red-600
+                           transition-colors"
+              >
+                <FiSquare className="w-3.5 h-3.5" />
+                Kényszer leállítás
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Progress bar */}
@@ -706,7 +820,7 @@ function NoProposalPanel({
                 { label: 'Train/Val gap',  value: fmtPct(best.train_val_gap), color: (best.train_val_gap ?? 100) > 20 ? 'text-amber-400' : 'text-gray-300' },
                 { label: 'Test trades',    value: `${best.test_trade_count ?? 0} db`, color: (best.test_trade_count ?? 0) >= 50 ? 'text-emerald-400' : 'text-red-400' },
                 { label: 'Profit Factor',  value: fmt2(best.test_profit_factor), color: 'text-gray-200' },
-                { label: 'Bootstrap p',    value: fmt4(best.bootstrap_p_value),  color: (best.bootstrap_p_value ?? 1) < 0.05 ? 'text-emerald-400' : 'text-red-400' },
+                { label: 'Bootstrap p',    value: fmt4(best.bootstrap_p_value),  color: (best.bootstrap_p_value ?? 1) < 0.10 ? 'text-emerald-400' : 'text-red-400' },
                 { label: 'Fitness javulás',value: fmtPct(best.fitness_improvement_pct), color: (best.fitness_improvement_pct ?? 0) >= 10 ? 'text-emerald-400' : 'text-red-400' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="bg-gray-900/50 rounded-lg p-2.5">
@@ -723,7 +837,7 @@ function NoProposalPanel({
             <FailedGateBadge label="Min. 50 trade a test seten"  ok={best.gate_min_trades_ok}          val={`${best.test_trade_count ?? 0} / 50`} />
             <FailedGateBadge label="Fitness javulás ≥ 10%"       ok={best.gate_fitness_improvement_ok} val={fmtPct(best.fitness_improvement_pct)} />
             <FailedGateBadge label="Profit Factor delta ≥ 0.10"  ok={best.gate_profit_factor_ok}       val={fmt2((best.test_profit_factor ?? 0) - (best.baseline_profit_factor ?? 0))} />
-            <FailedGateBadge label="Bootstrap p-érték < 0.05"    ok={best.gate_bootstrap_ok}           val={`p = ${fmt4(best.bootstrap_p_value)}`} />
+            <FailedGateBadge label="Bootstrap p-érték < 0.10"    ok={best.gate_bootstrap_ok}           val={`p = ${fmt4(best.bootstrap_p_value)}`} />
             <FailedGateBadge label="Overfitting ≤ 20%"           ok={best.gate_overfitting_ok}         val={fmtPct(best.train_val_gap)} />
           </div>
 
@@ -872,9 +986,20 @@ export function OptimizerPage() {
   })();
 
   // ---- Handlers ----
-  const handleStart = useCallback((pop: number, gen: number) => {
+  const handleStart = useCallback((
+    pop: number, gen: number,
+    tradeMode: 'all' | 'long' | 'short',
+    includeArchive: boolean,
+    phase: 'all' | 'score_only' | 'thresholds_only',
+  ) => {
     setForceIdle(false);
-    startMut.mutate({ population_size: pop, max_generations: gen });
+    startMut.mutate({
+      population_size: pop,
+      max_generations: gen,
+      trade_mode: tradeMode,
+      include_archive: includeArchive,
+      phase,
+    });
   }, [startMut]);
 
   const handleStop = useCallback(() => {

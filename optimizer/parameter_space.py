@@ -1,7 +1,7 @@
 """
 TrendSignal Self-Tuning Engine - Parameter Space Definition
 
-Defines the 46-dimensional parameter vector for the genetic optimizer.
+Defines the 59-dimensional parameter vector for the genetic optimizer.
 
 Dimension layout (0-indexed):
   [0-1]   Component weights (2 free; RISK_WEIGHT = 1 - S - T)
@@ -17,8 +17,10 @@ Dimension layout (0-indexed):
            Constraint: ATR_STOP_HIGH_CONF < ATR_STOP_DEFAULT < ATR_STOP_LOW_CONF
   [43-44] ATR Take-Profit multipliers, volatility-adaptive (2)
   [45]    S/R hard distance threshold for SL blending (1)
+  [46-51] SHORT daytrade SL/TP multipliers (6)
+  [52-58] Entry gate thresholds (7)
 
-Total: 46 dimensions
+Total: 59 dimensions
 
 Version: 2.0
 Date: 2026-02-24
@@ -232,6 +234,33 @@ PARAM_DEFS: List[ParamDef] = [
     ParamDef(51, "short_sl_max_pct",         "SHORT_SL_MAX_PCT",
              0.005, 0.030, False,
              "SHORT daytrade: maximum SL width as fraction of entry price"),
+
+    # ------------------------------------------------------------------
+    # Group 14: Entry Gate Thresholds  (dim 52-58)
+    # Applied after signal generation, before trade opening.
+    # Set to extreme values to effectively disable a gate.
+    # ------------------------------------------------------------------
+    ParamDef(52, "entry_gate_rsi_buy_max",            "ENTRY_GATE_RSI_BUY_MAX",
+             45.0, 75.0, False,
+             "BUY blocked if RSI >= this (overbought guard); 75=disabled"),
+    ParamDef(53, "entry_gate_rsi_sell_min",           "ENTRY_GATE_RSI_SELL_MIN",
+             25.0, 55.0, False,
+             "SELL blocked if RSI <= this (oversold guard); 25=disabled"),
+    ParamDef(54, "entry_gate_macd_hist_buy_min",      "ENTRY_GATE_MACD_HIST_BUY_MIN",
+             -0.5, 0.5, False,
+             "BUY blocked if macd_hist <= this; negative=permissive"),
+    ParamDef(55, "entry_gate_macd_hist_sell_max",     "ENTRY_GATE_MACD_HIST_SELL_MAX",
+             -0.5, 0.5, False,
+             "SELL blocked if macd_hist >= this; positive=permissive"),
+    ParamDef(56, "entry_gate_sma200_buy_max_pct",     "ENTRY_GATE_SMA200_BUY_MAX_PCT",
+             2.0, 20.0, False,
+             "BUY blocked if price > SMA200 by more than this % (too extended)"),
+    ParamDef(57, "entry_gate_sma200_sell_min_pct",    "ENTRY_GATE_SMA200_SELL_MIN_PCT",
+             -20.0, -2.0, False,
+             "SELL blocked if price < SMA200 by more than |this| % (oversold)"),
+    ParamDef(58, "entry_gate_dist_resist_buy_max_pct","ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT",
+             5.0, 50.0, False,
+             "BUY blocked if dist_to_resistance > this % (no room to run); 50=disabled"),
 ]
 
 # Convenience: number of dimensions
@@ -312,10 +341,137 @@ BASELINE_VECTOR: List[float] = [
     1.0,    # 49 SHORT_ATR_TP_LOW_VOL
     1.8,    # 50 SHORT_ATR_TP_HIGH_VOL
     0.015,  # 51 SHORT_SL_MAX_PCT
+    # Group 14: Entry gate thresholds
+    55.0,   # 52 ENTRY_GATE_RSI_BUY_MAX
+    45.0,   # 53 ENTRY_GATE_RSI_SELL_MIN
+    0.0,    # 54 ENTRY_GATE_MACD_HIST_BUY_MIN
+    0.0,    # 55 ENTRY_GATE_MACD_HIST_SELL_MAX
+    5.0,    # 56 ENTRY_GATE_SMA200_BUY_MAX_PCT
+    -5.0,   # 57 ENTRY_GATE_SMA200_SELL_MIN_PCT
+    15.0,   # 58 ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT
 ]
 
 assert len(BASELINE_VECTOR) == N_DIMS, \
     f"BASELINE_VECTOR length {len(BASELINE_VECTOR)} != N_DIMS {N_DIMS}"
+
+
+# ---------------------------------------------------------------------------
+# Aktuális config.json → baseline vector
+# ---------------------------------------------------------------------------
+
+def get_current_baseline_vector() -> List[float]:
+    """
+    Olvassa a config.json-t és visszaadja az aktuális paraméterek vektorát.
+
+    Az összes paramétert a PARAM_DEFS config_key alapján keresi. Ha egy kulcs
+    hiányzik a config.json-ból, visszaesik a hardcoded BASELINE_VECTOR értékre.
+
+    Így az optimizer mindig a VALÓDI jelenlegi confighoz képest méri a javulást,
+    nem az elavult 2026-02-23-as baseline-hoz.
+    """
+    import json
+    from pathlib import Path
+
+    config_path = Path(__file__).resolve().parent.parent / "config.json"
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return list(BASELINE_VECTOR)
+
+    # DECAY_WEIGHTS nested dict kezelése
+    _DECAY_MAP = {
+        "DECAY_2_6H":   raw.get("DECAY_WEIGHTS", {}).get("2-6h"),
+        "DECAY_6_12H":  raw.get("DECAY_WEIGHTS", {}).get("6-12h"),
+        "DECAY_12_24H": raw.get("DECAY_WEIGHTS", {}).get("12-24h"),
+    }
+
+    vector = list(BASELINE_VECTOR)
+    for p in PARAM_DEFS:
+        # Speciális DECAY leképezés
+        if p.config_key in _DECAY_MAP:
+            val = _DECAY_MAP[p.config_key]
+        else:
+            val = raw.get(p.config_key)
+
+        if val is not None:
+            try:
+                clamped = max(float(p.low), min(float(p.high), float(val)))
+                vector[p.index] = clamped
+            except (TypeError, ValueError):
+                pass  # fallback: BASELINE_VECTOR érték marad
+
+    return vector
+
+
+# ---------------------------------------------------------------------------
+# Dimenzió-csoportok trade_mode szerinti befagyasztáshoz
+# ---------------------------------------------------------------------------
+
+# Dim indexek, amelyek kizárólag LONG SL/TP-t érintenek
+_LONG_ONLY_DIMS  = list(range(40, 46))   # 40-45: ATR_STOP_*, ATR_TP_*, SR_SUPPORT_HARD_PCT
+
+# Dim indexek, amelyek kizárólag SHORT SL/TP-t érintenek
+_SHORT_ONLY_DIMS = list(range(46, 52))   # 46-51: SHORT_ATR_STOP_*, SHORT_ATR_TP_*, SHORT_SL_MAX_PCT
+
+# Signal küszöb dimenziók — ezeket a phase-alapú befagyasztás kezeli
+# dim 2: HOLD_ZONE_THRESHOLD, dim 3: STRONG_BUY_SCORE,
+# dim 4: MODERATE_BUY_SCORE,  dim 5: STRONG_BUY_CONFIDENCE
+_THRESHOLD_DIMS = [2, 3, 4, 5]
+
+
+def get_mode_bounds(trade_mode: str = "all", phase: str = "all"):
+    """
+    Returns (lower_bounds, upper_bounds) arrays for the given trade_mode and phase.
+
+    trade_mode freezing:
+      'long'  → SHORT SL/TP dimenziók (46-51) befagyasztva az aktuális config értékein
+      'short' → LONG SL/TP dimenziók (40-45) befagyasztva
+      'all'   → nincs trade_mode-alapú befagyasztás
+
+    phase freezing (kétfázisú optimalizáció):
+      'score_only'      → signal küszöbök (dim 2-5: HOLD_ZONE, STRONG/MODERATE_BUY_SCORE,
+                          STRONG_BUY_CONFIDENCE) befagyasztva az aktuális értéken.
+                          Csak a score komponensek (súlyok, decay, tech paraméterek,
+                          SL/TP multiplierek) optimalizálódnak.
+      'thresholds_only' → minden dim befagyasztva a 2-5-ös kivételével.
+                          Csak a signal küszöbök finomhangolódnak a már optimalizált
+                          score-kalkuláció felett.
+      'all'             → nincs phase-alapú befagyasztás (teljes tér)
+
+    A befagyasztás az aktuális config.json értékeit használja (nem a hardcoded
+    BASELINE_VECTOR-t), így a kétfázisú futásban a 2. fázis az 1. fázis
+    eredményére épít.
+    """
+    lb = LOWER_BOUNDS.copy()
+    ub = UPPER_BOUNDS.copy()
+
+    # Befagyasztáshoz az aktuális config értékeit használjuk
+    current = get_current_baseline_vector()
+
+    if trade_mode == "long":
+        for i in _SHORT_ONLY_DIMS:
+            lb[i] = current[i]
+            ub[i] = current[i]
+    elif trade_mode == "short":
+        for i in _LONG_ONLY_DIMS:
+            lb[i] = current[i]
+            ub[i] = current[i]
+
+    if phase == "score_only":
+        # Signal küszöbök befagyasztása → GA csak a score-kalkulációt optimalizálja
+        for i in _THRESHOLD_DIMS:
+            lb[i] = current[i]
+            ub[i] = current[i]
+    elif phase == "thresholds_only":
+        # Minden befagyasztva a küszöbök kivételével
+        for i in range(N_DIMS):
+            if i not in _THRESHOLD_DIMS:
+                lb[i] = current[i]
+                ub[i] = current[i]
+    # "all" → nincs phase-alapú befagyasztás
+
+    return lb, ub
 
 
 # ---------------------------------------------------------------------------
@@ -466,18 +622,54 @@ def decode_vector(v: List[float]) -> dict:
     return cfg
 
 
-def vector_to_config_diff(v: List[float]) -> dict:
+def vector_to_config_diff(
+    v: List[float],
+    trade_mode: str = "all",
+    baseline_vector: List[float] = None,
+) -> dict:
     """
-    Compare decoded vector against BASELINE_VECTOR.
+    Compare decoded vector against a baseline vector.
     Returns {config_key: {before, after}} for changed params only.
+
+    baseline_vector : list, optional
+        Ha None, a get_current_baseline_vector() által visszaadott aktuális
+        config.json értékeket használja (nem a hardcoded BASELINE_VECTOR-t).
+        Így az "Előtte" oszlop mindig a valódi jelenlegi configot tükrözi.
+
+    trade_mode : str
+        "long"  → a szimmetrikusan derivált SELL/BEARISH paraméterek NEM jelennek
+                  meg a diffben, mert nem önállóan optimalizáltak (csak BUY tükrei).
+        "short" → a szimmetrikusan derivált BUY/BULLISH paraméterek NEM jelennek meg.
+        "all"   → minden változás megjelenik.
     """
     decoded  = decode_vector(v)
-    baseline = decode_vector(BASELINE_VECTOR)
+    if baseline_vector is None:
+        baseline_vector = get_current_baseline_vector()
+    baseline = decode_vector(baseline_vector)
+
+    # Ezek mindig a BUY/BULLISH paraméterek tükrei — trade_mode=long esetén
+    # nem önállóan optimalizáltak, csak zaj lenne a diffben.
+    _SELL_DERIVED = {
+        "STRONG_SELL_SCORE", "MODERATE_SELL_SCORE",
+        "STRONG_SELL_CONFIDENCE", "MODERATE_SELL_CONFIDENCE",
+        "TECH_SMA20_BEARISH", "TECH_SMA50_BEARISH", "TECH_DEATH_CROSS",
+    }
+    _BUY_DERIVED = {
+        "STRONG_BUY_SCORE", "MODERATE_BUY_SCORE",
+        "STRONG_BUY_CONFIDENCE", "MODERATE_BUY_CONFIDENCE",
+        "TECH_SMA20_BULLISH", "TECH_SMA50_BULLISH", "TECH_GOLDEN_CROSS",
+    }
 
     diff = {}
     for key in decoded:
         before = baseline.get(key)
         after  = decoded[key]
-        if before is not None and abs(float(before) - float(after)) > 1e-6:
-            diff[key] = {"before": before, "after": after}
+        if before is None or abs(float(before) - float(after)) <= 1e-6:
+            continue
+        # trade_mode szűrés: derivált, nem önállóan optimalizált paramétereket kihagyjuk
+        if trade_mode == "long" and key in _SELL_DERIVED:
+            continue
+        if trade_mode == "short" and key in _BUY_DERIVED:
+            continue
+        diff[key] = {"before": before, "after": after}
     return diff

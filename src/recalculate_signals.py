@@ -27,7 +27,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.database import SessionLocal
 from src.models import Signal, SignalCalculation
-from src.signal_generator import SignalGenerator, parse_support_resistance
+from src.signal_generator import (
+    SignalGenerator, parse_support_resistance,
+    calculate_sma_component_score,
+    calculate_rsi_component_score,
+    calculate_macd_component_score,
+    calculate_bollinger_component_score,
+    calculate_stochastic_component_score,
+)
 
 
 # ─────────────────────────────────────────────
@@ -368,12 +375,297 @@ def recalculate_all_signals(
 
 
 # ─────────────────────────────────────────────
+# COMPONENT SCORE RECALCULATION
+# ─────────────────────────────────────────────
+
+def _compute_risk_sub_scores(calc, config):
+    """
+    Reconstruct volatility_risk / sr_proximity / trend_strength scores
+    from stored indicator values using the same continuous scaling as
+    calculate_risk_score() in signal_generator.py.
+
+    Returns (volatility_risk_score, sr_proximity_score, trend_strength_score)
+    all in -100..+100 range.
+    """
+    import pandas as pd
+
+    # ── Volatility (ATR-based) ──────────────────────────────────────
+    atr_pct = calc.atr_pct or 2.0
+    vl = config.atr_vol_very_low
+    lo = config.atr_vol_low
+    mo = config.atr_vol_moderate
+    hi = config.atr_vol_high
+
+    if atr_pct < vl:
+        vol_raw = +0.8
+    elif atr_pct < lo:
+        vol_raw = 0.8 - ((atr_pct - vl) / (lo - vl)) * 0.4
+    elif atr_pct < mo:
+        vol_raw = 0.4 - ((atr_pct - lo) / (mo - lo)) * 0.4
+    elif atr_pct < hi:
+        vol_raw = 0.0 - ((atr_pct - mo) / (hi - mo)) * 0.4
+    else:
+        vol_raw = max(-0.8, -0.4 - ((atr_pct - hi) / 2.0) * 0.4)
+    volatility_risk_score = max(-100, min(100, vol_raw / 0.8 * 100))
+
+    # ── S/R Proximity ───────────────────────────────────────────────
+    current_price = calc.current_price or 0
+    nearest_support    = calc.nearest_support    or (current_price * 0.97 if current_price else 0)
+    nearest_resistance = calc.nearest_resistance or (current_price * 1.03 if current_price else 0)
+
+    if current_price and current_price > 0:
+        support_dist    = ((current_price - nearest_support)    / current_price) * 100
+        resistance_dist = ((nearest_resistance - current_price) / current_price) * 100
+        min_distance = min(abs(support_dist), abs(resistance_dist))
+    else:
+        min_distance = 5.0
+
+    if min_distance < 1.0:
+        prox_raw = -0.8
+    elif min_distance < 2.0:
+        prox_raw = -0.8 + ((min_distance - 1.0) / 1.0) * 0.4
+    elif min_distance < 4.0:
+        prox_raw = -0.4 + ((min_distance - 2.0) / 2.0) * 0.4
+    elif min_distance < 6.0:
+        prox_raw = 0.0  + ((min_distance - 4.0) / 2.0) * 0.4
+    else:
+        prox_raw = min(0.8, 0.4 + ((min_distance - 6.0) / 4.0) * 0.4)
+    sr_proximity_score = max(-100, min(100, prox_raw / 0.8 * 100))
+
+    # ── Trend Strength (ADX) ────────────────────────────────────────
+    adx = calc.adx
+    if adx is not None:
+        avs = config.adx_very_strong
+        as_ = config.adx_strong
+        amo = config.adx_moderate
+        aw  = config.adx_weak
+        avw = config.adx_very_weak
+
+        if adx > avs:
+            trend_raw = +0.8
+        elif adx > as_:
+            trend_raw = 0.5 + ((adx - as_) / (avs - as_)) * 0.3
+        elif adx > amo:
+            trend_raw = 0.3 + ((adx - amo) / (as_ - amo)) * 0.2
+        elif adx > aw:
+            trend_raw = 0.0 + ((adx - aw)  / (amo - aw))  * 0.3
+        elif adx > avw:
+            trend_raw = -0.3 + ((adx - avw) / (aw - avw)) * 0.3
+        else:
+            trend_raw = max(-0.8, -0.3 - ((avw - adx) / 10) * 0.5)
+    else:
+        trend_raw = 0.0
+    trend_strength_score = max(-100, min(100, trend_raw / 0.8 * 100))
+
+    return volatility_risk_score, sr_proximity_score, trend_strength_score
+
+
+def compute_component_scores_from_record(calc, config):
+    """
+    Reconstruct all 12 component scores from a SignalCalculation record.
+
+    Returns dict with keys matching the new column names in signal_calculations.
+    Note: volume_confirm_score = 0 (volume ratio not persisted in calc records).
+    """
+    import pandas as pd
+
+    current_price = calc.current_price or 0
+
+    current = {
+        "close":          current_price,
+        "sma_20":         calc.sma_20,
+        "sma_50":         calc.sma_50,
+        "rsi":            calc.rsi,
+        "macd_histogram": calc.macd_histogram,
+        "bb_upper":       calc.bb_upper,
+        "bb_middle":      calc.bb_middle,
+        "bb_lower":       calc.bb_lower,
+        "stoch_k":        calc.stoch_k,
+        "stoch_d":        calc.stoch_d,
+    }
+
+    sma_20 = calc.sma_20
+    sma_50 = calc.sma_50
+
+    sma_trend_direction = 0
+    if pd.notna(sma_20) and pd.notna(sma_50):
+        sma_trend_direction = 1 if sma_20 > sma_50 else -1
+
+    sma_trend_score, _    = calculate_sma_component_score(current, sma_20, sma_50, "close", config)
+    rsi_momentum_score, _ = calculate_rsi_component_score(calc.rsi, sma_trend_direction, config)
+    macd_signal_score, _  = calculate_macd_component_score(current)
+    bb_position_score, _  = calculate_bollinger_component_score(current, "close", sma_trend_direction)
+    stoch_cross_score, _  = calculate_stochastic_component_score(current, sma_trend_direction, config)
+    volume_confirm_score  = 0  # not stored
+
+    sentiment_score      = calc.sentiment_score or 0
+    sentiment_confidence = calc.sentiment_confidence or 0.5
+    sentiment_dir        = 1 if sentiment_score >= 0 else -1
+    sentiment_recency_score = max(-100, min(100, (sentiment_confidence * 2 - 1) * 100 * sentiment_dir))
+
+    volatility_risk_score, sr_proximity_score, trend_strength_score = \
+        _compute_risk_sub_scores(calc, config)
+
+    rr_quality_score = 0
+    rr_ratio = calc.risk_reward_ratio
+    if rr_ratio is not None and calc.decision and calc.decision != "HOLD":
+        direction = 1 if calc.decision == "BUY" else -1
+        tp_method = None
+        if calc.entry_exit_details:
+            try:
+                eed = json.loads(calc.entry_exit_details)
+                if "take_profit" in eed and isinstance(eed["take_profit"], dict):
+                    tp_method = eed["take_profit"].get("method")
+            except Exception:
+                pass
+
+        if tp_method == "rr_target":
+            rr_quality_score = -100 * direction
+        elif rr_ratio >= 3.0:
+            rr_quality_score = 100 * direction
+        elif rr_ratio >= 2.5:
+            rr_quality_score = 67 * direction
+        elif rr_ratio >= 2.0:
+            rr_quality_score = 33 * direction
+
+    return {
+        "sma_trend_score":         round(sma_trend_score,      2),
+        "rsi_momentum_score":      round(rsi_momentum_score,   2),
+        "macd_signal_score":       round(macd_signal_score,    2),
+        "bb_position_score":       round(bb_position_score,    2),
+        "stoch_cross_score":       round(stoch_cross_score,    2),
+        "volume_confirm_score":    round(volume_confirm_score, 2),
+        "sentiment_recency_score": round(sentiment_recency_score, 2),
+        "volatility_risk_score":   round(volatility_risk_score,   2),
+        "sr_proximity_score":      round(sr_proximity_score,      2),
+        "trend_strength_score":    round(trend_strength_score,    2),
+        "rr_quality_score":        round(rr_quality_score,        2),
+        "_sentiment_signal_score": round(sentiment_score,         2),
+    }
+
+
+def recalculate_component_scores(
+    dry_run: bool = False,
+    ticker_filter: str = None,
+    status_filter: str = None,
+) -> dict:
+    """
+    Backfill 12-component scores on existing signal_calculations records
+    using stored indicator values. Also recomputes combined_score with the
+    new formula and updates both signals and signal_calculations tables.
+    """
+    from src.config import get_config
+    config = get_config()
+    cw = config.COMPONENT_WEIGHTS
+
+    db = SessionLocal()
+    stats = {"total": 0, "updated": 0, "skipped": 0, "errors": 0, "score_changed": 0}
+
+    try:
+        query = db.query(Signal).filter(Signal.decision != "HOLD")
+        if ticker_filter:
+            query = query.filter(Signal.ticker_symbol == ticker_filter.upper())
+        if status_filter:
+            query = query.filter(Signal.status == status_filter)
+
+        signals = query.order_by(Signal.id.asc()).all()
+        stats["total"] = len(signals)
+
+        print(f"\n{'='*70}")
+        print(f"  Component score recalculation {'[DRY RUN] ' if dry_run else ''}-- {len(signals)} signals")
+        print(f"{'='*70}")
+
+        for signal in signals:
+            calc = db.query(SignalCalculation).filter(
+                SignalCalculation.signal_id == signal.id
+            ).first()
+
+            if calc is None or calc.current_price is None:
+                stats["skipped"] += 1
+                continue
+
+            try:
+                comp = compute_component_scores_from_record(calc, config)
+                sentiment_signal_score = comp.pop("_sentiment_signal_score")
+
+                new_combined = (
+                    comp["sma_trend_score"]         * cw["sma_trend"]         +
+                    comp["rsi_momentum_score"]       * cw["rsi_momentum"]      +
+                    comp["macd_signal_score"]        * cw["macd_signal"]       +
+                    comp["bb_position_score"]        * cw["bb_position"]       +
+                    comp["stoch_cross_score"]        * cw["stoch_cross"]       +
+                    comp["volume_confirm_score"]     * cw["volume_confirm"]    +
+                    sentiment_signal_score           * cw["sentiment_signal"]  +
+                    comp["sentiment_recency_score"]  * cw["sentiment_recency"] +
+                    comp["volatility_risk_score"]    * cw["volatility_risk"]   +
+                    comp["sr_proximity_score"]       * cw["sr_proximity"]      +
+                    comp["trend_strength_score"]     * cw["trend_strength"]    +
+                    comp["rr_quality_score"]         * cw["rr_quality"]
+                )
+                new_combined = round(new_combined, 2)
+                old_combined = signal.combined_score or 0
+
+                score_changed = abs(new_combined - old_combined) > 0.01
+                if score_changed:
+                    stats["score_changed"] += 1
+
+                print(f"  Signal #{signal.id} {signal.ticker_symbol:6s} "
+                      f"{signal.strength} {signal.decision}: "
+                      f"score {old_combined:+.2f} -> {new_combined:+.2f}"
+                      f"{' <- CHANGED' if score_changed else ''}")
+
+                if not dry_run:
+                    for col, val in comp.items():
+                        setattr(calc, col, val)
+                    calc.combined_score = new_combined
+                    signal.combined_score = new_combined
+
+                stats["updated"] += 1
+
+            except Exception as e:
+                print(f"  WARNING Signal #{signal.id}: {e}")
+                stats["errors"] += 1
+
+        if not dry_run:
+            db.commit()
+            print(f"\nChanges committed to database.")
+        else:
+            print(f"\n[DRY RUN] No changes written.")
+
+    except Exception as e:
+        db.rollback()
+        print(f"\nFatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+    finally:
+        db.close()
+
+    print(f"\n{'='*70}")
+    print(f"  SUMMARY")
+    print(f"{'='*70}")
+    print(f"  Total processed : {stats['total']}")
+    print(f"  Updated         : {stats['updated']}")
+    print(f"  Skipped         : {stats['skipped']}")
+    print(f"  Errors          : {stats['errors']}")
+    print(f"  Score changed   : {stats['score_changed']}")
+    print(f"{'='*70}\n")
+    return stats
+
+
+# ─────────────────────────────────────────────
 # CLI ENTRY POINT
 # ─────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Recalculate SL/TP for existing signals using current logic"
+        description="Recalculate SL/TP or component scores for existing signals"
+    )
+    parser.add_argument(
+        "--mode", type=str, default="sl-tp",
+        choices=["sl-tp", "component-scores"],
+        help="'sl-tp': recalculate Stop-Loss/Take-Profit (default); "
+             "'component-scores': backfill 12-component scores from stored indicators"
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -389,11 +681,18 @@ def main():
     )
     args = parser.parse_args()
 
-    recalculate_all_signals(
-        dry_run=args.dry_run,
-        ticker_filter=args.ticker,
-        status_filter=args.status,
-    )
+    if args.mode == "component-scores":
+        recalculate_component_scores(
+            dry_run=args.dry_run,
+            ticker_filter=args.ticker,
+            status_filter=args.status,
+        )
+    else:
+        recalculate_all_signals(
+            dry_run=args.dry_run,
+            ticker_filter=args.ticker,
+            status_filter=args.status,
+        )
 
 
 if __name__ == "__main__":

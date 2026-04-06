@@ -13,7 +13,27 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import logging
 import json
+import pytz
 from datetime import datetime, timedelta
+
+_ET_TZ = pytz.timezone('America/New_York')
+
+def _us_eod_utc(dt_utc: datetime) -> datetime:
+    """4:00 PM ET (DST-aware) → naive UTC. EDT: 20:00 UTC | EST: 21:00 UTC."""
+    utc_aware = pytz.utc.localize(dt_utc)
+    et_time   = utc_aware.astimezone(_ET_TZ)
+    et_close  = _ET_TZ.localize(
+        et_time.replace(hour=16, minute=0, second=0, microsecond=0, tzinfo=None)
+    )
+    return et_close.astimezone(pytz.utc).replace(tzinfo=None)
+
+
+def _is_us_trading_hours(dt_utc: datetime) -> bool:
+    """DST-aware US kereskedési óra ellenőrzés (9:30–16:00 ET → UTC)."""
+    utc_aware  = pytz.utc.localize(dt_utc)
+    et_time    = utc_aware.astimezone(_ET_TZ)
+    et_decimal = et_time.hour + et_time.minute / 60.0
+    return 9.5 <= et_decimal < 16.0
 
 # Database imports
 from src.database import get_db
@@ -54,17 +74,19 @@ def _compute_direction_result(
         return t.weekday() >= 5
 
     def _is_trading(t: datetime, sym: str) -> bool:
-        dec = t.hour + t.minute / 60.0
-        return (8.0 <= dec < 16.0) if sym.endswith('.BD') else (14.5 <= dec < 21.0)
+        if sym.endswith('.BD'):
+            dec = t.hour + t.minute / 60.0
+            return 8.0 <= dec < 16.0
+        return _is_us_trading_hours(t)   # DST-aware
 
     if _is_weekend(entry_time) or not _is_trading(entry_time, ticker_symbol):
         return None
 
-    # Piacvégi időpont (UTC)
+    # Piacvégi időpont (UTC, DST-aware)
     if ticker_symbol.endswith('.BD'):
         eod = entry_time.replace(hour=16, minute=0, second=0, microsecond=0)
     else:
-        eod = entry_time.replace(hour=21, minute=0, second=0, microsecond=0)
+        eod = _us_eod_utc(entry_time)   # 20:00 UTC (EDT) vagy 21:00 UTC (EST)
 
     raw_exit_time = entry_time + timedelta(hours=2)
     exit_time     = min(raw_exit_time, eod - timedelta(minutes=5))
@@ -199,6 +221,10 @@ def save_signal_to_db(signal, db: Session):
             take_profit=to_python(signal.take_profit) if signal.take_profit else None,
             risk_reward_ratio=to_python(signal.risk_reward_ratio) if signal.risk_reward_ratio else None,
             reasoning_json=json.dumps(reasoning),
+            # Minden signal active státusszal jön létre (HOLD is),
+            # így megjelenik a live nézetben a következő simulate futásig.
+            # Simulate futása után a migrátor 'migrated' státuszra állítja és
+            # az archive nézetbe kerül.
             status='active',
             created_at=datetime.utcnow(),
             expires_at=datetime.utcnow() + timedelta(hours=24)
@@ -506,10 +532,34 @@ async def get_signal_history(
         }
         _requested_skip = [_skip_status_map[r] for r in (exit_reasons or []) if r in _skip_status_map]
 
-        # Start with base query - normal signals + any explicitly requested skip statuses
-        _base_statuses = ['active', 'expired', 'archived'] + _requested_skip
+        # Live nézetben látható signalok (állapot alapú, nem dátum alapú):
+        #   1. active státuszú signal — minden döntés (BUY, SELL, HOLD egyaránt),
+        #      amíg simulate nem fut rajtuk → megmarad a live nézetben
+        #   2. archived státuszú BUY/SELL signal — generator által superseded,
+        #      de még nem ment át a migrate pipeline-on
+        #   3. Bármely státuszú signal, amelyhez OPEN trade tartozik
+        #
+        # migrated, nogo, expired, skip_hours, parallel_skip stb.
+        # → csak explicit szűrőre látszik (archive nézetben)
+        from sqlalchemy import or_, exists as sa_exists, and_
+        _base_statuses = ['active'] + _requested_skip
         query = db.query(Signal).filter(
-            Signal.status.in_(_base_statuses)
+            or_(
+                # active: minden fresh signal (BUY, SELL, HOLD)
+                Signal.status.in_(_base_statuses),
+                # archived BUY/SELL: generator superseded, de még pending migrate
+                and_(
+                    Signal.status == 'archived',
+                    Signal.decision.in_(['BUY', 'SELL'])
+                ),
+                # Bármely signal, amelyhez nyitott trade tartozik
+                sa_exists().where(
+                    and_(
+                        SimulatedTrade.entry_signal_id == Signal.id,
+                        SimulatedTrade.status == 'OPEN'
+                    )
+                )
+            )
         )
         
         # Date range filtering
@@ -646,6 +696,8 @@ async def get_signal_history(
             "open_trade_ids": [],
             "total_pnl_huf": None,
             "total_pnl_percent": None,
+            "total_net_pnl_percent": None,
+            "win_rate": None,
         }
         if all_signal_ids_for_summary:
             all_trades_for_summary = db.query(SimulatedTrade).filter(
@@ -661,13 +713,21 @@ async def get_signal_history(
                 for t in all_trades_for_summary
                 if t.status == 'CLOSED' and t.pnl_percent is not None
             ]
-            pnl_summary["closed_count"] = sum(1 for t in all_trades_for_summary if t.status == 'CLOSED')
+            _TARGET_POS_HUF = 700_000
+            closed_cnt = sum(1 for t in all_trades_for_summary if t.status == 'CLOSED')
+            win_cnt    = sum(1 for t in all_trades_for_summary if t.status == 'CLOSED' and (t.pnl_amount_huf or 0) >= 0)
+            pnl_summary["closed_count"] = closed_cnt
             pnl_summary["open_count"] = sum(1 for t in all_trades_for_summary if t.status == 'OPEN')
             pnl_summary["open_trade_ids"] = [t.id for t in all_trades_for_summary if t.status == 'OPEN']
             if closed_huf_values:
-                pnl_summary["total_pnl_huf"] = sum(closed_huf_values)
+                total_huf = sum(closed_huf_values)
+                pnl_summary["total_pnl_huf"] = total_huf
+                # Átlagos %/trade: átlagos HUF nyereség / target pozícióméret
+                pnl_summary["total_net_pnl_percent"] = (total_huf / closed_cnt) / _TARGET_POS_HUF * 100
             if closed_pct_values:
                 pnl_summary["total_pnl_percent"] = sum(closed_pct_values)
+            if closed_cnt > 0:
+                pnl_summary["win_rate"] = win_cnt / closed_cnt * 100
 
         # Order by created_at descending (newest first) and apply pagination
         signals = query.order_by(Signal.created_at.desc()).limit(limit).offset(offset).all()
@@ -946,8 +1006,12 @@ async def get_archive_signal_history(
         # exit_reason filter — archive_simulated_trades alapján
         if exit_reasons:
             er_map = {
-                'TP': 'TP_HIT', 'SL': 'SL_HIT',
-                'REV': 'OPPOSING_SIGNAL', 'MAX': 'MAX_HOLD_LIQUIDATION',
+                'TP':   'TP_HIT',
+                'SL':   'SL_HIT',
+                'REV':  'OPPOSING_SIGNAL',
+                'MAX':  'MAX_HOLD_LIQUIDATION',
+                'STAG': 'STAGNATION_EXIT',
+                'EOD':  'EOD_AUTO_LIQUIDATION',
             }
             db_reasons = [er_map[r] for r in exit_reasons if r in er_map]
             include_open = 'OPEN' in exit_reasons
@@ -976,28 +1040,46 @@ async def get_archive_signal_history(
 
         w = " AND ".join(where)
 
-        # Total count
-        total_count = conn.execute(
-            f"SELECT COUNT(*) FROM archive_signals s WHERE {w}", params
-        ).fetchone()[0]
-
-        # PnL summary (closed trades a teljes szűrt halmazon)
+        # PnL summary + total count (egyetlen JOIN-os lekérdezés a COUNT helyett)
+        # USD/HUF közelítés az archive periódusra (2024-2026 átlag)
+        _USD_HUF_APPROX = 380.0
+        _TARGET_HUF     = 700_000
         pnl_row = conn.execute(f"""
             SELECT
-                COUNT(t.id)                                              AS closed_count,
-                SUM(CASE WHEN t.status='OPEN' THEN 1 ELSE 0 END)        AS open_count,
-                SUM(CASE WHEN t.status='CLOSED' THEN t.pnl_percent ELSE 0 END) AS total_pnl_pct
+                COUNT(DISTINCT s.id)                                             AS total_count,
+                SUM(CASE WHEN t.status='CLOSED' THEN 1 ELSE 0 END)              AS closed_count,
+                SUM(CASE WHEN t.status='OPEN'   THEN 1 ELSE 0 END)              AS open_count,
+                AVG(CASE WHEN t.status='CLOSED' THEN t.pnl_net_percent END)     AS avg_net_pnl_pct,
+                SUM(CASE WHEN t.status='CLOSED' THEN t.pnl_net_percent ELSE 0 END) AS sum_net_pnl_pct,
+                SUM(CASE WHEN t.status='CLOSED' AND t.pnl_net_percent >= 0 THEN 1 ELSE 0 END) AS win_count,
+                SUM(CASE WHEN t.status='CLOSED' AND t.entry_price > 0 AND t.pnl_net_percent IS NOT NULL
+                    THEN CAST({_TARGET_HUF} / {_USD_HUF_APPROX} / t.entry_price AS INT)
+                         * t.entry_price * {_USD_HUF_APPROX} * t.pnl_net_percent / 100.0
+                    ELSE 0 END)                                                  AS sum_huf_adjusted
             FROM archive_signals s
             LEFT JOIN archive_simulated_trades t ON t.archive_signal_id = s.id
             WHERE {w}
         """, params).fetchone()
 
+        total_count = pnl_row["total_count"] or 0
+
+        closed_cnt    = pnl_row["closed_count"] or 0
+        win_cnt       = pnl_row["win_count"]    or 0
+        win_rate      = (win_cnt / closed_cnt * 100) if closed_cnt > 0 else None
+        avg_net_pct   = float(pnl_row["avg_net_pnl_pct"])   if pnl_row["avg_net_pnl_pct"]   is not None else None
+        sum_net_pct   = float(pnl_row["sum_net_pnl_pct"])   if pnl_row["sum_net_pnl_pct"]   is not None else None
+        total_pnl_huf = round(float(pnl_row["sum_huf_adjusted"])) if pnl_row["sum_huf_adjusted"] is not None else None
+
         pnl_summary = {
-            "closed_count": pnl_row["closed_count"] or 0,
-            "open_count":   pnl_row["open_count"] or 0,
-            "open_trade_ids": [],
-            "total_pnl_huf": None,
-            "total_pnl_percent": float(pnl_row["total_pnl_pct"]) if pnl_row["total_pnl_pct"] else None,
+            "closed_count":    closed_cnt,
+            "open_count":      pnl_row["open_count"] or 0,
+            "open_trade_ids":  [],
+            "total_pnl_huf":   total_pnl_huf,
+            # kumulatív összeg (live-stílusú megjelenítéshez)
+            "total_pnl_percent":     sum_net_pct,
+            # átlagos per-trade net PnL (megtartva visszafelé kompatibilitáshoz)
+            "total_net_pnl_percent": avg_net_pct,
+            "win_rate":              win_rate,
         }
 
         # Paginated signals
@@ -1005,12 +1087,16 @@ async def get_archive_signal_history(
             SELECT s.*, t.id as trade_id, t.status as trade_status,
                    t.direction as trade_direction,
                    t.pnl_percent as trade_pnl_pct,
+                   t.pnl_net_percent as trade_pnl_net_pct,
                    t.exit_reason as trade_exit_reason,
                    t.entry_price as trade_entry_price,
                    t.exit_price as trade_exit_price,
                    t.stop_loss_price as trade_sl,
                    t.take_profit_price as trade_tp,
-                   t.is_real_trade as trade_is_real
+                   t.is_real_trade as trade_is_real,
+                   t.direction_2h_eligible as trade_2h_eligible,
+                   t.direction_2h_correct as trade_2h_correct,
+                   t.direction_2h_pct as trade_2h_pct
             FROM archive_signals s
             LEFT JOIN archive_simulated_trades t ON t.archive_signal_id = s.id
             WHERE {w}
@@ -1023,18 +1109,33 @@ async def get_archive_signal_history(
             trade_data = None
             if r["trade_id"]:
                 trade_data = {
-                    "id":             r["trade_id"],
-                    "status":         r["trade_status"],
-                    "direction":      r["trade_direction"],
-                    "pnl_percent":    float(r["trade_pnl_pct"]) if r["trade_pnl_pct"] is not None else None,
-                    "pnl_amount_huf": None,
-                    "exit_reason":    r["trade_exit_reason"],
-                    "entry_price":    float(r["trade_entry_price"]) if r["trade_entry_price"] else None,
-                    "exit_price":     float(r["trade_exit_price"]) if r["trade_exit_price"] is not None else None,
+                    "id":              r["trade_id"],
+                    "status":          r["trade_status"],
+                    "direction":       r["trade_direction"],
+                    "pnl_percent":     float(r["trade_pnl_pct"])     if r["trade_pnl_pct"]     is not None else None,
+                    "pnl_net_percent": float(r["trade_pnl_net_pct"]) if r["trade_pnl_net_pct"] is not None else None,
+                    "pnl_amount_huf":  None,
+                    "exit_reason":     r["trade_exit_reason"],
+                    "entry_price":     float(r["trade_entry_price"]) if r["trade_entry_price"] else None,
+                    "exit_price":      float(r["trade_exit_price"])  if r["trade_exit_price"]  is not None else None,
                     "position_size_shares": None,
-                    "usd_huf_rate":   None,
-                    "is_real_trade":  bool(r["trade_is_real"]),
+                    "usd_huf_rate":    None,
+                    "is_real_trade":   bool(r["trade_is_real"]),
                 }
+
+            # 2H direction_result archive trade 2H mezőiből
+            direction_result = None
+            if r["trade_id"] and r["trade_2h_eligible"] is not None:
+                if r["trade_2h_eligible"]:
+                    direction_result = {
+                        "eligible":         True,
+                        "correct":          bool(r["trade_2h_correct"]),
+                        "price_change_pct": float(r["trade_2h_pct"]) if r["trade_2h_pct"] is not None else 0.0,
+                        "window_minutes":   120,
+                        "hit_eod":          False,
+                    }
+                else:
+                    direction_result = {"eligible": False}
 
             reasoning = {}
             if r["reasoning_json"]:
@@ -1064,7 +1165,7 @@ async def get_archive_signal_history(
                 "expires_at":        None,
                 "status":            "archived",
                 "simulated_trade":   trade_data,
-                "direction_result":  None,
+                "direction_result":  direction_result,
                 "is_archive":        True,
             })
 

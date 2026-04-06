@@ -33,6 +33,20 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 import logging
 import time
+import pytz
+
+_ET_TZ = pytz.timezone('America/New_York')
+
+
+def _us_eod_utc(dt_utc: datetime) -> datetime:
+    """4:00 PM ET (DST-aware) → naive UTC datetime.
+    EDT: 20:00 UTC | EST: 21:00 UTC — automatikusan kezeli a nyári/téli időszámítást."""
+    utc_aware = pytz.utc.localize(dt_utc)
+    et_time   = utc_aware.astimezone(_ET_TZ)
+    et_close  = _ET_TZ.localize(
+        et_time.replace(hour=16, minute=0, second=0, microsecond=0, tzinfo=None)
+    )
+    return et_close.astimezone(pytz.utc).replace(tzinfo=None)
 
 from src.models import Signal, SimulatedTrade, PriceData
 from src.database import SessionLocal
@@ -71,6 +85,7 @@ class BacktestService:
             Stats dict
         """
         start_time = time.time()
+        run_start_dt = datetime.utcnow()
         
         logger.info("=" * 70)
         logger.info("🔄 Backtest Start")
@@ -116,9 +131,15 @@ class BacktestService:
         
         # Commit
         self.db.commit()
-        
+
+        # Archive migráció: az ebben a futásban lezárt trade-ek
+        # átmásolódnak az archive táblákba (idempotent, INSERT OR IGNORE)
+        archive_stats = self._migrate_newly_closed_to_archive(run_start_dt)
+        stats['archive_migrated'] = archive_stats['migrated']
+        stats['archive_skipped']  = archive_stats['skipped']
+
         execution_time = time.time() - start_time
-        
+
         logger.info("=" * 70)
         logger.info("✅ Backtest Complete")
         logger.info("=" * 70)
@@ -130,12 +151,50 @@ class BacktestService:
         logger.info(f"Skipped (no data): {stats['skipped_no_data']}")
         logger.info(f"Skipped (invalid): {stats['skipped_invalid']}")
         logger.info(f"Errors:         {len(stats['errors'])}")
+        logger.info(f"Archive migrated: {archive_stats['migrated']} trade(s)")
         logger.info("=" * 70)
-        
+
         return {
             'execution_time_seconds': round(execution_time, 2),
             'stats': stats
         }
+
+    def _migrate_newly_closed_to_archive(self, since: datetime) -> dict:
+        """
+        A backtest commit után lefutó archive migráció.
+
+        Lekéri az összes trade-et amelyek exit_execution_time >= since ÉS
+        status == 'CLOSED', majd mindegyiket átmásolja az archive táblákba
+        a live_to_archive_migrator segítségével.
+
+        Idempotent: ha egy trade már migrálva volt, az INSERT OR IGNORE kihagyja.
+        """
+        from src.live_to_archive_migrator import migrate_closed_trade_to_archive
+
+        newly_closed = (
+            self.db.query(SimulatedTrade)
+            .filter(
+                SimulatedTrade.status == "CLOSED",
+                SimulatedTrade.exit_execution_time >= since,
+            )
+            .all()
+        )
+
+        migrated = 0
+        skipped  = 0
+        for trade in newly_closed:
+            ok = migrate_closed_trade_to_archive(trade.id)
+            if ok:
+                migrated += 1
+            else:
+                skipped += 1
+
+        if newly_closed:
+            logger.info(
+                f"[Migrator] {migrated}/{len(newly_closed)} trade → archive "
+                f"({skipped} kihagyva)"
+            )
+        return {"migrated": migrated, "skipped": skipped}
     
     def _process_signal(self, signal: Signal) -> str:
         """
@@ -175,6 +234,14 @@ class BacktestService:
                 trade = self.trade_manager.open_position(signal)
                 if trade:
                     trade.is_real_trade = True
+                    # Telegram értesítés csak azokra a trade-ekre, amik átmentek az entry gate-en
+                    try:
+                        from src.telegram_alerter import get_telegram_alerter
+                        alerter = get_telegram_alerter()
+                        if alerter.enabled:
+                            alerter.send_alert(signal)
+                    except Exception as _tel_err:
+                        logger.debug(f"Telegram alert skipped: {_tel_err}")
             else:
                 # Gyenge signal (15 <= |score| < 25): ellenőrzések nélkül szimulálva
                 trade = self.trade_manager.open_position_simulated(signal)
@@ -196,9 +263,9 @@ class BacktestService:
         except InvalidSignalError as e:
             err_msg = str(e)
             logger.debug(f"   Skip {signal.ticker_symbol}: {err_msg}")
-            # signal.status may already be 'nogo' (set inside trade_manager for ATR filter).
+            # signal.status may already be set inside trade_manager (nogo, rsi_filtered, macd_filtered).
             # Tag remaining cases so every skipped signal has a meaningful status.
-            if signal.status not in ('nogo',):
+            if signal.status not in ('nogo', 'rsi_filtered', 'macd_filtered', 'sma200_filtered'):
                 if 'outside trading hours' in err_msg:
                     signal.status = 'skip_hours'
                 elif 'Invalid' in err_msg and ('LONG' in err_msg or 'SHORT' in err_msg):
@@ -317,8 +384,11 @@ class BacktestService:
 
             trading_slots_held += 1
 
-            # Stagnation check: bármikor exit-el ha az ár huzamosan oldalaz az entry körül
-            stagnation_slots, stag_exit = self._check_stagnation(trade, check_time_utc, stagnation_slots)
+            # Stagnation check: grace period alatt (első 4 kereskedési óra = 16 slot) nem aktivál
+            stagnation_slots, stag_exit = self._check_stagnation(
+                trade, check_time_utc, stagnation_slots,
+                grace_active=(trading_slots_held <= self.STAGNATION_GRACE_SLOTS),
+            )
             if stag_exit:
                 logger.debug(
                     f"      Exit: {trade.symbol} STAGNATION_EXIT "
@@ -450,13 +520,16 @@ class BacktestService:
 
     # Stagnation: ha az ár legalább ennyi egymást követő sloton át az entry ±band-on belül marad
     STAGNATION_CONSECUTIVE_SLOTS = 10    # 10 × 15min = 150 perc
-    STAGNATION_BAND_FACTOR = 0.20        # band = 0.20 × initial_risk
+    STAGNATION_BAND_FACTOR       = 0.20  # band = 0.20 × initial_risk
+    STAGNATION_GRACE_SLOTS       = 16   # 4 kereskedési óra grace period — előtte nem aktivál
+    BREAKEVEN_FEE_PCT            = 0.002 # Round-trip jutalék — breakeven SL ezt fedi be
 
     def _check_stagnation(
         self,
         trade: SimulatedTrade,
         check_time_utc: datetime,
         current_slots: int,
+        grace_active: bool = False,
     ) -> Tuple[int, bool]:
         """
         Oldalazó ár detektálása: ha az árfolyam STAGNATION_CONSECUTIVE_SLOTS egymást
@@ -465,10 +538,13 @@ class BacktestService:
         - Band = STAGNATION_BAND_FACTOR × initial_risk (ahol initial_risk = entry - orig_SL)
         - Ha az ár kilép a sávból, a számláló nullázódik → a detektálás bármikor újraindul.
         - LONG-ra és SHORT-ra egyaránt vonatkozik.
+        - grace_active=True esetén (első 4 kereskedési óra) a számláló nullán marad.
 
         Returns:
             (new_slots, should_exit)
         """
+        if grace_active:
+            return 0, False
         if not trade.initial_stop_loss_price:
             return current_slots, False
 
@@ -508,23 +584,27 @@ class BacktestService:
         return new_slots, should_exit
 
     def _apply_intraday_breakeven(self, trade: SimulatedTrade, candle: Dict) -> bool:
-        """Break-even stop: move SL to entry_price when price moved +0.5×initial_risk.
+        """Break-even stop: move SL to entry ± fee when price moved +1.0×initial_risk.
 
-        Only fires once — when SL is still on the losing side of entry.
+        Trigger: 1.0× initial_risk (korábban 0.5× volt — túl korai volt).
+        SL szint: entry × (1 + fee) LONG-nál, entry × (1 - fee) SHORT-nál,
+                  hogy az exit fedezze a round-trip jutalékot.
+        Only fires once — when SL is still on the losing side of entry ± fee.
         Uses candle HIGH (LONG) / LOW (SHORT) to detect intraday touch.
         """
         if not trade.initial_stop_loss_price:
             return False
 
         if trade.direction == 'LONG':
-            if trade.stop_loss_price >= trade.entry_price:
+            be_sl = round(trade.entry_price * (1.0 + self.BREAKEVEN_FEE_PCT), 4)
+            if trade.stop_loss_price >= be_sl:
                 return False  # Already at break-even or better
             initial_risk = trade.entry_price - trade.initial_stop_loss_price
             if initial_risk <= 0:
                 return False
-            if candle['high'] >= trade.entry_price + 0.5 * initial_risk:
+            if candle['high'] >= trade.entry_price + 1.0 * initial_risk:
                 old_sl = trade.stop_loss_price
-                trade.stop_loss_price = round(trade.entry_price, 4)
+                trade.stop_loss_price = be_sl
                 trade.sl_tp_update_count = (trade.sl_tp_update_count or 0) + 1
                 trade.sl_tp_last_updated_at = datetime.utcnow()
                 logger.debug(
@@ -533,14 +613,15 @@ class BacktestService:
                 return True
 
         else:  # SHORT
-            if trade.stop_loss_price <= trade.entry_price:
+            be_sl = round(trade.entry_price * (1.0 - self.BREAKEVEN_FEE_PCT), 4)
+            if trade.stop_loss_price <= be_sl:
                 return False  # Already at break-even or better
             initial_risk = trade.initial_stop_loss_price - trade.entry_price
             if initial_risk <= 0:
                 return False
-            if candle['low'] <= trade.entry_price - 0.5 * initial_risk:
+            if candle['low'] <= trade.entry_price - 1.0 * initial_risk:
                 old_sl = trade.stop_loss_price
-                trade.stop_loss_price = round(trade.entry_price, 4)
+                trade.stop_loss_price = be_sl
                 trade.sl_tp_update_count = (trade.sl_tp_update_count or 0) + 1
                 trade.sl_tp_last_updated_at = datetime.utcnow()
                 logger.debug(
@@ -631,11 +712,12 @@ class BacktestService:
                 'exit_signal': None
             }
 
-        # Priority 1b: Intraday break-even + TP tighten using the already-fetched candle
+        # Priority 1b: TP tighten ELŐSZÖR, breakeven UTÁNA — így az adjudikáció
+        # mindkét frissített szinttel dolgozik (TP tightening preemptálhatja a BE SL-t)
         if price_trigger and price_trigger.get('candle'):
             candle = price_trigger['candle']
-            be_triggered = self._apply_intraday_breakeven(trade, candle)
             tp_tightened = self._apply_tp_tighten(trade, candle)
+            be_triggered = self._apply_intraday_breakeven(trade, candle)
 
             if be_triggered or tp_tightened:
                 # Re-check SL/TP with adjusted levels (edge case: new SL immediately breached)
@@ -784,27 +866,27 @@ class BacktestService:
         )
 
     def _find_opposing_signal(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Signal]:
-        """Find opposing signal since the current trading session start up to check_time.
+        """Find opposing signal strictly after the entry signal up to check_time - 15 min.
 
-        Uses trading-session boundaries instead of UTC-midnight so that signals
-        arriving in the evening (e.g. 19-22 UTC for US markets) are visible during
-        the NEXT trading day's checks (14:30+ UTC), which are in a different UTC day.
+        Keresési ablak: entry signal időpontja UTÁN — az entry előtti ellentétes signal
+        nem zárhatja a trade-et, hiszen az entry döntés annak ismeretében született.
+        Ez konzisztens a trade_simulator_core logikájával (signal_ts < ts <= bar_ts).
 
         +15 perces végrehajtási késés: a signalt csak a következő 15 perces bar-on
         lehet végrehajtani, ezért az ellentétes signal keresési ablaka (check_time - 15 min)-ig
-        tart. Ha ez kereskedési időn kívülre esne, a fő loop gondoskodik arról, hogy a
-        következő kereskedési nap nyitóján kerüljön végrehajtásra.
+        tart.
 
         We return the strongest (highest abs score) opposing signal so the most
         decisive reversal wins.
         """
-        session_start = self._trading_session_start(check_time_utc, trade.symbol)
+        # Az entry signal időpontja: entry_execution_time - 15 perc (a végrehajtási késés inverze)
+        entry_signal_time = trade.entry_execution_time - timedelta(minutes=15)
         execution_cutoff = check_time_utc - timedelta(minutes=15)
 
         signals = self.db.query(Signal).filter(
             and_(
                 Signal.ticker_symbol == trade.symbol,
-                Signal.created_at >= session_start,
+                Signal.created_at > entry_signal_time,
                 Signal.created_at <= execution_cutoff,
                 Signal.id != trade.entry_signal_id
             )
@@ -824,11 +906,10 @@ class BacktestService:
         return best
 
     def _find_same_direction_signal(self, trade: SimulatedTrade, check_time_utc: datetime) -> Optional[Signal]:
-        """Find the strongest same-direction signal since the current trading session
-        start up to check_time.
+        """Find the strongest same-direction signal strictly after the entry signal.
 
-        Uses trading-session boundaries (not UTC midnight) so that evening signals
-        (19-22 UTC for US) are visible during the next trading day's 14:30+ UTC checks.
+        Keresési ablak: entry signal időpontja UTÁN — konzisztens az opposing signal
+        logikájával és a trade_simulator_core implementációjával.
 
         Used for signal-based adaptive SL/TP update:
         - LONG trade → signals with combined_score >= 25
@@ -836,12 +917,13 @@ class BacktestService:
 
         The entry signal is excluded. Only signals with at least one of SL/TP are useful.
         """
-        session_start = self._trading_session_start(check_time_utc, trade.symbol)
+        # Az entry signal időpontja: entry_execution_time - 15 perc (a végrehajtási késés inverze)
+        entry_signal_time = trade.entry_execution_time - timedelta(minutes=15)
 
         signals = self.db.query(Signal).filter(
             and_(
                 Signal.ticker_symbol == trade.symbol,
-                Signal.created_at >= session_start,
+                Signal.created_at > entry_signal_time,
                 Signal.created_at <= check_time_utc,
                 Signal.id != trade.entry_signal_id
             )
@@ -887,11 +969,11 @@ class BacktestService:
             trade.direction_2h_eligible = False
             return
 
-        # EOD időpont
+        # EOD időpont (DST-aware)
         if symbol.endswith('.BD'):
             eod = entry_time.replace(hour=16, minute=0, second=0, microsecond=0)
         else:
-            eod = entry_time.replace(hour=21, minute=0, second=0, microsecond=0)
+            eod = _us_eod_utc(entry_time)   # 20:00 UTC (EDT) vagy 21:00 UTC (EST)
 
         raw_exit = entry_time + timedelta(hours=2)
         exit_time = min(raw_exit, eod - timedelta(minutes=5))
@@ -950,6 +1032,9 @@ class BacktestService:
         Két kategória kerül szimulációba:
         - |score| >= 25: valódi alert-szintű signalok (is_real_trade lehet True vagy False)
         - 15 <= |score| < 25: gyengébb signalok (is_real_trade=False, csak finomhangoláshoz)
+
+        'migrated' státuszú signalok kizárva: ezek már az archive-ban vannak,
+        a live szimulációnak nincs rajtuk elvégzendő feladata.
         """
         query = self.db.query(Signal)
 
@@ -961,6 +1046,11 @@ class BacktestService:
 
         if symbols:
             query = query.filter(Signal.ticker_symbol.in_(symbols))
+
+        # Csak live signalok:
+        # - 'migrated': már archive-ban van, nincs live feladata
+        # - 'nogo': HOLD döntés (régi kód) vagy problémás signal, soha nem nyit trade-et
+        query = query.filter(Signal.status.notin_(['migrated', 'nogo']))
 
         # Minden nem-neutral signal (HOLD zone határán túl)
         query = query.filter(

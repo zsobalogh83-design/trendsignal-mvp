@@ -20,24 +20,31 @@ Fitness formula:
     If total_trades < MIN_TRADES: fitness = 0.0 (penalty)
     If total_gross_loss == 0:     fitness = win_rate × 3.0 (cap)
 
-Data split (v2.1):
-    The baseline config was iteratively improved on recent market conditions,
-    so the optimizer must also target recent data.  Split direction is
-    REVERSED so the newest 50% becomes the training set:
+Data split (v3.0 — random):
+    Véletlenszerű felosztás időszak-független stabilitásért.
+    A run_id seed-ként szolgál → egy futáson belül konzisztens, futások között eltérő.
 
-        [── TEST 20% (oldest) ──][─── VAL 30% ───][──── TRAIN 50% (newest) ────]
+        50% train  |  30% val  |  20% test   (véletlenszerűen kiválasztott sorok)
 
-Version: 2.1
-Date: 2026-03-08
+    Előnye a korábbi reversed-chronological splittel szemben:
+      - Nem kötődik egyetlen piaci rezsimhez sem
+      - A GA általánosan jobb konfigurációkat talál
+      - Train/val/test fitness értékek összehasonlíthatóak és stabilak
+
+Version: 3.0
+Date: 2026-03-29
 """
 
+import random
 from typing import Dict, List, Optional, Tuple
 
 from optimizer.trade_simulator import TradeSimResult
 from optimizer.signal_data import SignalSimRow
 
-# Minimum trades for a valid fitness score
-MIN_TRADES = 20
+# Minimum trades for a valid fitness score.
+# 50 alatt a GA cherry-picking-et végez (kevés, de mind nyerő trade → hamisan magas fitness).
+# Ez az érték megegyezik a validációs gate min_trades küszöbével.
+MIN_TRADES = 50
 
 
 # ---------------------------------------------------------------------------
@@ -165,42 +172,39 @@ def split_rows(
     train_ratio: float = 0.50,
     val_ratio:   float = 0.30,
     min_trades_per_split: int = 20,
+    random_seed: Optional[int] = None,
 ) -> Tuple[List[SignalSimRow], List[SignalSimRow], List[SignalSimRow]]:
     """
     Split signal rows into train / validation / test sets.
 
-    REVERSED chronological split (v2.1): the newest data is the TRAINING set.
+    RANDOM split (v3.0): véletlenszerű, időszak-független felosztás.
 
-    Rationale: the baseline config was iteratively fine-tuned on recent market
-    conditions, so it naturally performs best on recent data.  Optimizing on
-    old data (original split) produced configs that degraded on newer periods.
-    By reversing, the GA/BCD targets the same market regime the baseline was
-    tuned for, making the fitness landscape consistent.
+    Rationale: az időszak-alapú (reversed chronological) split egyetlen piaci
+    rezsimhez kötötte a GA-t. Véletlenszerű splittel a GA általánosan jobb
+    konfigurációkat talál, a fitness értékek összehasonlíthatók és stabilak.
 
-    Layout (oldest → newest signal by timestamp):
-        [── TEST 20% ──][─── VAL 30% ───][──── TRAIN 50% ────]
+    random_seed: reprodukálhatósághoz (tipikusan a run_id).
+    Ha None, minden híváskor más felosztás keletkezik.
 
-    - TRAIN (newest 50%): primary optimization target — matches current regime
-    - VAL   (middle 30%): overfitting guard — must also improve
-    - TEST  (oldest 20%): stability check — we don't want to collapse on
-                          historical market conditions entirely
-
-    Split is by signal count (not trade count); trades are generated on-the-fly.
-    Default: 50% train / 30% val / 20% test.
+    Default: 50% train / 30% val / 20% test (véletlenszerűen kiválasztva).
     """
     n = len(rows)
 
-    test_ratio = 1.0 - train_ratio - val_ratio   # default 0.20
-    test_end   = int(n * test_ratio)
-    val_end    = int(n * (test_ratio + val_ratio))
+    # Véletlenszerű index-keverés (seeded → egy futáson belül konzisztens)
+    indices = list(range(n))
+    rng = random.Random(random_seed)
+    rng.shuffle(indices)
 
-    # Ensure minimum sizes — each split must have at least 10% of data
-    test_end = max(test_end, int(n * 0.10))
-    val_end  = max(val_end,  test_end + int(n * 0.10))
-    val_end  = min(val_end,  n - int(n * 0.10))
+    test_end = int(n * (1.0 - train_ratio - val_ratio))
+    val_end  = int(n * (1.0 - train_ratio))
 
-    test  = rows[:test_end]        # oldest  ~20% — stability / sanity check
-    val   = rows[test_end:val_end] # middle  ~30% — overfitting guard
-    train = rows[val_end:]         # newest  ~50% — primary optimization target
+    # Minimum méret: legalább 10% minden részbe
+    test_end = max(test_end, max(1, int(n * 0.10)))
+    val_end  = max(val_end,  test_end + max(1, int(n * 0.10)))
+    val_end  = min(val_end,  n - max(1, int(n * 0.10)))
+
+    test  = [rows[i] for i in indices[:test_end]]
+    val   = [rows[i] for i in indices[test_end:val_end]]
+    train = [rows[i] for i in indices[val_end:]]
 
     return train, val, test

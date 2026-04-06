@@ -76,9 +76,42 @@ DECAY_WEIGHTS = {
 # COMPONENT WEIGHTS (FINAL)
 # ==========================================
 
-SENTIMENT_WEIGHT = 0.70  # 70% - Primary driver
-TECHNICAL_WEIGHT = 0.20  # 20% - Confirmation
-RISK_WEIGHT = 0.10       # 10% - Risk management
+# Legacy 3-component weights (backward compat display/logging only)
+SENTIMENT_WEIGHT = 0.50  # 50% - Primary driver
+TECHNICAL_WEIGHT = 0.00  # 0%  - Disabled (inverted correlation found in analysis)
+RISK_WEIGHT = 0.50       # 50% - Risk management
+
+# ==========================================
+# 12-COMPONENT WEIGHTS (new architecture)
+# ==========================================
+# Sum = 1.00 — every component gets a direct, bounded contribution
+CW_SMA_TREND         = 0.12  # Golden/Death cross, SMA20 vs SMA50
+CW_RSI_MOMENTUM      = 0.10  # Oversold / overbought zone
+CW_MACD_SIGNAL       = 0.08  # MACD crossover direction
+CW_BB_POSITION       = 0.04  # Bollinger Band position
+CW_STOCH_CROSS       = 0.02  # Stochastic K/D cross
+CW_VOLUME_CONFIRM    = 0.02  # Volume confirmation ratio
+CW_SENTIMENT_SIGNAL  = 0.30  # News sentiment direction (primary driver)
+CW_SENTIMENT_RECENCY = 0.10  # News freshness / confidence modifier
+CW_VOLATILITY_RISK   = 0.08  # ATR-based volatility (bounded: max ±8 pts)
+CW_SR_PROXIMITY      = 0.08  # Support/Resistance proximity
+CW_TREND_STRENGTH    = 0.04  # ADX trend strength
+CW_RR_QUALITY        = 0.02  # Risk/Reward ratio quality bonus
+
+COMPONENT_WEIGHTS = {
+    "sma_trend":         CW_SMA_TREND,
+    "rsi_momentum":      CW_RSI_MOMENTUM,
+    "macd_signal":       CW_MACD_SIGNAL,
+    "bb_position":       CW_BB_POSITION,
+    "stoch_cross":       CW_STOCH_CROSS,
+    "volume_confirm":    CW_VOLUME_CONFIRM,
+    "sentiment_signal":  CW_SENTIMENT_SIGNAL,
+    "sentiment_recency": CW_SENTIMENT_RECENCY,
+    "volatility_risk":   CW_VOLATILITY_RISK,
+    "sr_proximity":      CW_SR_PROXIMITY,
+    "trend_strength":    CW_TREND_STRENGTH,
+    "rr_quality":        CW_RR_QUALITY,
+}
 
 
 # ==========================================
@@ -86,7 +119,23 @@ RISK_WEIGHT = 0.10       # 10% - Risk management
 # ==========================================
 
 # HOLD Zone
-HOLD_ZONE_THRESHOLD = 15  # ±15 = neutral zone where no BUY/SELL signal is generated
+HOLD_ZONE_THRESHOLD = 25  # ±25 = neutral zone where no BUY/SELL signal is generated
+
+# ==========================================
+# ENTRY GATE THRESHOLDS
+# ==========================================
+# Applied AFTER signal generation, BEFORE trade opening.
+# BUY gates block trades where momentum/context is unfavorable.
+# SELL gates block trades where mean-reversion risk is high.
+# Set to extreme values (e.g. RSI_BUY_MAX=100) to effectively disable a gate.
+
+ENTRY_GATE_RSI_BUY_MAX        = 55.0   # BUY blocked if RSI >= this (overbought)
+ENTRY_GATE_RSI_SELL_MIN       = 45.0   # SELL blocked if RSI <= this (oversold)
+ENTRY_GATE_MACD_HIST_BUY_MIN  = 0.0    # BUY blocked if macd_hist <= this (bearish momentum)
+ENTRY_GATE_MACD_HIST_SELL_MAX = 0.0    # SELL blocked if macd_hist >= this (bullish momentum)
+ENTRY_GATE_SMA200_BUY_MAX_PCT  = 5.0   # BUY blocked if price > SMA200 by more than this % (extended)
+ENTRY_GATE_SMA200_SELL_MIN_PCT = -5.0  # SELL blocked if price < SMA200 by more than |this| % (oversold)
+ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT = 15.0  # BUY blocked if dist_to_resistance > this % (no room to run)
 
 # Strong signals
 STRONG_BUY_SCORE = 65
@@ -447,12 +496,33 @@ def save_config_to_file(config_instance):
     """Save current configuration to JSON file for persistence"""
     try:
         config_dict = {
-            # Signal weights
+            # Legacy 3-component weights (backward compat)
             "SENTIMENT_WEIGHT": config_instance.sentiment_weight,
             "TECHNICAL_WEIGHT": config_instance.technical_weight,
             "RISK_WEIGHT": config_instance.risk_weight,
+            # 12-component weights
+            "CW_SMA_TREND":         config_instance.cw_sma_trend,
+            "CW_RSI_MOMENTUM":      config_instance.cw_rsi_momentum,
+            "CW_MACD_SIGNAL":       config_instance.cw_macd_signal,
+            "CW_BB_POSITION":       config_instance.cw_bb_position,
+            "CW_STOCH_CROSS":       config_instance.cw_stoch_cross,
+            "CW_VOLUME_CONFIRM":    config_instance.cw_volume_confirm,
+            "CW_SENTIMENT_SIGNAL":  config_instance.cw_sentiment_signal,
+            "CW_SENTIMENT_RECENCY": config_instance.cw_sentiment_recency,
+            "CW_VOLATILITY_RISK":   config_instance.cw_volatility_risk,
+            "CW_SR_PROXIMITY":      config_instance.cw_sr_proximity,
+            "CW_TREND_STRENGTH":    config_instance.cw_trend_strength,
+            "CW_RR_QUALITY":        config_instance.cw_rr_quality,
             # Thresholds
             "HOLD_ZONE_THRESHOLD": config_instance.hold_zone_threshold,
+            # Entry gate thresholds
+            "ENTRY_GATE_RSI_BUY_MAX":             config_instance.entry_gate_rsi_buy_max,
+            "ENTRY_GATE_RSI_SELL_MIN":            config_instance.entry_gate_rsi_sell_min,
+            "ENTRY_GATE_MACD_HIST_BUY_MIN":       config_instance.entry_gate_macd_hist_buy_min,
+            "ENTRY_GATE_MACD_HIST_SELL_MAX":      config_instance.entry_gate_macd_hist_sell_max,
+            "ENTRY_GATE_SMA200_BUY_MAX_PCT":      config_instance.entry_gate_sma200_buy_max_pct,
+            "ENTRY_GATE_SMA200_SELL_MIN_PCT":     config_instance.entry_gate_sma200_sell_min_pct,
+            "ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT": config_instance.entry_gate_dist_resist_buy_max_pct,
             "STRONG_BUY_SCORE": config_instance.strong_buy_score,
             "STRONG_BUY_CONFIDENCE": config_instance.strong_buy_confidence,
             "MODERATE_BUY_SCORE": config_instance.moderate_buy_score,
@@ -686,13 +756,36 @@ class TrendSignalConfig:
     # Decay model
     decay_weights: Dict[str, float] = None
     
-    # Component weights
+    # Legacy 3-component weights (backward compat / display only)
     sentiment_weight: float = SENTIMENT_WEIGHT
     technical_weight: float = TECHNICAL_WEIGHT
     risk_weight: float = RISK_WEIGHT
-    
+
+    # 12-component weights (new architecture)
+    cw_sma_trend:         float = CW_SMA_TREND
+    cw_rsi_momentum:      float = CW_RSI_MOMENTUM
+    cw_macd_signal:       float = CW_MACD_SIGNAL
+    cw_bb_position:       float = CW_BB_POSITION
+    cw_stoch_cross:       float = CW_STOCH_CROSS
+    cw_volume_confirm:    float = CW_VOLUME_CONFIRM
+    cw_sentiment_signal:  float = CW_SENTIMENT_SIGNAL
+    cw_sentiment_recency: float = CW_SENTIMENT_RECENCY
+    cw_volatility_risk:   float = CW_VOLATILITY_RISK
+    cw_sr_proximity:      float = CW_SR_PROXIMITY
+    cw_trend_strength:    float = CW_TREND_STRENGTH
+    cw_rr_quality:        float = CW_RR_QUALITY
+
     # Decision thresholds
     hold_zone_threshold: int = HOLD_ZONE_THRESHOLD
+
+    # Entry gate thresholds
+    entry_gate_rsi_buy_max:            float = ENTRY_GATE_RSI_BUY_MAX
+    entry_gate_rsi_sell_min:           float = ENTRY_GATE_RSI_SELL_MIN
+    entry_gate_macd_hist_buy_min:      float = ENTRY_GATE_MACD_HIST_BUY_MIN
+    entry_gate_macd_hist_sell_max:     float = ENTRY_GATE_MACD_HIST_SELL_MAX
+    entry_gate_sma200_buy_max_pct:     float = ENTRY_GATE_SMA200_BUY_MAX_PCT
+    entry_gate_sma200_sell_min_pct:    float = ENTRY_GATE_SMA200_SELL_MIN_PCT
+    entry_gate_dist_resist_buy_max_pct: float = ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT
     
     strong_buy_score: int = STRONG_BUY_SCORE
     strong_buy_confidence: float = STRONG_BUY_CONFIDENCE
@@ -893,8 +986,29 @@ class TrendSignalConfig:
             self.sentiment_weight = saved_config.get("SENTIMENT_WEIGHT", SENTIMENT_WEIGHT)
             self.technical_weight = saved_config.get("TECHNICAL_WEIGHT", TECHNICAL_WEIGHT)
             self.risk_weight = saved_config.get("RISK_WEIGHT", RISK_WEIGHT)
+            # 12-component weights
+            self.cw_sma_trend         = saved_config.get("CW_SMA_TREND",         CW_SMA_TREND)
+            self.cw_rsi_momentum      = saved_config.get("CW_RSI_MOMENTUM",      CW_RSI_MOMENTUM)
+            self.cw_macd_signal       = saved_config.get("CW_MACD_SIGNAL",       CW_MACD_SIGNAL)
+            self.cw_bb_position       = saved_config.get("CW_BB_POSITION",       CW_BB_POSITION)
+            self.cw_stoch_cross       = saved_config.get("CW_STOCH_CROSS",       CW_STOCH_CROSS)
+            self.cw_volume_confirm    = saved_config.get("CW_VOLUME_CONFIRM",    CW_VOLUME_CONFIRM)
+            self.cw_sentiment_signal  = saved_config.get("CW_SENTIMENT_SIGNAL",  CW_SENTIMENT_SIGNAL)
+            self.cw_sentiment_recency = saved_config.get("CW_SENTIMENT_RECENCY", CW_SENTIMENT_RECENCY)
+            self.cw_volatility_risk   = saved_config.get("CW_VOLATILITY_RISK",   CW_VOLATILITY_RISK)
+            self.cw_sr_proximity      = saved_config.get("CW_SR_PROXIMITY",      CW_SR_PROXIMITY)
+            self.cw_trend_strength    = saved_config.get("CW_TREND_STRENGTH",    CW_TREND_STRENGTH)
+            self.cw_rr_quality        = saved_config.get("CW_RR_QUALITY",        CW_RR_QUALITY)
             # Decision thresholds
             self.hold_zone_threshold = saved_config.get("HOLD_ZONE_THRESHOLD", HOLD_ZONE_THRESHOLD)
+            # Entry gate thresholds
+            self.entry_gate_rsi_buy_max            = saved_config.get("ENTRY_GATE_RSI_BUY_MAX",             ENTRY_GATE_RSI_BUY_MAX)
+            self.entry_gate_rsi_sell_min           = saved_config.get("ENTRY_GATE_RSI_SELL_MIN",            ENTRY_GATE_RSI_SELL_MIN)
+            self.entry_gate_macd_hist_buy_min      = saved_config.get("ENTRY_GATE_MACD_HIST_BUY_MIN",      ENTRY_GATE_MACD_HIST_BUY_MIN)
+            self.entry_gate_macd_hist_sell_max     = saved_config.get("ENTRY_GATE_MACD_HIST_SELL_MAX",     ENTRY_GATE_MACD_HIST_SELL_MAX)
+            self.entry_gate_sma200_buy_max_pct     = saved_config.get("ENTRY_GATE_SMA200_BUY_MAX_PCT",     ENTRY_GATE_SMA200_BUY_MAX_PCT)
+            self.entry_gate_sma200_sell_min_pct    = saved_config.get("ENTRY_GATE_SMA200_SELL_MIN_PCT",    ENTRY_GATE_SMA200_SELL_MIN_PCT)
+            self.entry_gate_dist_resist_buy_max_pct = saved_config.get("ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT", ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT)
             self.strong_buy_score = saved_config.get("STRONG_BUY_SCORE", STRONG_BUY_SCORE)
             self.strong_buy_confidence = saved_config.get("STRONG_BUY_CONFIDENCE", STRONG_BUY_CONFIDENCE)
             self.moderate_buy_score = saved_config.get("MODERATE_BUY_SCORE", MODERATE_BUY_SCORE)
@@ -1097,6 +1211,24 @@ class TrendSignalConfig:
                 save_config_to_file(self)
                 print("[OK] Config auto-migrated with new parameters")
     
+    @property
+    def COMPONENT_WEIGHTS(self) -> dict:
+        """Return the 12-component weights as a dict (new architecture)."""
+        return {
+            "sma_trend":         self.cw_sma_trend,
+            "rsi_momentum":      self.cw_rsi_momentum,
+            "macd_signal":       self.cw_macd_signal,
+            "bb_position":       self.cw_bb_position,
+            "stoch_cross":       self.cw_stoch_cross,
+            "volume_confirm":    self.cw_volume_confirm,
+            "sentiment_signal":  self.cw_sentiment_signal,
+            "sentiment_recency": self.cw_sentiment_recency,
+            "volatility_risk":   self.cw_volatility_risk,
+            "sr_proximity":      self.cw_sr_proximity,
+            "trend_strength":    self.cw_trend_strength,
+            "rr_quality":        self.cw_rr_quality,
+        }
+
     # Uppercase property aliases for backward compatibility
     @property
     def SENTIMENT_WEIGHT(self):
@@ -1161,8 +1293,29 @@ class TrendSignalConfig:
             self.sentiment_weight = saved_config.get("SENTIMENT_WEIGHT", SENTIMENT_WEIGHT)
             self.technical_weight = saved_config.get("TECHNICAL_WEIGHT", TECHNICAL_WEIGHT)
             self.risk_weight = saved_config.get("RISK_WEIGHT", RISK_WEIGHT)
+            # 12-component weights
+            self.cw_sma_trend         = saved_config.get("CW_SMA_TREND",         CW_SMA_TREND)
+            self.cw_rsi_momentum      = saved_config.get("CW_RSI_MOMENTUM",      CW_RSI_MOMENTUM)
+            self.cw_macd_signal       = saved_config.get("CW_MACD_SIGNAL",       CW_MACD_SIGNAL)
+            self.cw_bb_position       = saved_config.get("CW_BB_POSITION",       CW_BB_POSITION)
+            self.cw_stoch_cross       = saved_config.get("CW_STOCH_CROSS",       CW_STOCH_CROSS)
+            self.cw_volume_confirm    = saved_config.get("CW_VOLUME_CONFIRM",    CW_VOLUME_CONFIRM)
+            self.cw_sentiment_signal  = saved_config.get("CW_SENTIMENT_SIGNAL",  CW_SENTIMENT_SIGNAL)
+            self.cw_sentiment_recency = saved_config.get("CW_SENTIMENT_RECENCY", CW_SENTIMENT_RECENCY)
+            self.cw_volatility_risk   = saved_config.get("CW_VOLATILITY_RISK",   CW_VOLATILITY_RISK)
+            self.cw_sr_proximity      = saved_config.get("CW_SR_PROXIMITY",      CW_SR_PROXIMITY)
+            self.cw_trend_strength    = saved_config.get("CW_TREND_STRENGTH",    CW_TREND_STRENGTH)
+            self.cw_rr_quality        = saved_config.get("CW_RR_QUALITY",        CW_RR_QUALITY)
             # Decision thresholds
             self.hold_zone_threshold = saved_config.get("HOLD_ZONE_THRESHOLD", HOLD_ZONE_THRESHOLD)
+            # Entry gate thresholds
+            self.entry_gate_rsi_buy_max            = saved_config.get("ENTRY_GATE_RSI_BUY_MAX",             ENTRY_GATE_RSI_BUY_MAX)
+            self.entry_gate_rsi_sell_min           = saved_config.get("ENTRY_GATE_RSI_SELL_MIN",            ENTRY_GATE_RSI_SELL_MIN)
+            self.entry_gate_macd_hist_buy_min      = saved_config.get("ENTRY_GATE_MACD_HIST_BUY_MIN",      ENTRY_GATE_MACD_HIST_BUY_MIN)
+            self.entry_gate_macd_hist_sell_max     = saved_config.get("ENTRY_GATE_MACD_HIST_SELL_MAX",     ENTRY_GATE_MACD_HIST_SELL_MAX)
+            self.entry_gate_sma200_buy_max_pct     = saved_config.get("ENTRY_GATE_SMA200_BUY_MAX_PCT",     ENTRY_GATE_SMA200_BUY_MAX_PCT)
+            self.entry_gate_sma200_sell_min_pct    = saved_config.get("ENTRY_GATE_SMA200_SELL_MIN_PCT",    ENTRY_GATE_SMA200_SELL_MIN_PCT)
+            self.entry_gate_dist_resist_buy_max_pct = saved_config.get("ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT", ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT)
             self.strong_buy_score = saved_config.get("STRONG_BUY_SCORE", STRONG_BUY_SCORE)
             self.strong_buy_confidence = saved_config.get("STRONG_BUY_CONFIDENCE", STRONG_BUY_CONFIDENCE)
             self.moderate_buy_score = saved_config.get("MODERATE_BUY_SCORE", MODERATE_BUY_SCORE)
@@ -1329,10 +1482,16 @@ class TrendSignalConfig:
         if not self.marketaux_api_key:
             print("[WARN] Warning: Marketaux API key not set!")
 
-        # Check weights sum to 1.0
-        total_weight = self.sentiment_weight + self.technical_weight + self.risk_weight
+        # Check 12-component weights sum to 1.0
+        total_weight = (
+            self.cw_sma_trend + self.cw_rsi_momentum + self.cw_macd_signal +
+            self.cw_bb_position + self.cw_stoch_cross + self.cw_volume_confirm +
+            self.cw_sentiment_signal + self.cw_sentiment_recency +
+            self.cw_volatility_risk + self.cw_sr_proximity +
+            self.cw_trend_strength + self.cw_rr_quality
+        )
         if abs(total_weight - 1.0) > 0.01:
-            print(f"[WARN] Warning: Component weights sum to {total_weight}, not 1.0!")
+            print(f"[WARN] Warning: 12-component weights sum to {total_weight:.4f}, not 1.0!")
             return False
 
         print("[OK] Configuration validated!")
@@ -1440,6 +1599,22 @@ def load_config_from_env() -> TrendSignalConfig:
         alphavantage_key=os.getenv("ALPHAVANTAGE_KEY", ALPHAVANTAGE_KEY),
     )
     return config
+
+
+# ── Module deduplication ────────────────────────────────────────────────────
+# Python treats 'config' and 'src.config' as separate entries in sys.modules
+# even when they resolve to the same physical file. This causes dual singletons:
+# config_api.py might update src.config.default_config while archive_backtest
+# reads config.default_config — a completely different object.
+#
+# Fix: after full initialization, register this module under BOTH aliases.
+# The second import attempt (via either path) will find the already-initialized
+# module in sys.modules and reuse it instead of creating a fresh instance.
+import sys as _sys
+_self = _sys.modules[__name__]
+for _alias in ('config', 'src.config'):
+    _sys.modules[_alias] = _self
+del _sys, _self, _alias
 
 
 if __name__ == "__main__":

@@ -205,7 +205,7 @@ def create_table(conn: sqlite3.Connection):
 def load_15m(conn: sqlite3.Connection, ticker: str) -> pd.DataFrame:
     df = pd.read_sql_query(
         "SELECT timestamp, open, high, low, close, volume "
-        "FROM price_data_alpaca "
+        "FROM price_data "
         "WHERE ticker_symbol=? AND interval='15m' ORDER BY timestamp",
         conn, params=(ticker,)
     )
@@ -217,7 +217,7 @@ def load_15m(conn: sqlite3.Connection, ticker: str) -> pd.DataFrame:
 def load_1d(conn: sqlite3.Connection, ticker: str) -> pd.DataFrame:
     df = pd.read_sql_query(
         "SELECT timestamp, open, high, low, close, volume "
-        "FROM price_data_alpaca "
+        "FROM price_data "
         "WHERE ticker_symbol=? AND interval='1d' ORDER BY timestamp",
         conn, params=(ticker,)
     )

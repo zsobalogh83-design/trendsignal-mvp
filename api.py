@@ -35,6 +35,84 @@ from main import get_config
 # Import scheduler functions
 from scheduler import generate_signals_for_active_markets
 
+# Import daily simulate+migrate job
+from src.backtest_service import BacktestService
+from src.models import SimulatedTrade, Signal
+from src.live_to_archive_migrator import (
+    migrate_closed_trade_to_archive,
+    migrate_signal_without_trade,
+)
+
+
+def run_daily_simulate_and_migrate():
+    """
+    Napi 09:08 CET: live backtest futtatása, majd teljes migráció:
+      1. Lezárt trade-ek → archive_signals + archive_simulated_trades
+      2. Trade nélküli expired/archived signalok → archive_signals
+         (recalc-ready: a következő recalculate-and-resimulate fut rájuk)
+    Manuális trigger-től függetlenül minden nap lefut.
+    """
+    logger.info("⏰ [DailyJob] Napi szimuláció + migráció indul...")
+    try:
+        from src.database import get_db as _get_db
+        db = next(_get_db())
+        try:
+            # Orphan lista BACKTEST ELŐTT: csak az eleve nem-live státuszú
+            # signalok kerülnek migrálásra, a backtest által frissen
+            # no_data/parallel_skip/stb. státuszra állított BUY/SELL signalok
+            # nem vesznek el azonnal (következő szimulációs körben újra próbálhatók).
+            _MIGRATABLE = ['expired', 'archived',
+                           'skip_hours', 'parallel_skip', 'no_sl_tp',
+                           'no_data', 'invalid_levels']
+            orphan_ids = [
+                s.id for s in db.query(Signal).filter(
+                    (Signal.status.in_(_MIGRATABLE)) |
+                    ((Signal.status == 'active') & (Signal.decision == 'HOLD'))
+                ).all()
+            ]
+
+            service = BacktestService(db)
+            result = service.run_backtest()
+            stats = result.get('stats', {})
+            logger.info(f"[DailyJob] Backtest kész: {stats}")
+            closed_ids = [
+                t.id for t in db.query(SimulatedTrade)
+                .filter(SimulatedTrade.status == 'CLOSED').all()
+            ]
+        finally:
+            db.close()
+
+        # 1. Lezárt trade-ek migrálása
+        migrated = errors = 0
+        for tid in closed_ids:
+            try:
+                if migrate_closed_trade_to_archive(tid):
+                    migrated += 1
+            except Exception as e:
+                errors += 1
+                logger.warning(f"[DailyJob] Trade migráció hiba {tid}: {e}")
+        logger.info(
+            f"[DailyJob] Trade migráció: {migrated}/{len(closed_ids)}"
+            + (f" ({errors} hiba)" if errors else "")
+        )
+
+        # 2. Trade nélküli expired/archived signalok migrálása
+        migrated_s = errors_s = 0
+        for sid in orphan_ids:
+            try:
+                if migrate_signal_without_trade(sid):
+                    migrated_s += 1
+            except Exception as e:
+                errors_s += 1
+                logger.warning(f"[DailyJob] Signal migráció hiba {sid}: {e}")
+        logger.info(
+            f"[DailyJob] Signal migráció (trade nélkül): {migrated_s}/{len(orphan_ids)}"
+            + (f" ({errors_s} hiba)" if errors_s else "")
+        )
+
+    except Exception as e:
+        logger.error(f"[DailyJob] Fatális hiba: {e}", exc_info=True)
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -83,6 +161,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ init_db failed: {e}")
 
+
     logger.info("📊 Database connection established")
 
     config = get_config()
@@ -108,12 +187,23 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         max_instances=1  # Prevent overlapping runs
     )
-    
+
+    # Napi 09:08 CET: live backtest + archive migráció
+    scheduler.add_job(
+        run_daily_simulate_and_migrate,
+        trigger=CronTrigger(hour=9, minute=8, timezone="Europe/Budapest"),
+        id='daily_simulate_migrate',
+        name='Daily Simulate + Archive Migration',
+        replace_existing=True,
+        max_instances=1,
+    )
+
     # Start scheduler
     scheduler.start()
     logger.info(f"⏰ Scheduler started - Signal refresh every {config.signal_refresh_interval} minutes")
     logger.info(f"   BÉT Hours: {config.bet_market_open}-{config.bet_market_close} {config.bet_timezone}")
     logger.info(f"   US Hours:  {config.us_market_open}-{config.us_market_close} {config.us_timezone}")
+    logger.info(f"   Daily Simulate+Migrate: 09:08 CET (minden nap, manuális triggertől függetlenül)")
     
     yield  # Application runs here
     

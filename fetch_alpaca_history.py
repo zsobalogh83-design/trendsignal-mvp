@@ -2,7 +2,7 @@
 Alpaca historikus adatok tömeges letöltése
 
 Letölti az összes US ticker árfolyamadatát az összes használt intervallumra,
-2 évre visszamenőleg, és elmenti a price_data_alpaca táblába.
+2 évre visszamenőleg, és elmenti a price_data táblába.
 
 Futtatás:
     python fetch_alpaca_history.py

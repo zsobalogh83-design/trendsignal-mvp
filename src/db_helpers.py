@@ -5,7 +5,7 @@ Utility functions for database operations with proper timestamp handling
 Version: 2.1 - Added Price Data & Technical Indicator Persistence
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_type
 from typing import List, Optional
 from sqlalchemy.orm import Session
 
@@ -129,6 +129,11 @@ def save_news_item_to_db(news_item: NewsItem, ticker_symbol: str, db: Session) -
         
     except Exception as e:
         db.rollback()
+        from sqlalchemy.exc import IntegrityError
+        if isinstance(e, IntegrityError):
+            # Race condition: another thread inserted the same url_hash between our
+            # SELECT check and our INSERT. Treat as duplicate → silent skip.
+            return False
         print(f"❌ Error saving news to DB: {e}")
         import traceback
         traceback.print_exc()
@@ -202,6 +207,35 @@ def get_recent_news_from_db(
         return []
 
 
+def _market_has_opened_since(latest_ts: datetime, now: datetime, ticker_symbol: str) -> bool:
+    """
+    Returns True if a new trading session started between latest_ts and now.
+    If False, the cached data is still the freshest available (market hasn't moved).
+    """
+    try:
+        import pytz
+        is_bet = ticker_symbol.endswith('.BD')
+        et_tz = pytz.timezone('America/New_York')
+
+        cursor = latest_ts.date()
+        end = now.date()
+        while cursor <= end:
+            if cursor.weekday() < 5:  # Mon–Fri only
+                if is_bet:
+                    market_open = datetime(cursor.year, cursor.month, cursor.day, 8, 0, tzinfo=timezone.utc)
+                else:
+                    local_open = et_tz.localize(
+                        datetime(cursor.year, cursor.month, cursor.day, 9, 30)
+                    )
+                    market_open = local_open.astimezone(timezone.utc)
+                if latest_ts < market_open <= now:
+                    return True
+            cursor += timedelta(days=1)
+        return False
+    except Exception:
+        return True  # On error, assume market opened → force refresh (safe default)
+
+
 def get_price_data_from_db(
     ticker_symbol: str,
     interval: str,
@@ -273,8 +307,13 @@ def get_price_data_from_db(
         
         if age_minutes > max_age:
             if not allow_stale:
-                print(f"🔄 Cache STALE for {ticker_symbol} ({interval}): latest={latest_timestamp}, age={age_minutes:.1f}min > {max_age}min")
-                return None  # Cache is stale, force refresh
+                # If market hasn't opened since last candle, the DB data IS the freshest
+                # possible – no point hitting yfinance for identical data.
+                if not _market_has_opened_since(latest_timestamp, now, ticker_symbol):
+                    print(f"⏸️ Cache STALE but market CLOSED for {ticker_symbol} ({interval}): returning DB data (age={age_minutes:.1f}min)")
+                else:
+                    print(f"🔄 Cache STALE for {ticker_symbol} ({interval}): latest={latest_timestamp}, age={age_minutes:.1f}min > {max_age}min")
+                    return None  # Market was open since last candle → force refresh
             else:
                 print(f"⚠️ Cache STALE (fallback) for {ticker_symbol} ({interval}): age={age_minutes:.1f}min > {max_age}min – returning stale data")
                 # fall through and return the stale data below
