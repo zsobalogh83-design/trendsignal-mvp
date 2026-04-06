@@ -313,10 +313,24 @@ class SignalCalculation(Base):
     take_profit = Column(Float)
     risk_reward_ratio = Column(Float)
     
-    # CONTRIBUTIONS
+    # CONTRIBUTIONS (legacy)
     sentiment_contribution = Column(Float)
     technical_contribution = Column(Float)
     risk_contribution = Column(Float)
+
+    # 12-COMPONENT SCORES (new architecture)
+    # sentiment_signal_score = existing sentiment_score (no duplicate column needed)
+    sma_trend_score         = Column(Float)
+    rsi_momentum_score      = Column(Float)
+    macd_signal_score       = Column(Float)
+    bb_position_score       = Column(Float)
+    stoch_cross_score       = Column(Float)
+    volume_confirm_score    = Column(Float)
+    sentiment_recency_score = Column(Float)
+    volatility_risk_score   = Column(Float)
+    sr_proximity_score      = Column(Float)
+    trend_strength_score    = Column(Float)
+    rr_quality_score        = Column(Float)
     
     # DETAILED JSON DATA
     news_inputs = Column(Text)
