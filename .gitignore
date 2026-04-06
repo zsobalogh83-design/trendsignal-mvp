@@ -61,6 +61,12 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# TrendSignal database (too large for GitHub)
+trendsignal.db
+trendsignal.db-shm
+trendsignal.db-wal
+trendsignal.db-journal
+
 # Flask stuff:
 instance/
 .webassets-cache
