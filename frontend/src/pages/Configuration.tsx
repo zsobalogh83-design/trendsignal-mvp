@@ -524,37 +524,74 @@ function TechnicalTab({ weights, setWeights, indicatorParams: ip, setIndicatorPa
   );
 }
 
-function SignalsTab({ componentWeights: cw, setComponentWeights: setCw, thresholds: th, setThresholds: setTh,
+function SignalsTab({ componentWeights: cw, setComponentWeights: setCw, cw12, setCw12, thresholds: th, setThresholds: setTh,
   advSignal: as, setAdvSignal: setAs, entryGates, setEntryGates }: any) {
-  const cwTotal = cw.sentiment + cw.technical + cw.risk;
+  const cw12Total = Object.values(cw12 as Record<string, number>).reduce((a, b) => a + b, 0);
   const conf = (v: number) => Math.round(v * 100);
   const pct  = (v: number) => v / 100;
 
   return (
     <div>
-      {/* component weights */}
+      {/* 12-component weights */}
       <div className="cfg-section">
-        <div className="cfg-section-title">⚖️ Összetevők súlya (global signal)</div>
-        <div className="cfg-section-desc">Sentiment, Technical és Risk rész aránya a végső jelzés score-ban. Összeg: 100%.</div>
-        <ParamRow name="💭 Sentiment" desc="Hír-hangulat – fő trigger (FinBERT)"
-          tip="FinBERT alapú hír-sentiment súlya. Fő vezérlő jel.">
-          <NumInput value={cw.sentiment} min={0} max={100}
-            onChange={(v) => setCw({...cw, sentiment: v})} />
+        <div className="cfg-section-title">⚖️ 12-komponens súlyok (combined score)</div>
+        <div className="cfg-section-desc">Minden komponens közvetlen súlya a végső score-ban. Összeg: 100%.</div>
+
+        <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>📈 Technikai</div>
+        <ParamRow name="SMA trend" desc="SMA20/50 trend irány" tip="Mozgóátlag trend iránya (bullish/bearish). Max súly: 12%.">
+          <NumInput value={cw12.sma_trend} min={0} max={50} onChange={(v) => setCw12({...cw12, sma_trend: v})} />
           <span className="p-unit">%</span>
         </ParamRow>
-        <ParamRow name="📈 Technical" desc="Technikai indikátorok – megerősítő jel"
-          tip="Technikai indikátorok megerősítő súlya.">
-          <NumInput value={cw.technical} min={0} max={100}
-            onChange={(v) => setCw({...cw, technical: v})} />
+        <ParamRow name="RSI momentum" desc="RSI overbought/oversold zóna" tip="RSI alapú momentum jel.">
+          <NumInput value={cw12.rsi_momentum} min={0} max={50} onChange={(v) => setCw12({...cw12, rsi_momentum: v})} />
           <span className="p-unit">%</span>
         </ParamRow>
-        <ParamRow name="🛡️ Risk" desc="Kockázat / R:R minőség – stop-loss közelség"
-          tip="Kockázati komponens – stop/take-profit távolság minőség.">
-          <NumInput value={cw.risk} min={0} max={100}
-            onChange={(v) => setCw({...cw, risk: v})} />
+        <ParamRow name="MACD signal" desc="MACD histogram irány" tip="MACD keresztezés és histogram.">
+          <NumInput value={cw12.macd_signal} min={0} max={50} onChange={(v) => setCw12({...cw12, macd_signal: v})} />
           <span className="p-unit">%</span>
         </ParamRow>
-        <SumBar total={cwTotal} />
+        <ParamRow name="BB position" desc="Bollinger Band pozíció" tip="Ár elhelyezkedése a Bollinger sávban.">
+          <NumInput value={cw12.bb_position} min={0} max={30} onChange={(v) => setCw12({...cw12, bb_position: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+        <ParamRow name="Stoch cross" desc="Stochastic keresztezés" tip="Stochastic K/D keresztezés oversold/overbought zónában.">
+          <NumInput value={cw12.stoch_cross} min={0} max={20} onChange={(v) => setCw12({...cw12, stoch_cross: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+        <ParamRow name="Volume confirm" desc="Volumen megerősítés" tip="Volumen arány megerősítő jel.">
+          <NumInput value={cw12.volume_confirm} min={0} max={20} onChange={(v) => setCw12({...cw12, volume_confirm: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+
+        <div style={{ fontSize: '12px', color: '#94a3b8', margin: '10px 0 6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>💭 Sentiment</div>
+        <ParamRow name="Sentiment signal" desc="FinBERT hír-hangulat" tip="Fő FinBERT sentiment score (-100..+100).">
+          <NumInput value={cw12.sentiment_signal} min={0} max={60} onChange={(v) => setCw12({...cw12, sentiment_signal: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+        <ParamRow name="Sentiment recency" desc="Hírek frissessége" tip="Confidence × irány – friss hírek megerősítése.">
+          <NumInput value={cw12.sentiment_recency} min={0} max={40} onChange={(v) => setCw12({...cw12, sentiment_recency: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+
+        <div style={{ fontSize: '12px', color: '#94a3b8', margin: '10px 0 6px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>🛡️ Kockázat</div>
+        <ParamRow name="Volatility risk" desc="ATR alapú volatilitás" tip="Magas volatilitás negatív, alacsony pozitív hatás.">
+          <NumInput value={cw12.volatility_risk} min={0} max={30} onChange={(v) => setCw12({...cw12, volatility_risk: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+        <ParamRow name="S/R proximity" desc="Support/Resistance közelség" tip="Stop-loss és S/R szint közelségének minősége.">
+          <NumInput value={cw12.sr_proximity} min={0} max={30} onChange={(v) => setCw12({...cw12, sr_proximity: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+        <ParamRow name="Trend strength" desc="ADX trend erősség" tip="ADX alapú trend erősség (magas ADX pozitív).">
+          <NumInput value={cw12.trend_strength} min={0} max={20} onChange={(v) => setCw12({...cw12, trend_strength: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+        <ParamRow name="R:R quality" desc="Risk/Reward arány minőség" tip="TP/SL arány minősége (jó R:R = pozitív, rossz = negatív).">
+          <NumInput value={cw12.rr_quality} min={0} max={15} onChange={(v) => setCw12({...cw12, rr_quality: v})} />
+          <span className="p-unit">%</span>
+        </ParamRow>
+
+        <SumBar total={cw12Total} />
       </div>
 
       {/* signal thresholds */}
@@ -1009,6 +1046,13 @@ export function Configuration() {
     sentiment: 70, technical: 20, risk: 10,
   });
 
+  const [cw12, setCw12] = useState({
+    sma_trend: 12, rsi_momentum: 10, macd_signal: 8, bb_position: 4,
+    stoch_cross: 2, volume_confirm: 2,
+    sentiment_signal: 30, sentiment_recency: 10,
+    volatility_risk: 8, sr_proximity: 8, trend_strength: 4, rr_quality: 2,
+  });
+
   const [thresholds, setThresholds] = useState({
     holdZoneThreshold: 15,
     strongBuyScore: 65,    strongBuyConfidence: 0.75,
@@ -1162,6 +1206,25 @@ export function Configuration() {
             stochPeriod: ic.stoch_period, stochTimeframe: ic.stoch_timeframe, stochLookback: ic.stoch_lookback,
             adxPeriod: ic.adx_period, adxTimeframe: ic.adx_timeframe, adxLookback: ic.adx_lookback,
           });
+
+              const cwResponse = await fetch('http://localhost:8000/api/v1/config/component-weights');
+          if (cwResponse.ok) {
+            const cw = await cwResponse.json();
+            setCw12({
+              sma_trend:         Math.round(cw.sma_trend         * 100),
+              rsi_momentum:      Math.round(cw.rsi_momentum      * 100),
+              macd_signal:       Math.round(cw.macd_signal       * 100),
+              bb_position:       Math.round(cw.bb_position       * 100),
+              stoch_cross:       Math.round(cw.stoch_cross       * 100),
+              volume_confirm:    Math.round(cw.volume_confirm    * 100),
+              sentiment_signal:  Math.round(cw.sentiment_signal  * 100),
+              sentiment_recency: Math.round(cw.sentiment_recency * 100),
+              volatility_risk:   Math.round(cw.volatility_risk   * 100),
+              sr_proximity:      Math.round(cw.sr_proximity      * 100),
+              trend_strength:    Math.round(cw.trend_strength    * 100),
+              rr_quality:        Math.round(cw.rr_quality        * 100),
+            });
+          }
 
           const tcwResponse = await fetch('http://localhost:8000/api/v1/config/technical-component-weights');
           if (tcwResponse.ok) {
@@ -1470,6 +1533,30 @@ export function Configuration() {
         }),
       });
 
+      const cw12Total = Object.values(cw12).reduce((a, b) => a + b, 0);
+      if (Math.abs(cw12Total - 100) > 1) {
+        alert(`⚠️ 12-component weights must sum to 100%, currently: ${cw12Total}%`);
+        setSaving(false);
+        return;
+      }
+      await fetch('http://localhost:8000/api/v1/config/component-weights', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sma_trend:         cw12.sma_trend         / 100,
+          rsi_momentum:      cw12.rsi_momentum      / 100,
+          macd_signal:       cw12.macd_signal       / 100,
+          bb_position:       cw12.bb_position       / 100,
+          stoch_cross:       cw12.stoch_cross       / 100,
+          volume_confirm:    cw12.volume_confirm    / 100,
+          sentiment_signal:  cw12.sentiment_signal  / 100,
+          sentiment_recency: cw12.sentiment_recency / 100,
+          volatility_risk:   cw12.volatility_risk   / 100,
+          sr_proximity:      cw12.sr_proximity      / 100,
+          trend_strength:    cw12.trend_strength    / 100,
+          rr_quality:        cw12.rr_quality        / 100,
+        }),
+      });
+
       alert('✅ Configuration saved successfully!');
       await loadConfigFromBackend();
     } catch (error) {
@@ -1534,6 +1621,7 @@ export function Configuration() {
         {activeTab === 4 && (
           <SignalsTab
             componentWeights={componentWeights} setComponentWeights={setComponentWeights}
+            cw12={cw12} setCw12={setCw12}
             thresholds={thresholds} setThresholds={setThresholds}
             advSignal={advSignal} setAdvSignal={setAdvSignal}
             entryGates={entryGates} setEntryGates={setEntryGates}

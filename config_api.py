@@ -106,6 +106,37 @@ class TechnicalWeightsResponse(BaseModel):
     tech_rsi_overbought: int
     tech_rsi_oversold: int
 
+# ===== 12-COMPONENT WEIGHTS MODELS =====
+
+class ComponentWeightsUpdate(BaseModel):
+    """12 direct component weights — all must be provided together, sum must equal 1.0"""
+    sma_trend:         float = Field(..., ge=0, le=1)
+    rsi_momentum:      float = Field(..., ge=0, le=1)
+    macd_signal:       float = Field(..., ge=0, le=1)
+    bb_position:       float = Field(..., ge=0, le=1)
+    stoch_cross:       float = Field(..., ge=0, le=1)
+    volume_confirm:    float = Field(..., ge=0, le=1)
+    sentiment_signal:  float = Field(..., ge=0, le=1)
+    sentiment_recency: float = Field(..., ge=0, le=1)
+    volatility_risk:   float = Field(..., ge=0, le=1)
+    sr_proximity:      float = Field(..., ge=0, le=1)
+    trend_strength:    float = Field(..., ge=0, le=1)
+    rr_quality:        float = Field(..., ge=0, le=1)
+
+class ComponentWeightsResponse(BaseModel):
+    sma_trend:         float
+    rsi_momentum:      float
+    macd_signal:       float
+    bb_position:       float
+    stoch_cross:       float
+    volume_confirm:    float
+    sentiment_signal:  float
+    sentiment_recency: float
+    volatility_risk:   float
+    sr_proximity:      float
+    trend_strength:    float
+    rr_quality:        float
+
 # ===== NEW: INDICATOR PARAMETERS MODELS =====
 
 class IndicatorParametersUpdate(BaseModel):
@@ -955,6 +986,77 @@ async def update_technical_component_weights(updates: TechnicalComponentWeightsU
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+# ===== 12-COMPONENT WEIGHTS ENDPOINTS =====
+
+@router.get("/component-weights", response_model=ComponentWeightsResponse)
+async def get_component_weights():
+    """Get current 12-component scoring weights"""
+    try:
+        from src.config import get_config
+        config = get_config()
+        cw = config.COMPONENT_WEIGHTS
+        return ComponentWeightsResponse(
+            sma_trend=cw["sma_trend"],
+            rsi_momentum=cw["rsi_momentum"],
+            macd_signal=cw["macd_signal"],
+            bb_position=cw["bb_position"],
+            stoch_cross=cw["stoch_cross"],
+            volume_confirm=cw["volume_confirm"],
+            sentiment_signal=cw["sentiment_signal"],
+            sentiment_recency=cw["sentiment_recency"],
+            volatility_risk=cw["volatility_risk"],
+            sr_proximity=cw["sr_proximity"],
+            trend_strength=cw["trend_strength"],
+            rr_quality=cw["rr_quality"],
+        )
+    except Exception as e:
+        logger.error(f"Error getting component weights: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.put("/component-weights", response_model=ComponentWeightsResponse)
+async def update_component_weights(updates: ComponentWeightsUpdate):
+    """Update 12-component scoring weights (all 12 required, must sum to 1.0)"""
+    try:
+        from src.config import get_config, update_config_values
+        config = get_config()
+
+        total = (updates.sma_trend + updates.rsi_momentum + updates.macd_signal +
+                 updates.bb_position + updates.stoch_cross + updates.volume_confirm +
+                 updates.sentiment_signal + updates.sentiment_recency +
+                 updates.volatility_risk + updates.sr_proximity +
+                 updates.trend_strength + updates.rr_quality)
+        if abs(total - 1.0) > 0.005:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Component weights must sum to 1.0, got {total:.4f}"
+            )
+
+        config_updates = {
+            "CW_SMA_TREND":         updates.sma_trend,
+            "CW_RSI_MOMENTUM":      updates.rsi_momentum,
+            "CW_MACD_SIGNAL":       updates.macd_signal,
+            "CW_BB_POSITION":       updates.bb_position,
+            "CW_STOCH_CROSS":       updates.stoch_cross,
+            "CW_VOLUME_CONFIRM":    updates.volume_confirm,
+            "CW_SENTIMENT_SIGNAL":  updates.sentiment_signal,
+            "CW_SENTIMENT_RECENCY": updates.sentiment_recency,
+            "CW_VOLATILITY_RISK":   updates.volatility_risk,
+            "CW_SR_PROXIMITY":      updates.sr_proximity,
+            "CW_TREND_STRENGTH":    updates.trend_strength,
+            "CW_RR_QUALITY":        updates.rr_quality,
+        }
+        update_config_values(config, config_updates)
+        logger.info(f"12-component weights updated: {config_updates}")
+        return await get_component_weights()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating component weights: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 # ===== ADVANCED SIGNAL PARAMETERS =====
