@@ -181,61 +181,110 @@ class SignalGenerator:
         # ===== CONFIG =====
         from src.config import get_config
         self.config = get_config()
-        
-        # ===== EXTRACT COMPONENT SCORES =====
+
+        # ===== LEGACY AGGREGATE SCORES (kept for display/backward compat) =====
         sentiment_score = sentiment_data.get("weighted_avg", 0) * 100  # -100 to +100
-        technical_score = technical_data.get("score", 0)  # -100 to +100
-        risk_score = risk_data.get("score", 0)  # -100 to +100
-        
+        technical_score = technical_data.get("score", 0)               # -100 to +100
+        risk_score      = risk_data.get("score", 0)                     # -100 to +100
+
         # Extract confidences
         sentiment_confidence = sentiment_data.get("confidence", 0.5)
         technical_confidence = technical_data.get("confidence", 0.5)
-        
-        # ===== DYNAMIC WEIGHTS FROM CONFIG =====
-        sentiment_weight = self.config.SENTIMENT_WEIGHT
-        technical_weight = self.config.TECHNICAL_WEIGHT
-        risk_weight = self.config.RISK_WEIGHT
-        
-        # ===== CALCULATE CONTRIBUTIONS =====
-        sentiment_contribution = sentiment_score * sentiment_weight
-        technical_contribution = technical_score * technical_weight
-        risk_contribution = (risk_score - 50) * risk_weight
-        
-        # ===== COMBINED SCORE =====
-        base_combined_score = sentiment_contribution + technical_contribution + risk_contribution
-        
-        # ===== ALIGNMENT BONUS =====
+        risk_confidence      = risk_data.get("confidence", 0.5)
+
+        # ===== 12-COMPONENT SCORES =====
+        # Technical sub-scores (already -100..+100 from calculate_technical_score)
+        sc = technical_data.get("score_components", {})
+        sma_trend_score      = sc.get("sma",        {}).get("score", 0)
+        rsi_momentum_score   = sc.get("rsi",        {}).get("score", 0)
+        macd_signal_score    = sc.get("macd",       {}).get("score", 0)
+        bb_position_score    = sc.get("bollinger",  {}).get("score", 0)
+        stoch_cross_score    = sc.get("stochastic", {}).get("score", 0)
+        volume_confirm_score = sc.get("volume",     {}).get("score", 0)
+
+        # If score_components not available (e.g. fallback path), derive from aggregate
+        if not sc:
+            sma_trend_score    = technical_score
+            rsi_momentum_score = 0
+            macd_signal_score  = 0
+            bb_position_score  = 0
+            stoch_cross_score  = 0
+            volume_confirm_score = 0
+
+        # Sentiment components
+        sentiment_signal_score  = sentiment_score  # direction already -100..+100
+
+        # sentiment_recency: how fresh/reliable the news are, scaled directionally
+        # confidence 1.0 → full recency; 0.5 → neutral; < 0.5 → stale penalty
+        # Aligned with the direction of sentiment so it amplifies/penalises consistently
+        sentiment_dir = 1 if sentiment_score >= 0 else -1
+        sentiment_recency_score = max(-100, min(100,
+            (sentiment_confidence * 2 - 1) * 100 * sentiment_dir
+        ))
+
+        # Risk sub-scores (raw values -0.8..+0.8, scale to -100..+100)
+        rc = risk_data.get("components", {})
+        _vol_raw  = rc.get("volatility",     {}).get("risk", 0)
+        _prox_raw = rc.get("proximity",      {}).get("risk", 0)
+        _trend_raw= rc.get("trend_strength", {}).get("risk", 0)
+        volatility_risk_score = max(-100, min(100, _vol_raw  / 0.8 * 100))
+        sr_proximity_score    = max(-100, min(100, _prox_raw / 0.8 * 100))
+        trend_strength_score  = max(-100, min(100, _trend_raw/ 0.8 * 100))
+
+        # rr_quality: initialised to 0 here; updated after entry/exit level calculation
+        rr_quality_score = 0
+
+        # ===== 12-COMPONENT COMBINED SCORE =====
+        cw = self.config.COMPONENT_WEIGHTS
+        base_combined_score = (
+            sma_trend_score      * cw["sma_trend"]      +
+            rsi_momentum_score   * cw["rsi_momentum"]   +
+            macd_signal_score    * cw["macd_signal"]    +
+            bb_position_score    * cw["bb_position"]    +
+            stoch_cross_score    * cw["stoch_cross"]    +
+            volume_confirm_score * cw["volume_confirm"] +
+            sentiment_signal_score  * cw["sentiment_signal"]  +
+            sentiment_recency_score * cw["sentiment_recency"] +
+            volatility_risk_score   * cw["volatility_risk"]   +
+            sr_proximity_score      * cw["sr_proximity"]      +
+            trend_strength_score    * cw["trend_strength"]
+            # rr_quality added after level calculation below
+        )
+
+        # ===== ALIGNMENT BONUS (kept for signal quality boost) =====
         alignment_bonus = self._calculate_alignment_bonus(
-            sentiment_score, 
-            technical_score, 
+            sentiment_score,
+            technical_score,
             risk_score
         )
-        
-        # Final combined score with alignment bonus
+
         combined_score = base_combined_score + alignment_bonus
-        
+
         # Logging
-        print(f"[{ticker_symbol}] Using weights: S={sentiment_weight:.2f}, T={technical_weight:.2f}, R={risk_weight:.2f}")
-        print(f"[{ticker_symbol}] Scores: S={sentiment_score:.1f}, T={technical_score:.1f}, R={risk_score:.1f}")
-        print(f"[{ticker_symbol}] Contributions: S={sentiment_contribution:.1f}, T={technical_contribution:.1f}, R={risk_contribution:.1f}")
+        print(f"[{ticker_symbol}] 12-component scores:")
+        print(f"   SMA={sma_trend_score:+.1f}  RSI={rsi_momentum_score:+.1f}  MACD={macd_signal_score:+.1f}"
+              f"  BB={bb_position_score:+.1f}  Stoch={stoch_cross_score:+.1f}  Vol={volume_confirm_score:+.1f}")
+        print(f"   Sent={sentiment_signal_score:+.1f}  Recency={sentiment_recency_score:+.1f}")
+        print(f"   VolRisk={volatility_risk_score:+.1f}  SRProx={sr_proximity_score:+.1f}  Trend={trend_strength_score:+.1f}")
         print(f"[{ticker_symbol}] BASE SCORE: {base_combined_score:.2f}")
         if alignment_bonus != 0:
             if alignment_bonus > 0:
                 print(f"[{ticker_symbol}] ALIGNMENT BONUS: +{alignment_bonus} (BUY components aligned)")
             else:
                 print(f"[{ticker_symbol}] ALIGNMENT BONUS: {alignment_bonus} (SELL components aligned)")
-        print(f"[{ticker_symbol}] FINAL COMBINED SCORE: {combined_score:.2f}")
-        
+        print(f"[{ticker_symbol}] SCORE (pre-RR): {combined_score:.2f}")
+
         # ===== OVERALL CONFIDENCE =====
-        # Use actual risk confidence from risk_data
-        risk_confidence = risk_data.get("confidence", 0.5)
-        
         overall_confidence = (
-            sentiment_confidence * sentiment_weight +
-            technical_confidence * technical_weight +
-            risk_confidence * risk_weight
+            sentiment_confidence * (cw["sentiment_signal"] + cw["sentiment_recency"]) +
+            technical_confidence * (cw["sma_trend"] + cw["rsi_momentum"] + cw["macd_signal"] +
+                                    cw["bb_position"] + cw["stoch_cross"] + cw["volume_confirm"]) +
+            risk_confidence      * (cw["volatility_risk"] + cw["sr_proximity"] +
+                                    cw["trend_strength"] + cw["rr_quality"])
         )
-        
+        # Normalize (weights sum to ~0.98 without rr_quality; close enough at this point)
+        overall_confidence = min(1.0, max(0.0, overall_confidence))
+
         print(f"[{ticker_symbol}] Confidences: S={sentiment_confidence:.2f}, T={technical_confidence:.2f}, R={risk_confidence:.2f}")
         print(f"[{ticker_symbol}] OVERALL CONFIDENCE: {overall_confidence:.2%}")
         
@@ -271,39 +320,43 @@ class SignalGenerator:
         print(f"   Take-Profit: ${take_profit if take_profit else 'None'} ({((take_profit/entry_price-1)*100) if (entry_price and take_profit) else 0:+.2f}%)")
         print(f"   R:R Ratio: {rr_ratio if rr_ratio else 'None'} | SL: {sl_method} | TP: {tp_method}")
 
-        # ===== R:R SCORE CORRECTION =====
-        # Small penalty if TP was mechanically pushed to meet minimum R:R (weaker natural setup).
-        # Small reward for naturally excellent R:R (signal already active, no level recalculation).
-        # No correction for HOLD signals (rr_ratio is None).
-        #
-        # Direction-aware: correction always moves the score AWAY from zero for rewards
-        # and TOWARD zero for penalties, regardless of BUY (positive) or SELL (negative).
-        #   BUY  direction=+1: reward=+N, penalty=-N
-        #   SELL direction=-1: reward=-N, penalty=+N
+        # ===== R:R QUALITY COMPONENT =====
+        # rr_quality_score (-100..+100) feeds back into combined_score via its 0.02 weight.
+        # Keeps the same semantics as the old rr_correction but bounded and weight-controlled.
+        #   tp_method == "rr_target" → TP had to be pushed → mediocre setup → -100
+        #   rr >= 3.0               → excellent natural R:R → +100
+        #   rr >= 2.5               → very good             → +67
+        #   rr >= 2.0               → good                  → +33
+        #   otherwise               → neutral → 0
         rr_correction = 0
         if preliminary_decision != "HOLD" and rr_ratio is not None:
             direction = 1 if preliminary_decision == "BUY" else -1
             if tp_method == "rr_target":
-                # TP had to be pushed outward to achieve the minimum 1.5 R:R → mediocre setup
-                rr_correction = -3 * direction
+                rr_quality_score = -100 * direction
+                rr_correction    = round(rr_quality_score * cw["rr_quality"])
             elif rr_ratio >= 3.0:
-                rr_correction = 3 * direction
+                rr_quality_score = 100 * direction
+                rr_correction    = round(rr_quality_score * cw["rr_quality"])
             elif rr_ratio >= 2.5:
-                rr_correction = 2 * direction
+                rr_quality_score = 67 * direction
+                rr_correction    = round(rr_quality_score * cw["rr_quality"])
             elif rr_ratio >= 2.0:
-                rr_correction = 1 * direction
+                rr_quality_score = 33 * direction
+                rr_correction    = round(rr_quality_score * cw["rr_quality"])
+            else:
+                rr_quality_score = 0
 
         if rr_correction != 0:
             combined_score += rr_correction
             rr_str = f"{rr_ratio:.2f}" if rr_ratio is not None else "N/A"
-            print(f"[{ticker_symbol}] R:R CORRECTION: {rr_correction:+d} (tp_method={tp_method}, rr={rr_str}) → SCORE: {combined_score:.2f}")
+            print(f"[{ticker_symbol}] R:R QUALITY: score={rr_quality_score:+.0f} → contrib={rr_correction:+.2f} (tp_method={tp_method}, rr={rr_str}) → SCORE: {combined_score:.2f}")
 
-            # If correction pushes score below HOLD threshold → force HOLD, discard levels
+            # If rr_quality pushes score below HOLD threshold → force HOLD, discard levels
             if abs(combined_score) < HOLD_ZONE_THRESHOLD:
                 preliminary_decision = "HOLD"
                 entry_price = stop_loss = take_profit = rr_ratio = None
                 sl_method = tp_method = None
-                print(f"[{ticker_symbol}] ⚠️ R:R correction → score {combined_score:.2f} below ±{HOLD_ZONE_THRESHOLD} → forced HOLD")
+                print(f"[{ticker_symbol}] ⚠️ R:R quality → score {combined_score:.2f} below ±{HOLD_ZONE_THRESHOLD} → forced HOLD")
 
         # ===== DETERMINE FINAL DECISION & STRENGTH =====
         # Classification is based purely on the final combined_score and confidence.
@@ -312,6 +365,7 @@ class SignalGenerator:
             overall_confidence
         )
         
+        print(f"[{ticker_symbol}] FINAL COMBINED SCORE: {combined_score:.2f}")
         print(f"[{ticker_symbol}] DECISION: {strength} {decision} (Conf: {overall_confidence:.0%})")
         
         # ===== BUILD REASONING =====
@@ -319,22 +373,34 @@ class SignalGenerator:
             "combined_score": combined_score,
             "decision": decision,
             "strength": strength,
+            "scoring_architecture": "12-component",
+            "component_scores": {
+                "sma_trend":         round(sma_trend_score,      2),
+                "rsi_momentum":      round(rsi_momentum_score,   2),
+                "macd_signal":       round(macd_signal_score,    2),
+                "bb_position":       round(bb_position_score,    2),
+                "stoch_cross":       round(stoch_cross_score,    2),
+                "volume_confirm":    round(volume_confirm_score, 2),
+                "sentiment_signal":  round(sentiment_signal_score,  2),
+                "sentiment_recency": round(sentiment_recency_score, 2),
+                "volatility_risk":   round(volatility_risk_score,   2),
+                "sr_proximity":      round(sr_proximity_score,      2),
+                "trend_strength":    round(trend_strength_score,    2),
+                "rr_quality":        round(rr_quality_score,        2),
+            },
             "reasoning": {
                 "sentiment": {
                     "score": sentiment_score,
-                    "contribution": sentiment_contribution,
                     "confidence": sentiment_confidence,
                     "key_news": sentiment_data.get("key_news", [])[:3]
                 },
                 "technical": {
                     "score": technical_score,
-                    "contribution": technical_contribution,
                     "confidence": technical_confidence,
                     "key_signals": technical_data.get("key_signals", [])
                 },
                 "risk": {
                     "score": risk_score,
-                    "contribution": risk_contribution,
                     "volatility": risk_data.get("volatility", "N/A"),
                     "support_resistance": {
                         "support": risk_data.get("nearest_support"),
@@ -345,8 +411,8 @@ class SignalGenerator:
             "alignment_bonus": alignment_bonus if alignment_bonus != 0 else None,
             "rr_correction": rr_correction if rr_correction != 0 else None,
             "levels_meta": {
-                "sl_method": sl_method,   # 'sr' | 'atr' | 'atr_conf' | 'blended' | 'tightened'
-                "tp_method": tp_method,   # 'sr' | 'atr' | 'blended' | 'atr_override' | 'rr_target'
+                "sl_method": sl_method,
+                "tp_method": tp_method,
             } if sl_method else None
         }
         
@@ -371,19 +437,30 @@ class SignalGenerator:
             news_count=news_count,
             reasoning=reasoning,
             technical_indicator_id=technical_data.get("technical_indicator_id"),  # ✅ Link to DB record
-            components={  # ✅ NEW: Include actual weights and contributions
+            components={  # 12-component breakdown + legacy aggregates
+                # ── 12-component scores & weights ──────────────────────────
+                "component_scores": {
+                    "sma_trend":         {"score": round(sma_trend_score,      2), "weight": cw["sma_trend"],      "contribution": round(sma_trend_score      * cw["sma_trend"],      2)},
+                    "rsi_momentum":      {"score": round(rsi_momentum_score,   2), "weight": cw["rsi_momentum"],   "contribution": round(rsi_momentum_score   * cw["rsi_momentum"],   2)},
+                    "macd_signal":       {"score": round(macd_signal_score,    2), "weight": cw["macd_signal"],    "contribution": round(macd_signal_score    * cw["macd_signal"],    2)},
+                    "bb_position":       {"score": round(bb_position_score,    2), "weight": cw["bb_position"],    "contribution": round(bb_position_score    * cw["bb_position"],    2)},
+                    "stoch_cross":       {"score": round(stoch_cross_score,    2), "weight": cw["stoch_cross"],    "contribution": round(stoch_cross_score    * cw["stoch_cross"],    2)},
+                    "volume_confirm":    {"score": round(volume_confirm_score, 2), "weight": cw["volume_confirm"], "contribution": round(volume_confirm_score * cw["volume_confirm"], 2)},
+                    "sentiment_signal":  {"score": round(sentiment_signal_score,  2), "weight": cw["sentiment_signal"],  "contribution": round(sentiment_signal_score  * cw["sentiment_signal"],  2)},
+                    "sentiment_recency": {"score": round(sentiment_recency_score, 2), "weight": cw["sentiment_recency"], "contribution": round(sentiment_recency_score * cw["sentiment_recency"], 2)},
+                    "volatility_risk":   {"score": round(volatility_risk_score,   2), "weight": cw["volatility_risk"],   "contribution": round(volatility_risk_score   * cw["volatility_risk"],   2)},
+                    "sr_proximity":      {"score": round(sr_proximity_score,      2), "weight": cw["sr_proximity"],      "contribution": round(sr_proximity_score      * cw["sr_proximity"],      2)},
+                    "trend_strength":    {"score": round(trend_strength_score,    2), "weight": cw["trend_strength"],    "contribution": round(trend_strength_score    * cw["trend_strength"],    2)},
+                    "rr_quality":        {"score": round(rr_quality_score,        2), "weight": cw["rr_quality"],        "contribution": round(rr_quality_score        * cw["rr_quality"],        2)},
+                },
+                # ── Legacy aggregate scores (backward compat / display) ───
                 "sentiment": {
                     "score": round(sentiment_score, 2),
-                    "weight": sentiment_weight,
-                    "contribution": round(sentiment_contribution, 2),
                     "confidence": round(sentiment_confidence, 2)
                 },
                 "technical": {
                     "score": round(technical_score, 2),
-                    "weight": technical_weight,
-                    "contribution": round(technical_contribution, 2),
                     "confidence": round(technical_confidence, 2),
-                    # ✅ ADD: Indicator values for UI display
                     "rsi": technical_data.get("rsi"),
                     "sma_20": technical_data.get("sma_20"),
                     "sma_50": technical_data.get("sma_50"),
@@ -393,13 +470,9 @@ class SignalGenerator:
                 },
                 "risk": {
                     "score": round(risk_score, 2),
-                    "weight": risk_weight,
-                    "contribution": round(risk_contribution, 2),
-                    "confidence": round(risk_data.get("confidence", 0.5), 2),
-                    # ✅ ADD: Risk component breakdown for UI
+                    "confidence": round(risk_confidence, 2),
                     "components": risk_data.get("components", {})
                 },
-                # ✅ NEW: Alignment bonus + R:R correction information
                 "alignment": {
                     "bonus": alignment_bonus,
                     "base_score": round(base_combined_score, 2),
@@ -418,11 +491,25 @@ class SignalGenerator:
             sentiment_data=sentiment_data,
             technical_data=technical_data,
             risk_data=risk_data,
+            component_scores={
+                "sma_trend_score":         sma_trend_score,
+                "rsi_momentum_score":      rsi_momentum_score,
+                "macd_signal_score":       macd_signal_score,
+                "bb_position_score":       bb_position_score,
+                "stoch_cross_score":       stoch_cross_score,
+                "volume_confirm_score":    volume_confirm_score,
+                "sentiment_recency_score": sentiment_recency_score,
+                "volatility_risk_score":   volatility_risk_score,
+                "sr_proximity_score":      sr_proximity_score,
+                "trend_strength_score":    trend_strength_score,
+                "rr_quality_score":        rr_quality_score,
+            },
             config_snapshot={
                 "weights": {
-                    "sentiment": sentiment_weight,
-                    "technical": technical_weight,
-                    "risk": risk_weight
+                    "sentiment": self.config.SENTIMENT_WEIGHT,
+                    "technical": self.config.TECHNICAL_WEIGHT,
+                    "risk":      self.config.RISK_WEIGHT,
+                    "component_weights": cw,
                 },
                 "thresholds": {
                     "buy": getattr(self.config, 'BUY_THRESHOLD', getattr(self.config, 'moderate_buy_score', 50)),
@@ -898,7 +985,8 @@ class SignalGenerator:
         sentiment_data: Dict,
         technical_data: Dict,
         risk_data: Dict,
-        config_snapshot: Dict
+        config_snapshot: Dict,
+        component_scores: Dict = None,
     ):
         """
         Save detailed audit trail for debugging and analysis
@@ -1121,11 +1209,14 @@ class SignalGenerator:
                     take_profit=signal.take_profit,
                     risk_reward_ratio=signal.risk_reward_ratio,
                     
-                    # ===== CONTRIBUTIONS (columns) =====
+                    # ===== CONTRIBUTIONS (legacy columns) =====
                     sentiment_contribution=signal.sentiment_score * config_snapshot["weights"]["sentiment"],
                     technical_contribution=signal.technical_score * config_snapshot["weights"]["technical"],
                     risk_contribution=signal.risk_score * config_snapshot["weights"]["risk"],
-                    
+
+                    # ===== 12-COMPONENT SCORES (new columns) =====
+                    **(component_scores or {}),
+
                     # ===== DETAILED JSON DATA =====
                     news_inputs=json.dumps(news_inputs, default=str),
                     config_snapshot=json.dumps(config_snapshot, default=str),
