@@ -760,8 +760,13 @@ class NewsCollector:
 
             if db_record is not None:
                 # ── Cache HIT: DB-bol visszatoltjuk az LLM-adatokat ──
-                item.active_score = db_record.llm_score
-                item.active_score_source = 'llm'
+                # Ha llm_score NULL/0 (korabbi timeout), FinBERT fallback-et hasznalunk
+                if db_record.llm_score is not None and db_record.llm_score != 0.0:
+                    item.active_score = db_record.llm_score
+                    item.active_score_source = 'llm'
+                else:
+                    item.active_score = item.sentiment_score  # FinBERT fallback
+                    item.active_score_source = 'finbert'
                 item.llm_impact_duration = db_record.llm_impact_duration
                 item.llm_score = db_record.llm_score
                 item.llm_price_impact = db_record.llm_price_impact
