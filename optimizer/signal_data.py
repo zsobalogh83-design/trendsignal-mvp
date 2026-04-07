@@ -108,6 +108,8 @@ class SignalSimRow:
     atr: Optional[float] = None             # raw ATR value (price units)
     atr_pct: Optional[float] = None         # ATR as % of price
     confidence: float = 0.60               # overall_confidence
+    sentiment_confidence: float = 0.50     # component-level sentiment confidence
+    risk_reward_ratio: Optional[float] = None  # for rr_quality_score
     nearest_support: Optional[float] = None
     nearest_resistance: Optional[float] = None
 
@@ -231,6 +233,8 @@ def _load_signal_rows(conn: sqlite3.Connection) -> List[SignalSimRow]:
                 THEN (sc.sentiment_confidence + sc.technical_confidence + sc.risk_confidence) / 3.0
                 ELSE COALESCE(sc.technical_confidence, sc.sentiment_confidence, sc.risk_confidence, 0.60)
             END AS confidence,
+            COALESCE(sc.sentiment_confidence, 0.50) AS sentiment_confidence,
+            sc.risk_reward_ratio,
             sc.nearest_support,
             sc.nearest_resistance
 
@@ -312,6 +316,8 @@ def _load_signal_rows(conn: sqlite3.Connection) -> List[SignalSimRow]:
             atr=_f(r["atr"]),
             atr_pct=_f(r["atr_pct"]),
             confidence=conf_val,
+            sentiment_confidence=_f(r["sentiment_confidence"]) or 0.50,
+            risk_reward_ratio=_f(r["risk_reward_ratio"]),
             nearest_support=_f(r["nearest_support"]),
             nearest_resistance=_f(r["nearest_resistance"]),
         ))
@@ -553,7 +559,9 @@ def _load_archive_signal_rows(
 
             a.atr,
             a.atr_pct,
-            a.overall_confidence  AS confidence,
+            a.overall_confidence      AS confidence,
+            COALESCE(a.sentiment_confidence, 0.50) AS sentiment_confidence,
+            a.risk_reward_ratio,
             a.nearest_support,
             a.nearest_resistance,
             a.reasoning_json
@@ -630,6 +638,8 @@ def _load_archive_signal_rows(
             atr=_f(r["atr"]),
             atr_pct=_f(r["atr_pct"]),
             confidence=conf_val,
+            sentiment_confidence=_f(r["sentiment_confidence"]) or 0.50,
+            risk_reward_ratio=_f(r["risk_reward_ratio"]),
             nearest_support=_f(r["nearest_support"]),
             nearest_resistance=_f(r["nearest_resistance"]),
         ))

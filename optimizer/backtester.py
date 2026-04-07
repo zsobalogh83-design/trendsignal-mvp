@@ -9,13 +9,14 @@ Two-stage pipeline:
 
 Key design:
   - All raw inputs are read once from the DB (load_all_sim_data in signal_data.py)
-  - score recalculation is pure Python — no DB writes during evaluation
+  - score recalculation uses compute_combined_score_from_indicators() —
+    same function as live signal generation and archive score recalculation
   - trade simulation is in-memory, using pre-loaded price_data candles
   - SignalSimRow replaces the old SignalRow (superset of fields)
   - Old load_signal_rows / load_trade_outcomes are kept for backward compatibility
 
-Version: 2.0
-Date: 2026-02-24
+Version: 3.0 – score replay → compute_combined_score_from_indicators (12-component formula)
+Date: 2026-04-06
 """
 
 import json
@@ -101,6 +102,7 @@ def load_signal_rows(db_path: Path = DATABASE_PATH) -> List[SignalRow]:
     """
     Load signal_calculations as SignalRow objects (score replay only).
     DEPRECATED: For new optimizer code, use load_all_sim_data() instead.
+    Kept for backward compat and test_step3.py.
     """
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -240,35 +242,144 @@ def load_trade_outcomes(db_path: Path = DATABASE_PATH) -> Dict[int, dict]:
 
 
 # ---------------------------------------------------------------------------
-# Score replay  (unchanged from v1 — works with both SignalRow and SignalSimRow)
+# Optimizer config adapter for compute_combined_score_from_indicators()
 # ---------------------------------------------------------------------------
 
-def replay_signal(row, cfg: dict) -> ReplayResult:
+class _OptimizerConfig:
     """
-    Recompute the combined score for one row using the provided config dict.
-    Accepts both SignalRow and SignalSimRow.
+    Lightweight config adapter that maps optimizer cfg dict keys to the
+    attribute names expected by calculate_*_component_score() in signal_generator.py
+    and compute_combined_score_from_indicators() in recalculate_signals.py.
+
+    Fixed (non-tunable) values use production defaults.
     """
-    sentiment_score = _replay_sentiment(row, cfg)
-    technical_score = _replay_technical(row, cfg)
-    risk_score      = row.stored_risk_score
+    __slots__ = [
+        "COMPONENT_WEIGHTS",
+        # SMA component params
+        "tech_sma20_bullish", "tech_sma20_bearish",
+        "tech_sma50_bullish", "tech_sma50_bearish",
+        "tech_golden_cross",  "tech_death_cross",
+        # RSI component params
+        "rsi_neutral_low", "rsi_neutral_high",
+        "rsi_overbought",  "rsi_oversold",
+        "tech_rsi_neutral", "tech_rsi_bullish", "tech_rsi_weak_bullish",
+        "tech_rsi_overbought", "tech_rsi_oversold",
+        # Stochastic
+        "stoch_overbought", "stoch_oversold",
+        # ATR volatility thresholds (fixed — not optimized)
+        "atr_vol_very_low", "atr_vol_low", "atr_vol_moderate", "atr_vol_high",
+        # ADX thresholds (fixed — not optimized)
+        "adx_very_strong", "adx_strong", "adx_moderate", "adx_weak", "adx_very_weak",
+    ]
 
-    sw = cfg["SENTIMENT_WEIGHT"]
-    tw = cfg["TECHNICAL_WEIGHT"]
-    rw = cfg["RISK_WEIGHT"]
+    def __init__(self, cfg: dict):
+        # 12-component weights — sum must = 1.0 (enforced in decode_vector)
+        self.COMPONENT_WEIGHTS = {
+            "sma_trend":         cfg.get("CW_SMA_TREND",         0.15),
+            "rsi_momentum":      cfg.get("CW_RSI_MOMENTUM",       0.07),
+            "macd_signal":       cfg.get("CW_MACD_SIGNAL",        0.08),
+            "bb_position":       cfg.get("CW_BB_POSITION",        0.04),
+            "stoch_cross":       cfg.get("CW_STOCH_CROSS",        0.02),
+            "volume_confirm":    cfg.get("CW_VOLUME_CONFIRM",     0.02),
+            "sentiment_signal":  cfg.get("CW_SENTIMENT_SIGNAL",   0.30),
+            "sentiment_recency": cfg.get("CW_SENTIMENT_RECENCY",  0.10),
+            "volatility_risk":   cfg.get("CW_VOLATILITY_RISK",    0.08),
+            "sr_proximity":      cfg.get("CW_SR_PROXIMITY",       0.08),
+            "trend_strength":    cfg.get("CW_TREND_STRENGTH",     0.04),
+            "rr_quality":        cfg.get("CW_RR_QUALITY",         0.02),
+        }
 
-    base_combined = (
-        sentiment_score * sw +
-        technical_score * tw +
-        risk_score      * rw
-    )
+        # SMA component (still tunable via TECH_SMA* params)
+        self.tech_sma20_bullish = cfg.get("TECH_SMA20_BULLISH", 25)
+        self.tech_sma20_bearish = cfg.get("TECH_SMA20_BULLISH", 25)  # symmetric
+        self.tech_sma50_bullish = cfg.get("TECH_SMA50_BULLISH", 20)
+        self.tech_sma50_bearish = cfg.get("TECH_SMA50_BULLISH", 20)  # symmetric
+        self.tech_golden_cross  = cfg.get("TECH_GOLDEN_CROSS",  15)
+        self.tech_death_cross   = cfg.get("TECH_GOLDEN_CROSS",  15)  # symmetric
 
-    alignment_bonus = _calculate_alignment_bonus(
-        sentiment_score, technical_score, risk_score, cfg
-    )
+        # RSI zones (tunable)
+        self.rsi_overbought    = cfg.get("RSI_OVERBOUGHT",   70)
+        self.rsi_oversold      = cfg.get("RSI_OVERSOLD",     30)
+        self.rsi_neutral_low   = cfg.get("RSI_NEUTRAL_LOW",  45)
+        self.rsi_neutral_high  = cfg.get("RSI_NEUTRAL_HIGH", 55)
 
-    combined  = base_combined + alignment_bonus
-    hold_zone = cfg["HOLD_ZONE_THRESHOLD"]
+        # RSI component scores (tunable)
+        self.tech_rsi_bullish      = cfg.get("TECH_RSI_BULLISH",      30)
+        self.tech_rsi_weak_bullish = cfg.get("TECH_RSI_WEAK_BULLISH", 10)
+        self.tech_rsi_overbought   = cfg.get("TECH_RSI_OVERBOUGHT",   30)
+        self.tech_rsi_oversold     = cfg.get("TECH_RSI_OVERSOLD",     30)
+        self.tech_rsi_neutral      = cfg.get("TECH_RSI_NEUTRAL",      20)
 
+        # Stochastic zones (tunable)
+        self.stoch_overbought = cfg.get("STOCH_OVERBOUGHT", 80)
+        self.stoch_oversold   = cfg.get("STOCH_OVERSOLD",   20)
+
+        # ATR volatility thresholds (fixed production values)
+        self.atr_vol_very_low = 0.5
+        self.atr_vol_low      = 1.5
+        self.atr_vol_moderate = 3.0
+        self.atr_vol_high     = 5.0
+
+        # ADX thresholds (fixed production values)
+        self.adx_very_strong = 50
+        self.adx_strong      = 40
+        self.adx_moderate    = 25
+        self.adx_weak        = 20
+        self.adx_very_weak   = 10
+
+
+# ---------------------------------------------------------------------------
+# Score replay using the 12-component formula (matches live signal generation)
+# ---------------------------------------------------------------------------
+
+def replay_signal(row: SignalSimRow, cfg: dict) -> ReplayResult:
+    """
+    Recompute the combined score for one SignalSimRow using the 12-component
+    formula via compute_combined_score_from_indicators().
+
+    For live signals (news_items available): sentiment is re-calculated with
+    the proposed decay weights before being passed to the formula.
+    For archive signals (no news_items): stored sentiment_score is used directly.
+
+    Accepts both SignalSimRow and legacy SignalRow (backward compat).
+    """
+    from src.recalculate_signals import compute_combined_score_from_indicators
+
+    # Sentiment: re-tune decay for live signals; use stored for archive
+    if getattr(row, "news_items", None):
+        sentiment_score = _replay_sentiment(row, cfg)
+    else:
+        sentiment_score = row.stored_sentiment_score
+
+    sentiment_confidence = getattr(row, "sentiment_confidence", 0.50) or 0.50
+    risk_reward_ratio    = getattr(row, "risk_reward_ratio", None)
+
+    ind = {
+        "current_price":        row.current_price,
+        "sma_20":               row.sma_20,
+        "sma_50":               row.sma_50,
+        "rsi":                  row.rsi,
+        "macd_histogram":       row.macd_histogram,
+        "bb_upper":             row.bb_upper,
+        "bb_lower":             row.bb_lower,
+        "bb_middle":            row.bb_middle,
+        "stoch_k":              row.stoch_k,
+        "stoch_d":              row.stoch_d,
+        "atr_pct":              row.atr_pct or getattr(row, "volatility", None),
+        "nearest_support":      row.nearest_support,
+        "nearest_resistance":   row.nearest_resistance,
+        "adx":                  row.adx,
+        "sentiment_score":      sentiment_score,
+        "sentiment_confidence": sentiment_confidence,
+        "decision":             row.original_decision,
+        "risk_reward_ratio":    risk_reward_ratio,
+    }
+
+    oc = _OptimizerConfig(cfg)
+    result = compute_combined_score_from_indicators(ind, oc)
+    combined = result["combined_score"]
+
+    hold_zone = cfg.get("HOLD_ZONE_THRESHOLD", 15.0)
     if combined >= hold_zone:
         decision = "BUY"
     elif combined <= -hold_zone:
@@ -283,8 +394,8 @@ def replay_signal(row, cfg: dict) -> ReplayResult:
         new_combined_score=combined,
         new_decision=decision,
         new_sentiment_score=sentiment_score,
-        new_technical_score=technical_score,
-        stored_risk_score=risk_score,
+        new_technical_score=0.0,   # not separately tracked in 12-component formula
+        stored_risk_score=0.0,     # not separately tracked in 12-component formula
     )
 
 
@@ -307,8 +418,9 @@ def replay_and_simulate(
 
       1. replay_signal()     → new_decision + new_combined_score
       2. Filter active signals (|score| >= HOLD_ZONE_THRESHOLD and decision != HOLD)
-      3. compute_sl_tp()     → stop_loss, take_profit under new config
-      4. simulate_trade()    → exit_reason, exit_price, pnl_percent
+      3. Entry gate filters  → block bad entries per new config thresholds
+      4. compute_sl_tp()     → stop_loss, take_profit under new config
+      5. simulate_trade()    → exit_reason, exit_price, pnl_percent
 
     Parameters
     ----------
@@ -328,7 +440,7 @@ def replay_and_simulate(
     results = []
 
     for row in rows:
-        # Stage 1: Score replay
+        # Stage 1: Score replay (12-component formula)
         replay = replay_signal(row, cfg)
 
         # Stage 2a: Filter — HOLD or below threshold
@@ -344,35 +456,47 @@ def replay_and_simulate(
             ))
             continue
 
-        # Stage 2b: Entry gate filters (configurable thresholds from cfg)
-        _blocked = False
+        # Stage 2b: Entry gate filters
+        _blocked   = False
         _direction = replay.new_decision  # "BUY" or "SELL"
-        _rsi   = row.rsi
-        _mhst  = row.macd_histogram
+        _rsi    = row.rsi
+        _mhst   = row.macd_histogram
         _sma200 = row.sma_200
+        _sma50  = row.sma_50
         _price  = row.current_price
         _resist = row.nearest_resistance
 
-        _rsi_buy_max   = cfg.get("ENTRY_GATE_RSI_BUY_MAX",             55.0)
-        _rsi_sell_min  = cfg.get("ENTRY_GATE_RSI_SELL_MIN",            45.0)
-        _macd_buy_min  = cfg.get("ENTRY_GATE_MACD_HIST_BUY_MIN",       0.0)
-        _macd_sell_max = cfg.get("ENTRY_GATE_MACD_HIST_SELL_MAX",      0.0)
-        _sma200_buy    = cfg.get("ENTRY_GATE_SMA200_BUY_MAX_PCT",       5.0)
-        _sma200_sell   = cfg.get("ENTRY_GATE_SMA200_SELL_MIN_PCT",     -5.0)
-        _dist_r_buy    = cfg.get("ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT", 15.0)
+        _rsi_buy_max    = cfg.get("ENTRY_GATE_RSI_BUY_MAX",              70.0)
+        _rsi_sell_min   = cfg.get("ENTRY_GATE_RSI_SELL_MIN",             65.0)
+        _macd_buy_min   = cfg.get("ENTRY_GATE_MACD_HIST_BUY_MIN",         0.0)
+        _macd_sell_max  = cfg.get("ENTRY_GATE_MACD_HIST_SELL_MAX",        0.0)
+        _sma200_buy     = cfg.get("ENTRY_GATE_SMA200_BUY_MAX_PCT",        5.0)
+        _sma200_sell    = cfg.get("ENTRY_GATE_SMA200_SELL_MIN_PCT",       -5.0)
+        _dist_r_buy     = cfg.get("ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT",  15.0)
+        _sma50_sell_min = cfg.get("ENTRY_GATE_SMA50_SELL_MIN_PCT",         3.0)
 
         if _direction == "BUY":
-            if _rsi  is not None and _rsi  >= _rsi_buy_max:   _blocked = True
-            if _mhst is not None and _mhst <= _macd_buy_min:  _blocked = True
+            if _rsi  is not None and _rsi  >= _rsi_buy_max:
+                _blocked = True
+            if not _blocked and _mhst is not None and _mhst <= _macd_buy_min:
+                _blocked = True
             if not _blocked and _sma200 and _sma200 > 0 and _price and _price > 0:
-                if (_price - _sma200) / _sma200 * 100 > _sma200_buy:  _blocked = True
+                if (_price - _sma200) / _sma200 * 100 > _sma200_buy:
+                    _blocked = True
             if not _blocked and _resist and _price and _price > 0:
-                if (_resist - _price) / _price * 100 > _dist_r_buy:   _blocked = True
+                if (_resist - _price) / _price * 100 > _dist_r_buy:
+                    _blocked = True
         else:  # SELL
-            if _rsi  is not None and _rsi  <= _rsi_sell_min:  _blocked = True
-            if _mhst is not None and _mhst >= _macd_sell_max: _blocked = True
+            if _rsi  is not None and _rsi  <= _rsi_sell_min:
+                _blocked = True
+            if not _blocked and _mhst is not None and _mhst >= _macd_sell_max:
+                _blocked = True
             if not _blocked and _sma200 and _sma200 > 0 and _price and _price > 0:
-                if (_price - _sma200) / _sma200 * 100 < _sma200_sell: _blocked = True
+                if (_price - _sma200) / _sma200 * 100 < _sma200_sell:
+                    _blocked = True
+            if not _blocked and _sma50 and _sma50 > 0 and _price and _price > 0:
+                if (_price - _sma50) / _sma50 * 100 < _sma50_sell_min:
+                    _blocked = True
 
         if _blocked:
             results.append(TradeSimResult(
@@ -451,7 +575,7 @@ def replay_and_simulate(
             ))
             continue
 
-        # Stage 4: Trade simulation
+        # Stage 4: Trade simulation (delegates to trade_simulator_core — same as archive backtest)
         direction = "LONG" if replay.new_decision == "BUY" else "SHORT"
         entry_ts  = _parse_ts(row.calculated_at)
         ticker_timeline = score_timeline.get(row.ticker, [])
@@ -494,18 +618,24 @@ def replay_and_simulate(
 
 
 # ---------------------------------------------------------------------------
-# Sentiment replay
+# Sentiment replay (decay re-tuning for live signals with news_items)
 # ---------------------------------------------------------------------------
 
 def _replay_sentiment(row, cfg: dict) -> float:
+    """
+    Re-calculate sentiment score from news_items with proposed decay weights.
+    Falls back to stored_sentiment_score when news_items is empty.
+    Used for live signals (signal_calculations) which have individual news items stored.
+    Archive signals return stored_sentiment_score directly (no news_items).
+    """
     if not row.news_items:
         return row.stored_sentiment_score
 
     decay_map = {
         "0-2h":   1.0,
-        "2-6h":   cfg.get("DECAY_2_6H",   0.85),
-        "6-12h":  cfg.get("DECAY_6_12H",  0.60),
-        "12-24h": cfg.get("DECAY_12_24H", 0.35),
+        "2-6h":   cfg.get("DECAY_2_6H",   0.50),
+        "6-12h":  cfg.get("DECAY_6_12H",  0.50),
+        "12-24h": cfg.get("DECAY_12_24H", 0.37),
     }
 
     total_weight = 0.0
@@ -535,220 +665,6 @@ def _remap_decay(stored_decay: float, decay_map: dict) -> float:
         return decay_map["6-12h"]
     elif stored_decay > 0.0:
         return decay_map["12-24h"]
-    else:
-        return 0.0
-
-
-# ---------------------------------------------------------------------------
-# Technical score replay
-# ---------------------------------------------------------------------------
-
-def _replay_technical(row, cfg: dict) -> float:
-    price   = row.current_price
-    rsi     = row.rsi
-    sma20   = row.sma_20
-    sma50   = row.sma_50
-    sma200  = row.sma_200
-    macd_h  = row.macd_histogram
-    macd_v  = row.macd
-    macd_s  = row.macd_signal_val
-    bb_up   = row.bb_upper
-    bb_lo   = row.bb_lower
-    bb_mid  = row.bb_middle
-    stoch_k = row.stoch_k
-
-    is_bullish_trend = _infer_trend(row)
-
-    sma_score   = _score_sma(price, sma20, sma50, sma200, cfg)
-    rsi_score   = _score_rsi(rsi, is_bullish_trend, cfg)
-    macd_score  = _score_macd(macd_v, macd_s, macd_h)
-    bb_score    = _score_bollinger(price, bb_up, bb_lo, bb_mid, is_bullish_trend)
-    stoch_score = _score_stochastic(stoch_k, row.stoch_d, is_bullish_trend, cfg)
-    vol_score   = 0.0
-
-    w_sma   = cfg.get("TECH_SMA_WEIGHT",        0.30)
-    w_rsi   = cfg.get("TECH_RSI_WEIGHT",         0.25)
-    w_macd  = cfg.get("TECH_MACD_WEIGHT",        0.20)
-    w_bb    = cfg.get("TECH_BOLLINGER_WEIGHT",   0.15)
-    w_stoch = cfg.get("TECH_STOCHASTIC_WEIGHT",  0.05)
-    w_vol   = cfg.get("TECH_VOLUME_WEIGHT",      0.05)
-
-    tech = (
-        sma_score   * w_sma   +
-        rsi_score   * w_rsi   +
-        macd_score  * w_macd  +
-        bb_score    * w_bb    +
-        stoch_score * w_stoch +
-        vol_score   * w_vol
-    )
-    return float(_clamp(tech, -100.0, 100.0))
-
-
-def _infer_trend(row) -> Optional[bool]:
-    if row.sma_20 and row.sma_50 and row.current_price:
-        if row.current_price > row.sma_20 and row.sma_20 > row.sma_50:
-            return True
-        if row.current_price < row.sma_20 and row.sma_20 < row.sma_50:
-            return False
-    signals_lower = " ".join(row.key_signals).lower()
-    if "golden cross" in signals_lower or "price > sma" in signals_lower:
-        return True
-    if "death cross" in signals_lower or "price < sma" in signals_lower:
-        return False
-    return None
-
-
-def _score_sma(price, sma20, sma50, sma200, cfg: dict) -> float:
-    if price is None:
-        return 0.0
-    score = 0.0
-    sma20_bull = cfg.get("TECH_SMA20_BULLISH", 25)
-    sma50_bull = cfg.get("TECH_SMA50_BULLISH", 20)
-    golden     = cfg.get("TECH_GOLDEN_CROSS",  15)
-    if sma20 and price > sma20:
-        score += sma20_bull
-    elif sma20 and price < sma20:
-        score -= cfg.get("TECH_SMA20_BEARISH", sma20_bull)
-    if sma50 and price > sma50:
-        score += sma50_bull
-    elif sma50 and price < sma50:
-        score -= cfg.get("TECH_SMA50_BEARISH", sma50_bull)
-    if sma20 and sma50:
-        if sma20 > sma50:
-            score += golden
-        else:
-            score -= cfg.get("TECH_DEATH_CROSS", golden)
-    return _clamp(score, -100.0, 100.0)
-
-
-def _score_rsi(rsi, is_bullish_trend, cfg: dict) -> float:
-    if rsi is None:
-        return 0.0
-    ob      = cfg.get("RSI_OVERBOUGHT",      70)
-    os_     = cfg.get("RSI_OVERSOLD",        30)
-    nl      = cfg.get("RSI_NEUTRAL_LOW",     45)
-    nh      = cfg.get("RSI_NEUTRAL_HIGH",    55)
-    bull_sc = cfg.get("TECH_RSI_BULLISH",    30)
-    weak_b  = cfg.get("TECH_RSI_WEAK_BULLISH", 10)
-    ob_sc   = cfg.get("TECH_RSI_OVERBOUGHT", 30)
-    os_sc   = cfg.get("TECH_RSI_OVERSOLD",   30)
-    neut_sc = cfg.get("TECH_RSI_NEUTRAL",    20)
-    if rsi >= ob:
-        return _clamp(-ob_sc * 0.5 if is_bullish_trend is True else -ob_sc, -100.0, 100.0)
-    elif rsi <= os_:
-        return _clamp(-os_sc * 0.5 if is_bullish_trend is False else os_sc, -100.0, 100.0)
-    elif nh < rsi < ob:
-        return _clamp(bull_sc, -100.0, 100.0)
-    elif nl <= rsi <= nh:
-        return _clamp(neut_sc if is_bullish_trend is True else -neut_sc, -100.0, 100.0)
-    elif os_ < rsi < nl:
-        return _clamp(-weak_b, -100.0, 100.0)
-    return 0.0
-
-
-def _score_macd(macd_val, macd_sig, macd_hist) -> float:
-    if macd_hist is None and (macd_val is None or macd_sig is None):
-        return 0.0
-    hist  = macd_hist if macd_hist is not None else (macd_val - macd_sig)
-    score = _clamp(hist * 20.0, -100.0, 100.0)
-    if macd_val is not None and macd_sig is not None:
-        if macd_val > macd_sig:
-            score = min(100.0, score + 10.0)
-        elif macd_val < macd_sig:
-            score = max(-100.0, score - 10.0)
-    return float(score)
-
-
-def _score_bollinger(price, bb_up, bb_lo, bb_mid, is_bullish_trend) -> float:
-    if price is None or bb_up is None or bb_lo is None or bb_mid is None:
-        return 0.0
-    band_width = bb_up - bb_lo
-    if band_width <= 0:
-        return 0.0
-    pos = (price - bb_mid) / (band_width / 2.0)
-    if price > bb_up:
-        score = -20.0 if is_bullish_trend is True else -40.0
-    elif price < bb_lo:
-        score = 20.0 if is_bullish_trend is False else 40.0
-    else:
-        score = _clamp(-pos * 30.0, -100.0, 100.0)
-        if is_bullish_trend is True and pos > 0:
-            score = _clamp(-pos * 15.0, -100.0, 100.0)
-        elif is_bullish_trend is False and pos < 0:
-            score = _clamp(-pos * 15.0, -100.0, 100.0)
-    return float(_clamp(score, -100.0, 100.0))
-
-
-def _score_stochastic(stoch_k, stoch_d, is_bullish_trend, cfg: dict) -> float:
-    if stoch_k is None:
-        return 0.0
-    ob  = cfg.get("STOCH_OVERBOUGHT", 80)
-    os_ = cfg.get("STOCH_OVERSOLD",   20)
-    if stoch_k >= ob:
-        return _clamp(-20.0 if is_bullish_trend is True else -40.0, -100.0, 100.0)
-    elif stoch_k <= os_:
-        return _clamp(20.0 if is_bullish_trend is False else 40.0, -100.0, 100.0)
-    else:
-        midpoint = (ob + os_) / 2.0
-        score = (stoch_k - midpoint) / (ob - midpoint) * 40.0
-        return float(_clamp(score, -100.0, 100.0))
-
-
-# ---------------------------------------------------------------------------
-# Alignment bonus
-# ---------------------------------------------------------------------------
-
-def _calculate_alignment_bonus(sentiment: float, technical: float, risk: float, cfg: dict) -> float:
-    """
-    Mirror of SignalGenerator._calculate_alignment_bonus() in src/signal_generator.py.
-
-    Pair thresholds (must match production exactly):
-      TR: |tech| > ALIGNMENT_TECH_THRESHOLD (60) AND |risk| > ALIGNMENT_RISK_THRESHOLD (40)
-      ST: |sent| > ALIGNMENT_SENT_THRESHOLD (40) AND |tech| > ALIGNMENT_SENT_THRESHOLD (40)
-          NOTE: ST uses sent_thr for the technical check, not tech_thr — see docstring.
-      SR: |sent| > ALIGNMENT_SENT_THRESHOLD (40) AND |risk| > ALIGNMENT_RISK_THRESHOLD (40)
-
-    Bonus is given only when exactly 1 or all 3 pairs are strong (count-based, not cascade).
-    Direction check: bonus is positive only if all three raw scores share the same sign.
-    """
-    tech_thr  = cfg.get("ALIGNMENT_TECH_THRESHOLD", 60)
-    sent_thr  = cfg.get("ALIGNMENT_SENT_THRESHOLD", 40)
-    risk_thr  = cfg.get("ALIGNMENT_RISK_THRESHOLD", 40)
-    bonus_all = cfg.get("ALIGNMENT_BONUS_ALL", 8)
-    bonus_tr  = cfg.get("ALIGNMENT_BONUS_TR",  5)
-    bonus_st  = cfg.get("ALIGNMENT_BONUS_ST",  5)
-    bonus_sr  = cfg.get("ALIGNMENT_BONUS_SR",  3)
-
-    abs_sent = abs(sentiment)
-    abs_tech = abs(technical)
-    abs_risk = abs(risk)
-
-    # TR: tech > tech_thr (60) AND risk > risk_thr (40)
-    tr_strong = abs_tech > tech_thr and abs_risk > risk_thr
-    # ST: sent > sent_thr (40) AND tech > sent_thr (40)  ← ST uses sent_thr for tech!
-    st_strong = abs_sent > sent_thr and abs_tech > sent_thr
-    # SR: sent > sent_thr (40) AND risk > risk_thr (40)
-    sr_strong = abs_sent > sent_thr and abs_risk > risk_thr
-
-    strong_pairs = sum([tr_strong, st_strong, sr_strong])
-
-    if strong_pairs == 3:
-        bonus_magnitude = bonus_all
-    elif strong_pairs == 1:
-        if tr_strong:
-            bonus_magnitude = bonus_tr
-        elif st_strong:
-            bonus_magnitude = bonus_st
-        else:
-            bonus_magnitude = bonus_sr
-    else:
-        return 0.0  # 0 or 2 strong pairs → no bonus
-
-    # Apply direction: bonus only when all three raw scores share the same sign
-    if sentiment > 0 and technical > 0 and risk > 0:
-        return float(bonus_magnitude)
-    elif sentiment < 0 and technical < 0 and risk < 0:
-        return float(-bonus_magnitude)
     else:
         return 0.0
 
