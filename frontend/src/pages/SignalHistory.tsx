@@ -161,6 +161,7 @@ export function SignalHistory() {
       }
       if (debouncedFilters.min_score !== undefined) params.append('min_score', String(debouncedFilters.min_score));
       if (debouncedFilters.max_score !== undefined) params.append('max_score', String(debouncedFilters.max_score));
+      if (debouncedFilters.cluster_peak_only) params.append('cluster_peak_only', 'true');
       if (debouncedFilters.exit_reasons && debouncedFilters.exit_reasons.length > 0) {
         debouncedFilters.exit_reasons.forEach(r => params.append('exit_reasons', r));
       }
@@ -195,6 +196,7 @@ export function SignalHistory() {
       min_score: undefined,
       max_score: undefined,
       exit_reasons: [],
+      cluster_peak_only: false,
     });
   };
 
@@ -532,7 +534,7 @@ export function SignalHistory() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <FiFilter style={{ color: '#3b82f6', fontSize: '14px' }} />
               <span>Filters</span>
-              {((filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0) + (filters.max_score !== undefined ? 1 : 0)) > 0 && (
+              {((filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0) + (filters.max_score !== undefined ? 1 : 0) + (filters.cluster_peak_only ? 1 : 0)) > 0 && (
                 <span style={{
                   background: 'rgba(59, 130, 246, 0.2)',
                   color: '#60a5fa',
@@ -540,7 +542,7 @@ export function SignalHistory() {
                   borderRadius: '10px',
                   fontSize: '11px'
                 }}>
-                  {(filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0) + (filters.max_score !== undefined ? 1 : 0)} active
+                  {(filters.ticker_symbols?.length || 0) + (filters.decisions?.length || 0) + (filters.strengths?.length || 0) + (filters.exit_reasons?.length || 0) + (filters.min_score !== undefined ? 1 : 0) + (filters.max_score !== undefined ? 1 : 0) + (filters.cluster_peak_only ? 1 : 0)} active
                 </span>
               )}
             </div>
@@ -669,6 +671,41 @@ export function SignalHistory() {
                   </div>
                 </div>
               </div>
+
+              {/* Cluster Peak filter — csak archive módban */}
+              {viewMode === 'archive' && (
+                <div style={{ marginBottom: '12px' }}>
+                  <button
+                    onClick={() => setFilters(prev => ({ ...prev, cluster_peak_only: !prev.cluster_peak_only }))}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      background: filters.cluster_peak_only ? 'rgba(139, 92, 246, 0.15)' : 'rgba(51, 65, 85, 0.5)',
+                      border: `1px solid ${filters.cluster_peak_only ? '#8b5cf6' : 'rgba(99, 102, 241, 0.3)'}`,
+                      color: filters.cluster_peak_only ? '#c4b5fd' : '#94a3b8',
+                      padding: '5px 12px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    <span style={{
+                      width: '14px', height: '14px',
+                      border: `2px solid ${filters.cluster_peak_only ? '#8b5cf6' : '#64748b'}`,
+                      borderRadius: '3px',
+                      background: filters.cluster_peak_only ? '#8b5cf6' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      {filters.cluster_peak_only && <span style={{ color: '#fff', fontSize: '10px', lineHeight: 1 }}>✓</span>}
+                    </span>
+                    Klaszter csúcsok (score emelkedő sorozat, reset &lt;25)
+                  </button>
+                </div>
+              )}
 
               {/* Decision, Strength, Reset - ALL IN ONE ROW */}
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap' }}>

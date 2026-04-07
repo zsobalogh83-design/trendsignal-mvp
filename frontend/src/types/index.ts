@@ -260,6 +260,7 @@ export interface SignalHistoryFilters {
   min_score?: number;
   max_score?: number;
   exit_reasons?: ('SL' | 'TP' | 'REV' | 'EOD' | 'STAG' | 'MAX' | 'OPEN' | 'NOGO' | 'NO_DATA' | 'SKIP_HRS' | 'INV_LVL' | 'PAR_SKIP' | 'NONE')[];
+  cluster_peak_only?: boolean;
   limit?: number;
   offset?: number;
 }
