@@ -5,10 +5,10 @@ Atomic units are groups of parameter dimensions that MUST be optimized
 together because decode_vector() enforces constraints between them
 (ordering, sum=1 normalization, monotone sequences, etc.).
 
-19 atomic units covering all 52 dimensions.
+25 atomic units covering all 61 dimensions.
 
-Version: 1.0
-Date: 2026-03-07
+Version: 2.0 — 12-component CW_ weight architecture
+Date: 2026-04-07
 """
 
 import random
@@ -18,11 +18,12 @@ from typing import Dict, Any, List, Tuple
 ATOMIC_UNITS: List[Dict[str, Any]] = [
 
     # ------------------------------------------------------------------
-    # Group 1: Component weights — RISK_WEIGHT = 1 - SENTIMENT - TECHNICAL
-    # Constraint: sum must allow RISK >= 0.05 (enforced in decode_vector)
+    # Group 1: CW_ sentiment weights (dims 0-1)
+    # Part of the shared 12-component sum=1 normalization.
+    # Constraint: all CW_ dims [0,1,9-13,22,23,59,60] share global sum.
     # ------------------------------------------------------------------
     {"id": "W",     "dims": [0, 1],
-     "name": "Component weights (sent/tech/risk)"},
+     "name": "CW sentiment weights (signal + recency)"},
 
     # ------------------------------------------------------------------
     # Group 2: Signal thresholds — split into 3 independent units
@@ -42,10 +43,11 @@ ATOMIC_UNITS: List[Dict[str, Any]] = [
      "name": "Sentiment decay"},
 
     # ------------------------------------------------------------------
-    # Group 4: Tech component weights — sum <= 1.0 (volume is residual)
+    # Group 4: CW_ technical weights (dims 9-13)
+    # Part of the shared 12-component sum=1 normalization.
     # ------------------------------------------------------------------
     {"id": "TW",    "dims": [9, 10, 11, 12, 13],
-     "name": "Technical component weights"},
+     "name": "CW technical weights (sma/rsi/macd/bb/stoch)"},
 
     # ------------------------------------------------------------------
     # Group 5: Technical signal scores — no cross-constraints, split 2x4
@@ -56,10 +58,11 @@ ATOMIC_UNITS: List[Dict[str, Any]] = [
      "name": "Tech scores B (RSI overbought/oversold/neutral)"},
 
     # ------------------------------------------------------------------
-    # Group 6: Risk component weights — TREND = 1 - VOL - PROXIMITY
+    # Group 6: CW_ risk weights — volume_confirm + volatility_risk (dims 22-23)
+    # Part of the shared 12-component sum=1 normalization.
     # ------------------------------------------------------------------
     {"id": "RW",    "dims": [22, 23],
-     "name": "Risk component weights"},
+     "name": "CW risk weights (volume_confirm + volatility_risk)"},
 
     # ------------------------------------------------------------------
     # Group 7: Alignment — no cross-constraints, split bonus + threshold
@@ -110,23 +113,43 @@ ATOMIC_UNITS: List[Dict[str, Any]] = [
      "name": "SHORT ATR Stop-Loss multipliers"},
 
     # ------------------------------------------------------------------
-    # Group 13: SHORT ATR Take-Profit — LOW_VOL <= HIGH_VOL
+    # Group 14a: SHORT ATR Take-Profit — LOW_VOL <= HIGH_VOL
     # ------------------------------------------------------------------
     {"id": "S_TP",  "dims": [49, 50],
      "name": "SHORT ATR Take-Profit multipliers"},
 
     # ------------------------------------------------------------------
-    # Group 13: SHORT SL max pct — independent
+    # Group 14b: SHORT SL max pct — independent
     # ------------------------------------------------------------------
     {"id": "S_MAX", "dims": [51],
      "name": "SHORT SL max pct"},
+
+    # ------------------------------------------------------------------
+    # Group 15: Entry gate thresholds (dims 52-58)
+    # Split into pairs so BCD can tune each gate independently.
+    # ------------------------------------------------------------------
+    {"id": "EG_R",  "dims": [52, 53],
+     "name": "Entry gates RSI (buy_max / sell_min)"},
+    {"id": "EG_M",  "dims": [54, 55],
+     "name": "Entry gates MACD histogram (buy_min / sell_max)"},
+    {"id": "EG_S",  "dims": [56, 57],
+     "name": "Entry gates SMA200 pct (buy_max / sell_min)"},
+    {"id": "EG_D",  "dims": [58],
+     "name": "Entry gate dist_to_resistance (buy_max)"},
+
+    # ------------------------------------------------------------------
+    # Group 16: CW_ risk proximity + trend strength (dims 59-60)
+    # Part of the shared 12-component sum=1 normalization.
+    # ------------------------------------------------------------------
+    {"id": "CW_R",  "dims": [59, 60],
+     "name": "CW risk weights (sr_proximity + trend_strength)"},
 ]
 
 
-# Validate: all 52 dims covered exactly once
+# Validate: all 61 dims covered exactly once
 _all_dims = [d for u in ATOMIC_UNITS for d in u["dims"]]
-assert sorted(_all_dims) == list(range(52)), (
-    f"ATOMIC_UNITS must cover dims 0-51 exactly once. Got: {sorted(_all_dims)}"
+assert sorted(_all_dims) == list(range(61)), (
+    f"ATOMIC_UNITS must cover dims 0-60 exactly once. Got: {sorted(_all_dims)}"
 )
 
 # Convenience lookup by ID

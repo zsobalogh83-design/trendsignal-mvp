@@ -1,15 +1,15 @@
 """
 TrendSignal Self-Tuning Engine - Parameter Space Definition
 
-Defines the 59-dimensional parameter vector for the genetic optimizer.
+Defines the 61-dimensional parameter vector for the genetic optimizer.
 
 Dimension layout (0-indexed):
-  [0-1]   Component weights (2 free; RISK_WEIGHT = 1 - S - T)
+  [0-1]   12-component CW_ weights: sentiment (2 free)
   [2-5]   Signal thresholds (4)
   [6-8]   Sentiment decay (3 free; DECAY_0_2h fixed at 1.0)
-  [9-13]  Technical component weights (5 free; VOLUME_WEIGHT = 1 - sum)
+  [9-13]  12-component CW_ weights: technical (5 free)
   [14-21] Technical signal scores (8)
-  [22-23] Risk component weights (2 free; TREND_STRENGTH = 1 - V - P)
+  [22-23] 12-component CW_ weights: risk vol/vol_confirm (2 free)
   [24-29] Alignment bonuses and thresholds (6)
   [30-35] RSI/Stochastic zone thresholds (6)
   [36-39] Sentiment confidence params (4)
@@ -19,11 +19,15 @@ Dimension layout (0-indexed):
   [45]    S/R hard distance threshold for SL blending (1)
   [46-51] SHORT daytrade SL/TP multipliers (6)
   [52-58] Entry gate thresholds (7)
+  [59-60] 12-component CW_ weights: sr_proximity + trend_strength (2 free)
 
-Total: 59 dimensions
+  All 11 free CW_ dims [0,1,9,10,11,12,13,22,23,59,60] share a sum=1.0
+  normalization in decode_vector(); CW_RR_QUALITY is derived as the residual.
 
-Version: 2.0
-Date: 2026-02-24
+Total: 61 dimensions
+
+Version: 3.0 — 12-component CW_ weight architecture
+Date: 2026-04-07
 """
 
 from dataclasses import dataclass
@@ -50,13 +54,13 @@ class ParamDef:
 PARAM_DEFS: List[ParamDef] = [
 
     # ------------------------------------------------------------------
-    # Group 1: Component Weights  (dim 0-1, RISK_WEIGHT is derived)
+    # Group 1: 12-component CW_ weights — sentiment (dim 0-1)
+    # All 11 free CW_ dims sum to ≤ 0.98; CW_RR_QUALITY = 1.0 - sum (derived)
     # ------------------------------------------------------------------
-    ParamDef(0,  "sentiment_weight",    "SENTIMENT_WEIGHT",    0.10, 0.80, False,
-             "Weight of sentiment score in combined score"),
-    ParamDef(1,  "technical_weight",    "TECHNICAL_WEIGHT",    0.10, 0.70, False,
-             "Weight of technical score in combined score"),
-    # RISK_WEIGHT = 1.0 - sentiment_weight - technical_weight  (enforced in decode)
+    ParamDef(0,  "cw_sentiment_signal",  "CW_SENTIMENT_SIGNAL",  0.05, 0.60, False,
+             "Direct weight of sentiment_signal score in combined score"),
+    ParamDef(1,  "cw_sentiment_recency", "CW_SENTIMENT_RECENCY", 0.01, 0.25, False,
+             "Direct weight of sentiment_recency (confidence) score"),
 
     # ------------------------------------------------------------------
     # Group 2: Signal Thresholds  (dim 2-5)
@@ -82,19 +86,18 @@ PARAM_DEFS: List[ParamDef] = [
              "Sentiment decay weight for 12-24h old news"),
 
     # ------------------------------------------------------------------
-    # Group 4: Technical Component Weights  (dim 9-13; VOLUME = 1-sum)
+    # Group 4: 12-component CW_ weights — technical (dim 9-13)
     # ------------------------------------------------------------------
-    ParamDef(9,  "tech_sma_weight",      "TECH_SMA_WEIGHT",     0.05, 0.60, False,
-             "Weight of SMA component in technical score"),
-    ParamDef(10, "tech_rsi_weight",      "TECH_RSI_WEIGHT",     0.05, 0.50, False,
-             "Weight of RSI component in technical score"),
-    ParamDef(11, "tech_macd_weight",     "TECH_MACD_WEIGHT",    0.05, 0.45, False,
-             "Weight of MACD component in technical score"),
-    ParamDef(12, "tech_bollinger_weight","TECH_BOLLINGER_WEIGHT",0.00, 0.40, False,
-             "Weight of Bollinger Bands in technical score"),
-    ParamDef(13, "tech_stochastic_weight","TECH_STOCHASTIC_WEIGHT",0.00, 0.20, False,
-             "Weight of Stochastic in technical score"),
-    # TECH_VOLUME_WEIGHT = max(0, 1 - sum(dim9..dim13))  (enforced in decode)
+    ParamDef(9,  "cw_sma_trend",         "CW_SMA_TREND",        0.01, 0.30, False,
+             "Direct weight of sma_trend score (golden/death cross, price vs SMA)"),
+    ParamDef(10, "cw_rsi_momentum",      "CW_RSI_MOMENTUM",     0.01, 0.25, False,
+             "Direct weight of rsi_momentum score (oversold/overbought zone)"),
+    ParamDef(11, "cw_macd_signal",       "CW_MACD_SIGNAL",      0.01, 0.20, False,
+             "Direct weight of macd_signal score (MACD crossover/histogram)"),
+    ParamDef(12, "cw_bb_position",       "CW_BB_POSITION",      0.00, 0.15, False,
+             "Direct weight of bb_position score (Bollinger Band position)"),
+    ParamDef(13, "cw_stoch_cross",       "CW_STOCH_CROSS",      0.00, 0.10, False,
+             "Direct weight of stoch_cross score (Stochastic K/D)"),
 
     # ------------------------------------------------------------------
     # Group 5: Technical Signal Scores  (dim 14-21)
@@ -117,13 +120,12 @@ PARAM_DEFS: List[ParamDef] = [
              "Score when RSI is in neutral zone"),
 
     # ------------------------------------------------------------------
-    # Group 6: Risk Component Weights  (dim 22-23; TREND = 1-V-P)
+    # Group 6: 12-component CW_ weights — risk vol_confirm + volatility (dim 22-23)
     # ------------------------------------------------------------------
-    ParamDef(22, "risk_volatility_weight",   "RISK_VOLATILITY_WEIGHT",    0.10, 0.70, False,
-             "Weight of volatility component in risk score"),
-    ParamDef(23, "risk_proximity_weight",    "RISK_PROXIMITY_WEIGHT",     0.10, 0.60, False,
-             "Weight of S/R proximity in risk score"),
-    # RISK_TREND_STRENGTH_WEIGHT = 1 - V - P  (enforced in decode)
+    ParamDef(22, "cw_volume_confirm",    "CW_VOLUME_CONFIRM",   0.00, 0.08, False,
+             "Direct weight of volume_confirm score (volume ratio)"),
+    ParamDef(23, "cw_volatility_risk",   "CW_VOLATILITY_RISK",  0.01, 0.25, False,
+             "Direct weight of volatility_risk score (ATR-based)"),
 
     # ------------------------------------------------------------------
     # Group 7: Alignment Bonuses  (dim 24-29)
@@ -261,10 +263,18 @@ PARAM_DEFS: List[ParamDef] = [
     ParamDef(58, "entry_gate_dist_resist_buy_max_pct","ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT",
              5.0, 50.0, False,
              "BUY blocked if dist_to_resistance > this % (no room to run); 50=disabled"),
+
+    # ------------------------------------------------------------------
+    # Group 15: 12-component CW_ weights — sr_proximity + trend_strength (dim 59-60)
+    # ------------------------------------------------------------------
+    ParamDef(59, "cw_sr_proximity",      "CW_SR_PROXIMITY",     0.01, 0.25, False,
+             "Direct weight of sr_proximity score (S/R distance quality)"),
+    ParamDef(60, "cw_trend_strength",    "CW_TREND_STRENGTH",   0.00, 0.15, False,
+             "Direct weight of trend_strength score (ADX-based)"),
 ]
 
 # Convenience: number of dimensions
-N_DIMS: int = len(PARAM_DEFS)  # 52
+N_DIMS: int = len(PARAM_DEFS)  # 61
 
 # Lower and upper bounds as numpy arrays (for DEAP initialisation)
 LOWER_BOUNDS: np.ndarray = np.array([p.low  for p in PARAM_DEFS], dtype=float)
@@ -276,11 +286,11 @@ UPPER_BOUNDS: np.ndarray = np.array([p.high for p in PARAM_DEFS], dtype=float)
 # ---------------------------------------------------------------------------
 
 BASELINE_VECTOR: List[float] = [
-    # Group 1: Component weights
-    0.50,   # 0  SENTIMENT_WEIGHT
-    0.35,   # 1  TECHNICAL_WEIGHT
+    # Group 1: 12-component CW_ weights — sentiment
+    0.30,   # 0  CW_SENTIMENT_SIGNAL
+    0.10,   # 1  CW_SENTIMENT_RECENCY
     # Group 2: Signal thresholds
-    15.0,   # 2  HOLD_ZONE_THRESHOLD
+    25.0,   # 2  HOLD_ZONE_THRESHOLD  (matches config.py default)
     55.0,   # 3  STRONG_BUY_SCORE
     35.0,   # 4  MODERATE_BUY_SCORE
     0.75,   # 5  STRONG_BUY_CONFIDENCE
@@ -288,12 +298,12 @@ BASELINE_VECTOR: List[float] = [
     0.85,   # 6  DECAY_2_6h
     0.60,   # 7  DECAY_6_12h
     0.35,   # 8  DECAY_12_24h
-    # Group 4: Technical component weights
-    0.30,   # 9  TECH_SMA_WEIGHT
-    0.25,   # 10 TECH_RSI_WEIGHT
-    0.20,   # 11 TECH_MACD_WEIGHT
-    0.15,   # 12 TECH_BOLLINGER_WEIGHT
-    0.05,   # 13 TECH_STOCHASTIC_WEIGHT
+    # Group 4: 12-component CW_ weights — technical
+    0.12,   # 9  CW_SMA_TREND
+    0.10,   # 10 CW_RSI_MOMENTUM
+    0.08,   # 11 CW_MACD_SIGNAL
+    0.04,   # 12 CW_BB_POSITION
+    0.02,   # 13 CW_STOCH_CROSS
     # Group 5: Technical signal scores
     25.0,   # 14 TECH_SMA20_BULLISH
     20.0,   # 15 TECH_SMA50_BULLISH
@@ -303,9 +313,9 @@ BASELINE_VECTOR: List[float] = [
     30.0,   # 19 TECH_RSI_OVERBOUGHT
     30.0,   # 20 TECH_RSI_OVERSOLD
     20.0,   # 21 TECH_RSI_NEUTRAL
-    # Group 6: Risk component weights
-    0.40,   # 22 RISK_VOLATILITY_WEIGHT
-    0.35,   # 23 RISK_PROXIMITY_WEIGHT
+    # Group 6: 12-component CW_ weights — volume_confirm + volatility_risk
+    0.02,   # 22 CW_VOLUME_CONFIRM
+    0.08,   # 23 CW_VOLATILITY_RISK
     # Group 7: Alignment bonuses
     8.0,    # 24 ALIGNMENT_BONUS_ALL
     5.0,    # 25 ALIGNMENT_BONUS_TR
@@ -349,6 +359,10 @@ BASELINE_VECTOR: List[float] = [
     5.0,    # 56 ENTRY_GATE_SMA200_BUY_MAX_PCT
     -5.0,   # 57 ENTRY_GATE_SMA200_SELL_MIN_PCT
     15.0,   # 58 ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT
+    # Group 15: 12-component CW_ weights — sr_proximity + trend_strength
+    0.08,   # 59 CW_SR_PROXIMITY
+    0.04,   # 60 CW_TREND_STRENGTH
+    # CW_RR_QUALITY = 1.0 - sum(dims[0,1,9-13,22,23,59,60]) = 0.02 (derived)
 ]
 
 assert len(BASELINE_VECTOR) == N_DIMS, \
@@ -500,18 +514,25 @@ def decode_vector(v: List[float]) -> dict:
     for p in PARAM_DEFS:
         v[p.index] = float(np.clip(v[p.index], p.low, p.high))
 
-    # --- Group 1: component weights sum=1.0 ---
-    sw = v[0]
-    tw = v[1]
-    rw = 1.0 - sw - tw
-    if rw < 0.05:
-        # Scale down sw and tw proportionally to free up risk weight
-        total = sw + tw
-        sw = sw / total * 0.95
-        tw = tw / total * 0.95
-        rw = 0.05
-    v[0] = sw
-    v[1] = tw
+    # --- Groups 1/4/6/15: 12-component CW_ weights sum=1.0 ---
+    # Free dims: [0,1,9,10,11,12,13,22,23,59,60] — 11 params
+    # Derived:   CW_RR_QUALITY = max(0.02, 1.0 - sum_of_11)
+    _CW_DIMS = [0, 1, 9, 10, 11, 12, 13, 22, 23, 59, 60]
+    cw_sum = sum(v[i] for i in _CW_DIMS)
+    if cw_sum > 0.98:
+        # Scale proportionally to leave room for CW_RR_QUALITY min 0.02
+        scale = 0.98 / cw_sum
+        for i in _CW_DIMS:
+            v[i] = v[i] * scale
+        cw_rr = 0.02
+    elif cw_sum <= 0.0:
+        # Degenerate case: reset to baseline proportions
+        baseline_cw = [0.30, 0.10, 0.12, 0.10, 0.08, 0.04, 0.02, 0.02, 0.08, 0.08, 0.04]
+        for j, i in enumerate(_CW_DIMS):
+            v[i] = baseline_cw[j]
+        cw_rr = 0.02
+    else:
+        cw_rr = max(0.02, 1.0 - cw_sum)
 
     # --- Group 3: monotone decay ---
     # Enforce dim6 >= dim7 >= dim8
@@ -521,28 +542,6 @@ def decode_vector(v: List[float]) -> dict:
     v[6] = d26
     v[7] = d612
     v[8] = d1224
-
-    # --- Group 4: tech weights sum=1.0, volume is residual ---
-    tw_sum = v[9] + v[10] + v[11] + v[12] + v[13]
-    if tw_sum > 1.0:
-        # Normalise proportionally
-        for i in range(9, 14):
-            v[i] = v[i] / tw_sum
-        tech_volume = 0.0
-    else:
-        tech_volume = max(0.0, 1.0 - tw_sum)
-
-    # --- Group 6: risk weights sum=1.0, trend is residual ---
-    rv = v[22]
-    rp = v[23]
-    rt = 1.0 - rv - rp
-    if rt < 0.05:
-        total = rv + rp
-        rv = rv / total * 0.95
-        rp = rp / total * 0.95
-        rt = 0.05
-    v[22] = rv
-    v[23] = rp
 
     # --- Group 8: RSI ordering constraints ---
     # RSI_OVERSOLD < RSI_NEUTRAL_LOW < RSI_NEUTRAL_HIGH < RSI_OVERBOUGHT
@@ -593,9 +592,7 @@ def decode_vector(v: List[float]) -> dict:
         cfg[p.config_key] = int(v[p.index]) if p.is_int else v[p.index]
 
     # Derived / non-free params
-    cfg["RISK_WEIGHT"]              = round(1.0 - v[0] - v[1], 6)
-    cfg["TECH_VOLUME_WEIGHT"]       = round(tech_volume, 6)
-    cfg["RISK_TREND_STRENGTH_WEIGHT"] = round(rt, 6)
+    cfg["CW_RR_QUALITY"]            = round(cw_rr, 6)
     cfg["DECAY_0_2H"]               = 1.0   # always fixed
 
     # S/R blend soft thresholds (fixed at half of the hard threshold)
