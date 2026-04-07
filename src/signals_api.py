@@ -959,6 +959,7 @@ async def get_archive_signal_history(
     min_score: Optional[float] = None,
     max_score: Optional[float] = None,
     exit_reasons: Optional[List[str]] = Query(None),
+    cluster_peak_only: bool = False,
     limit: int = 100,
     offset: int = 0,
 ):
@@ -1037,6 +1038,37 @@ async def get_archive_signal_history(
                 )
             if er_conds:
                 where.append(f"({' OR '.join(er_conds)})")
+
+        # Klaszter-csúcs filter: ticker+irány szerint futó maximum score alapján
+        # csak azok a signalok jelennek meg, amelyek meghaladják a korábbi klaszter-csúcsot.
+        # Reset: ha a score 25 alá esik, a klaszter újraindul.
+        if cluster_peak_only:
+            _CLUSTER_THRESHOLD = 25.0
+            pre_rows = conn.execute(
+                f"SELECT s.id, s.ticker_symbol, s.combined_score "
+                f"FROM archive_signals s WHERE {' AND '.join(where)} "
+                f"ORDER BY s.signal_timestamp ASC",
+                params,
+            ).fetchall()
+            _cluster_max: dict = {}   # (ticker, direction) → futó max |score|
+            _valid_ids: list = []
+            for _r in pre_rows:
+                _abs = abs(_r["combined_score"])
+                _dir = "LONG" if _r["combined_score"] > 0 else "SHORT"
+                _key = (_r["ticker_symbol"], _dir)
+                _cur = _cluster_max.get(_key, 0.0)
+                if _abs < _CLUSTER_THRESHOLD:
+                    _cluster_max[_key] = 0.0          # reset
+                elif _abs > _cur:
+                    _valid_ids.append(_r["id"])
+                    _cluster_max[_key] = _abs
+                # else: skip (score >= threshold de nem haladja meg a csúcsot)
+            if _valid_ids:
+                _ph = ",".join("?" * len(_valid_ids))
+                where.append(f"s.id IN ({_ph})")
+                params = list(params) + _valid_ids
+            else:
+                where.append("1=0")
 
         w = " AND ".join(where)
 
