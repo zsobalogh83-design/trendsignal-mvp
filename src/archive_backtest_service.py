@@ -28,6 +28,7 @@ from src.trade_simulator_core import (
     _is_weekend,
 )
 from config import get_config as _get_config
+from src.entry_gates import check_entry_gates
 
 _ET_TZ = pytz.timezone('America/New_York')
 
@@ -283,36 +284,20 @@ class ArchiveBacktestService:
             is_real   = abs(sig["score"]) >= ALERT_THRESHOLD
             signal_ts = sig["ts"]
 
-            # ── Entry gates (konzisztens trade_manager.open_position()-szal) ──────
+            # ── Entry gates (közös logika: src/entry_gates.py) ──────────────────
             _cfg = _get_config()
-            rsi       = sig.get("rsi")
-            macd_hist = sig.get("macd_hist")
-            sma_200   = sig.get("sma_200")
-            close_p   = sig.get("close_price")
-            nearest_r = sig.get("nearest_resistance")
-
-            if direction == "LONG":
-                if rsi is not None and rsi >= _cfg.entry_gate_rsi_buy_max:
-                    stats["skipped"] += 1; continue
-                if macd_hist is not None and macd_hist <= _cfg.entry_gate_macd_hist_buy_min:
-                    stats["skipped"] += 1; continue
-                if sma_200 and sma_200 > 0 and close_p and close_p > 0:
-                    pct = (close_p - sma_200) / sma_200 * 100
-                    if pct > _cfg.entry_gate_sma200_buy_max_pct:
-                        stats["skipped"] += 1; continue
-                if nearest_r and close_p and close_p > 0:
-                    dist_r = (nearest_r - close_p) / close_p * 100
-                    if dist_r > _cfg.entry_gate_dist_resist_buy_max_pct:
-                        stats["skipped"] += 1; continue
-            else:  # SHORT
-                if rsi is not None and rsi <= _cfg.entry_gate_rsi_sell_min:
-                    stats["skipped"] += 1; continue
-                if macd_hist is not None and macd_hist >= _cfg.entry_gate_macd_hist_sell_max:
-                    stats["skipped"] += 1; continue
-                if sma_200 and sma_200 > 0 and close_p and close_p > 0:
-                    pct = (close_p - sma_200) / sma_200 * 100
-                    if pct < _cfg.entry_gate_sma200_sell_min_pct:
-                        stats["skipped"] += 1; continue
+            blocked, _filter, _reason = check_entry_gates(
+                direction=direction,
+                rsi=sig.get("rsi"),
+                macd_hist=sig.get("macd_hist"),
+                sma_200=sig.get("sma_200"),
+                sma_50=sig.get("sma_50"),
+                close_price=sig.get("close_price"),
+                nearest_resistance=sig.get("nearest_resistance"),
+                cfg=_cfg,
+            )
+            if blocked:
+                stats["skipped"] += 1; continue
 
             # Entry: a signal timestampje utáni első kereskedési bar nyitóárán
             # (15 perces végrehajtási késés, mint a valóságban)
@@ -510,7 +495,7 @@ class ArchiveBacktestService:
         rows = conn.execute(
             """SELECT id, signal_timestamp, combined_score, overall_confidence,
                       entry_price, stop_loss, take_profit,
-                      rsi, macd_hist, sma_200, close_price, nearest_resistance
+                      rsi, macd_hist, sma_200, sma_50, close_price, nearest_resistance
                FROM archive_signals
                WHERE ticker_symbol = ?
                  AND decision != 'HOLD'
@@ -534,6 +519,7 @@ class ArchiveBacktestService:
                 "rsi":                r["rsi"],
                 "macd_hist":          r["macd_hist"],
                 "sma_200":            r["sma_200"],
+                "sma_50":             r["sma_50"],
                 "close_price":        r["close_price"],
                 "nearest_resistance": r["nearest_resistance"],
             })

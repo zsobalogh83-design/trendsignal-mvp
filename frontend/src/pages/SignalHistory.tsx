@@ -1351,9 +1351,7 @@ function calcSummary(signals: Signal[], openPnlMap: OpenPnlMap | undefined): Sum
 }
 
 function getDefaultFromDate(): string {
-  const date = new Date();
-  date.setDate(date.getDate() - 30);
-  return date.toISOString().split('T')[0];
+  return '2024-03-20';
 }
 
 function getDefaultToDate(): string {

@@ -31,6 +31,7 @@ class SignalConfigUpdate(BaseModel):
     entry_gate_sma200_buy_max_pct: Optional[float] = None
     entry_gate_sma200_sell_min_pct: Optional[float] = None
     entry_gate_dist_resist_buy_max_pct: Optional[float] = Field(None, ge=0)
+    entry_gate_sma50_sell_min_pct: Optional[float] = None
 
     strong_buy_score: Optional[float] = Field(None, ge=0, le=100)
     strong_buy_confidence: Optional[float] = Field(None, ge=0, le=1)
@@ -63,6 +64,7 @@ class SignalConfigResponse(BaseModel):
     entry_gate_sma200_buy_max_pct: float
     entry_gate_sma200_sell_min_pct: float
     entry_gate_dist_resist_buy_max_pct: float
+    entry_gate_sma50_sell_min_pct: float
 
 class DecayWeightsUpdate(BaseModel):
     """Model for updating decay weights (as percentages 0-100)"""
@@ -284,6 +286,7 @@ async def get_signal_config():
             entry_gate_sma200_buy_max_pct=config.entry_gate_sma200_buy_max_pct,
             entry_gate_sma200_sell_min_pct=config.entry_gate_sma200_sell_min_pct,
             entry_gate_dist_resist_buy_max_pct=config.entry_gate_dist_resist_buy_max_pct,
+            entry_gate_sma50_sell_min_pct=config.entry_gate_sma50_sell_min_pct,
             strong_buy_score=config.STRONG_BUY_SCORE,
             strong_buy_confidence=config.STRONG_BUY_CONFIDENCE,
             moderate_buy_score=config.MODERATE_BUY_SCORE,
@@ -346,6 +349,8 @@ async def update_signal_config(config_update: SignalConfigUpdate):
             updates["ENTRY_GATE_SMA200_SELL_MIN_PCT"] = config_update.entry_gate_sma200_sell_min_pct
         if config_update.entry_gate_dist_resist_buy_max_pct is not None:
             updates["ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT"] = config_update.entry_gate_dist_resist_buy_max_pct
+        if config_update.entry_gate_sma50_sell_min_pct is not None:
+            updates["ENTRY_GATE_SMA50_SELL_MIN_PCT"] = config_update.entry_gate_sma50_sell_min_pct
         if config_update.strong_buy_score is not None:
             updates["STRONG_BUY_SCORE"] = config_update.strong_buy_score
         if config_update.strong_buy_confidence is not None:

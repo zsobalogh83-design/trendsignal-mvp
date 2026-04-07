@@ -136,6 +136,7 @@ ENTRY_GATE_MACD_HIST_SELL_MAX = 0.0    # SELL blocked if macd_hist >= this (bull
 ENTRY_GATE_SMA200_BUY_MAX_PCT  = 5.0   # BUY blocked if price > SMA200 by more than this % (extended)
 ENTRY_GATE_SMA200_SELL_MIN_PCT = -5.0  # SELL blocked if price < SMA200 by more than |this| % (oversold)
 ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT = 15.0  # BUY blocked if dist_to_resistance > this % (no room to run)
+ENTRY_GATE_SMA50_SELL_MIN_PCT = 3.0       # SELL blocked if price < SMA50 + this % (not extended enough above SMA50)
 
 # Strong signals
 STRONG_BUY_SCORE = 65
@@ -523,6 +524,7 @@ def save_config_to_file(config_instance):
             "ENTRY_GATE_SMA200_BUY_MAX_PCT":      config_instance.entry_gate_sma200_buy_max_pct,
             "ENTRY_GATE_SMA200_SELL_MIN_PCT":     config_instance.entry_gate_sma200_sell_min_pct,
             "ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT": config_instance.entry_gate_dist_resist_buy_max_pct,
+            "ENTRY_GATE_SMA50_SELL_MIN_PCT":      config_instance.entry_gate_sma50_sell_min_pct,
             "STRONG_BUY_SCORE": config_instance.strong_buy_score,
             "STRONG_BUY_CONFIDENCE": config_instance.strong_buy_confidence,
             "MODERATE_BUY_SCORE": config_instance.moderate_buy_score,
@@ -786,6 +788,7 @@ class TrendSignalConfig:
     entry_gate_sma200_buy_max_pct:     float = ENTRY_GATE_SMA200_BUY_MAX_PCT
     entry_gate_sma200_sell_min_pct:    float = ENTRY_GATE_SMA200_SELL_MIN_PCT
     entry_gate_dist_resist_buy_max_pct: float = ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT
+    entry_gate_sma50_sell_min_pct:      float = ENTRY_GATE_SMA50_SELL_MIN_PCT
     
     strong_buy_score: int = STRONG_BUY_SCORE
     strong_buy_confidence: float = STRONG_BUY_CONFIDENCE
@@ -1009,6 +1012,7 @@ class TrendSignalConfig:
             self.entry_gate_sma200_buy_max_pct     = saved_config.get("ENTRY_GATE_SMA200_BUY_MAX_PCT",     ENTRY_GATE_SMA200_BUY_MAX_PCT)
             self.entry_gate_sma200_sell_min_pct    = saved_config.get("ENTRY_GATE_SMA200_SELL_MIN_PCT",    ENTRY_GATE_SMA200_SELL_MIN_PCT)
             self.entry_gate_dist_resist_buy_max_pct = saved_config.get("ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT", ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT)
+            self.entry_gate_sma50_sell_min_pct      = saved_config.get("ENTRY_GATE_SMA50_SELL_MIN_PCT",      ENTRY_GATE_SMA50_SELL_MIN_PCT)
             self.strong_buy_score = saved_config.get("STRONG_BUY_SCORE", STRONG_BUY_SCORE)
             self.strong_buy_confidence = saved_config.get("STRONG_BUY_CONFIDENCE", STRONG_BUY_CONFIDENCE)
             self.moderate_buy_score = saved_config.get("MODERATE_BUY_SCORE", MODERATE_BUY_SCORE)
@@ -1316,6 +1320,7 @@ class TrendSignalConfig:
             self.entry_gate_sma200_buy_max_pct     = saved_config.get("ENTRY_GATE_SMA200_BUY_MAX_PCT",     ENTRY_GATE_SMA200_BUY_MAX_PCT)
             self.entry_gate_sma200_sell_min_pct    = saved_config.get("ENTRY_GATE_SMA200_SELL_MIN_PCT",    ENTRY_GATE_SMA200_SELL_MIN_PCT)
             self.entry_gate_dist_resist_buy_max_pct = saved_config.get("ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT", ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT)
+            self.entry_gate_sma50_sell_min_pct      = saved_config.get("ENTRY_GATE_SMA50_SELL_MIN_PCT",      ENTRY_GATE_SMA50_SELL_MIN_PCT)
             self.strong_buy_score = saved_config.get("STRONG_BUY_SCORE", STRONG_BUY_SCORE)
             self.strong_buy_confidence = saved_config.get("STRONG_BUY_CONFIDENCE", STRONG_BUY_CONFIDENCE)
             self.moderate_buy_score = saved_config.get("MODERATE_BUY_SCORE", MODERATE_BUY_SCORE)

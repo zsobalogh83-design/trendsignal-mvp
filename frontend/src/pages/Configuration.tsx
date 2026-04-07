@@ -725,10 +725,18 @@ function SignalsTab({ componentWeights: cw, setComponentWeights: setCw, cw12, se
               </td>
               <td style={{ color: '#475569', fontSize: '12px' }}>– (nincs)</td>
             </tr>
+            <tr>
+              <td><strong>SMA50 távolság</strong></td>
+              <td style={{ color: '#475569', fontSize: '12px' }}>– (nincs)</td>
+              <td>
+                Ár min. <input className="ind-input" type="number" step="0.5" value={entryGates.sma50SellMinPct} style={{ width: '60px' }}
+                  onChange={(e) => setEntryGates({...entryGates, sma50SellMinPct: parseFloat(e.target.value) || 0})} /> % felett
+              </td>
+            </tr>
           </tbody>
         </table>
         <div className="info-bar">
-          ℹ️ RSI BUY: &lt;{entryGates.rsiBuyMax} · RSI SELL: &gt;{entryGates.rsiSellMin} · MACD Hist BUY: &gt;{entryGates.macdHistBuyMin} · MACD Hist SELL: &lt;{entryGates.macdHistSellMax} · SMA200 BUY: max +{entryGates.sma200BuyMaxPct}% · SMA200 SELL: max {entryGates.sma200SellMinPct}% · Resistance BUY: max {entryGates.distResistBuyMaxPct}%
+          ℹ️ RSI BUY: &lt;{entryGates.rsiBuyMax} · RSI SELL: &gt;{entryGates.rsiSellMin} · MACD Hist BUY: &gt;{entryGates.macdHistBuyMin} · MACD Hist SELL: &lt;{entryGates.macdHistSellMax} · SMA200 BUY: max +{entryGates.sma200BuyMaxPct}% · SMA200 SELL: max {entryGates.sma200SellMinPct}% · Resistance BUY: max {entryGates.distResistBuyMaxPct}% · SMA50 SELL: min +{entryGates.sma50SellMinPct}%
         </div>
       </div>
 
@@ -1066,6 +1074,7 @@ export function Configuration() {
     macdHistBuyMin: 0.0, macdHistSellMax: 0.0,
     sma200BuyMaxPct: 5.0, sma200SellMinPct: -5.0,
     distResistBuyMaxPct: 15.0,
+    sma50SellMinPct: 3.0,
   });
 
   const [technicalWeights, setTechnicalWeights] = useState({
@@ -1168,6 +1177,7 @@ export function Configuration() {
           sma200BuyMaxPct: config.entry_gate_sma200_buy_max_pct ?? 5.0,
           sma200SellMinPct: config.entry_gate_sma200_sell_min_pct ?? -5.0,
           distResistBuyMaxPct: config.entry_gate_dist_resist_buy_max_pct ?? 15.0,
+          sma50SellMinPct: config.entry_gate_sma50_sell_min_pct ?? 3.0,
         });
       }
 
@@ -1359,6 +1369,7 @@ export function Configuration() {
         entry_gate_sma200_buy_max_pct: entryGates.sma200BuyMaxPct,
         entry_gate_sma200_sell_min_pct: entryGates.sma200SellMinPct,
         entry_gate_dist_resist_buy_max_pct: entryGates.distResistBuyMaxPct,
+        entry_gate_sma50_sell_min_pct: entryGates.sma50SellMinPct,
         strong_buy_score: thresholds.strongBuyScore,
         strong_buy_confidence: thresholds.strongBuyConfidence,
         moderate_buy_score: thresholds.moderateBuyScore,

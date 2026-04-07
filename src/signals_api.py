@@ -997,10 +997,10 @@ async def get_archive_signal_history(
             where.append(f"s.strength IN ({ph})")
             params.extend([st.upper() for st in strengths])
         if min_score is not None:
-            where.append("s.combined_score >= ?")
+            where.append("ABS(s.combined_score) >= ?")
             params.append(min_score)
         if max_score is not None:
-            where.append("s.combined_score <= ?")
+            where.append("ABS(s.combined_score) <= ?")
             params.append(max_score)
 
         # exit_reason filter — archive_simulated_trades alapján

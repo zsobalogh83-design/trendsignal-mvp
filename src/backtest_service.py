@@ -265,7 +265,7 @@ class BacktestService:
             logger.debug(f"   Skip {signal.ticker_symbol}: {err_msg}")
             # signal.status may already be set inside trade_manager (nogo, rsi_filtered, macd_filtered).
             # Tag remaining cases so every skipped signal has a meaningful status.
-            if signal.status not in ('nogo', 'rsi_filtered', 'macd_filtered', 'sma200_filtered'):
+            if signal.status not in ('nogo', 'rsi_filtered', 'macd_filtered', 'sma200_filtered', 'sma50_filtered'):
                 if 'outside trading hours' in err_msg:
                     signal.status = 'skip_hours'
                 elif 'Invalid' in err_msg and ('LONG' in err_msg or 'SHORT' in err_msg):
