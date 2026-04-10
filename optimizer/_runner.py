@@ -95,7 +95,35 @@ def _mark_run_failed(run_id: int, error_msg: str, db_path: Path):
     conn.close()
 
 
-def _save_proposal(run_id: int, proposal: dict, validation: dict, db_path: Path) -> int:
+def _ensure_cycle_columns(db_path: Path):
+    """DB migration: cycle tracking mezők hozzáadása, ha még nem léteznek."""
+    conn = _db(db_path)
+    for sql in [
+        "ALTER TABLE optimization_runs ADD COLUMN current_cycle INTEGER DEFAULT 1",
+        "ALTER TABLE optimization_runs ADD COLUMN max_cycles INTEGER DEFAULT 1",
+        "ALTER TABLE config_proposals ADD COLUMN cycle INTEGER DEFAULT 1",
+    ]:
+        try:
+            conn.execute(sql)
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # mező már létezik
+    conn.close()
+
+
+def _update_run_cycle(run_id: int, current_cycle: int, db_path: Path):
+    """Frissíti a futó ciklus számát a DB-ben (progress polling számára)."""
+    conn = _db(db_path)
+    conn.execute(
+        "UPDATE optimization_runs SET current_cycle=? WHERE id=?",
+        (current_cycle, run_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def _save_proposal(run_id: int, proposal: dict, validation: dict, db_path: Path,
+                   cycle: int = 1) -> int:
     """
     Insert one fully-validated proposal into config_proposals.
     Returns the new proposal id.
@@ -119,7 +147,7 @@ def _save_proposal(run_id: int, proposal: dict, validation: dict, db_path: Path)
     conn = _db(db_path)
     cur = conn.execute("""
         INSERT INTO config_proposals (
-            run_id, rank,
+            run_id, rank, cycle,
             train_fitness, val_fitness, test_fitness,
             baseline_fitness, fitness_improvement_pct,
             test_trade_count, test_win_rate, test_profit_factor, baseline_profit_factor,
@@ -134,7 +162,7 @@ def _save_proposal(run_id: int, proposal: dict, validation: dict, db_path: Path)
             verdict, verdict_reason,
             config_vector_json, config_diff_json
         ) VALUES (
-            ?, ?,
+            ?, ?, ?,
             ?, ?, ?,
             ?, ?,
             ?, ?, ?, ?,
@@ -152,6 +180,7 @@ def _save_proposal(run_id: int, proposal: dict, validation: dict, db_path: Path)
     """, (
         run_id,
         proposal["rank"],
+        cycle,
         proposal["train_fitness"],
         proposal["val_fitness"],
         proposal["test_fitness"],
@@ -210,10 +239,13 @@ def _validate_and_save_proposals(
     score_timeline: dict,
     test_rows,
     db_path: Path,
-) -> int:
+    cycle: int = 1,
+) -> tuple:
     """
     Run full validation pipeline on each proposal from the GA result,
-    save to config_proposals table. Returns count of saved proposals.
+    save to config_proposals table.
+    Returns (saved_count, has_acceptable) where has_acceptable=True if
+    at least one proposal has verdict PROPOSABLE or CONDITIONAL.
     Uses v2 SignalSimRow pipeline throughout.
 
     test_rows: gate_test_rows = val + test (50% held-out).
@@ -238,8 +270,9 @@ def _validate_and_save_proposals(
           f"PF={baseline_gate_stats['profit_factor']:.2f}")
 
     saved = 0
+    has_acceptable = False
     for proposal in result.get("proposals", []):
-        print(f"\n[Runner] Validating proposal rank={proposal['rank']}...")
+        print(f"\n[Runner] Validating proposal rank={proposal['rank']} (cycle {cycle})...")
 
         prop_vector = proposal["vector"]
         prop_cfg    = decode_vector(prop_vector)
@@ -320,11 +353,13 @@ def _validate_and_save_proposals(
             "verdict":      (verdict_str, verdict_reason),
         }
 
-        proposal_id = _save_proposal(run_id, proposal, validation, db_path)
+        proposal_id = _save_proposal(run_id, proposal, validation, db_path, cycle=cycle)
         print(f"  Saved as config_proposals.id={proposal_id}")
         saved += 1
+        if verdict_str in ("PROPOSABLE", "CONDITIONAL"):
+            has_acceptable = True
 
-    return saved
+    return saved, has_acceptable
 
 
 # ---------------------------------------------------------------------------
@@ -369,10 +404,18 @@ def main():
                              "thresholds_only=score-params befagyasztva")
     parser.add_argument("--include-archive", action="store_true", default=False,
                         help="Archive CLOSED trade jelzések bevonása a tanítóadatba")
+    parser.add_argument("--max-cycles",  type=int, default=1,
+                        help="Max ismétlési ciklus (1=nincs ismétlés, max 10). "
+                             "Addig ismétli a futást, amíg PROPOSABLE vagy CONDITIONAL "
+                             "javaslat születik, vagy eléri a maximumot.")
     args = parser.parse_args()
 
-    db_path   = Path(args.db_path)
-    stop_flag = Path(args.stop_flag) if args.stop_flag else None
+    max_cycles = max(1, min(10, args.max_cycles))
+    db_path    = Path(args.db_path)
+    stop_flag  = Path(args.stop_flag) if args.stop_flag else None
+
+    # DB migration: cycle mezők hozzáadása ha szükséges
+    _ensure_cycle_columns(db_path)
 
     # Auto-create DB record when launched manually (no --run-id supplied)
     if args.run_id is None:
@@ -384,6 +427,12 @@ def main():
     else:
         run_id = args.run_id
 
+    # max_cycles mentése a DB-be (progress polling számára)
+    conn = _db(db_path)
+    conn.execute("UPDATE optimization_runs SET max_cycles=? WHERE id=?", (max_cycles, run_id))
+    conn.commit()
+    conn.close()
+
     print("=" * 60)
     print(f"TrendSignal Optimizer - run_id={run_id}")
     print(f"  Population:       {args.population}")
@@ -393,39 +442,17 @@ def main():
     print(f"  Trade mode:       {args.trade_mode}")
     print(f"  Phase:            {args.phase}")
     print(f"  Include archive:  {args.include_archive}")
+    print(f"  Max cycles:       {max_cycles}")
     print(f"  DB:               {db_path}")
     print(f"  Stop flag:        {stop_flag}")
     print("=" * 60)
 
     import time
-    t_start = time.time()
+    t_start  = time.time()
+    total_saved = 0
 
     try:
-        # Run genetic optimizer
-        result = run_optimizer(
-            run_id=run_id,
-            population_size=args.population,
-            max_generations=args.generations,
-            crossover_prob=args.crossover,
-            mutation_prob=args.mutation,
-            stop_flag_path=stop_flag,
-            db_path=db_path,
-            trade_mode=args.trade_mode,
-            include_archive=args.include_archive,
-            phase=args.phase,
-        )
-
-        elapsed = time.time() - t_start
-
-        print(f"\n[Runner] GA complete in {elapsed:.0f}s")
-        print(f"  Best train fitness: {result['best_train_fitness']:.4f}")
-        print(f"  Best val fitness:   {result['best_val_fitness']:.4f}")
-        print(f"  Generations run:    {result['generations_run']}")
-        print(f"  Proposals to save:  {len(result['proposals'])}")
-
-        # Load split data for validation (reuse the same split, v2 pipeline)
-        # Fontos: ugyanazokkal a paraméterekkel töltünk, mint a GA futtatáskor,
-        # hogy a validáció konzisztens legyen a tanítással.
+        # Adat betöltés egyszer — minden ciklusban ugyanaz az adatkészlet
         from optimizer.signal_data import load_all_sim_data
         all_rows, score_timeline = load_all_sim_data(
             db_path,
@@ -433,37 +460,84 @@ def main():
             trade_mode=args.trade_mode,
         )
         _, val_rows, test_rows = split_rows(all_rows, random_seed=run_id)
-
-        # A végső gate értékeléshez a val+test kombinált halmazt használjuk.
-        # Indoklás: a GA kizárólag a train seten optimalizál; val csak overfitting
-        # monitorozásra szolgált (fitness-ben nem szerepelt). Így val+test együtt
-        # érvényes held-out halmaz a gate statisztikákhoz — és elegendő trade-et
-        # biztosít magas HOLD_ZONE_THRESHOLD esetén is (50%→20% helyett 50% held-out).
         gate_test_rows = val_rows + test_rows
 
-        # Validate and save proposals
-        saved = _validate_and_save_proposals(
-            result, run_id, all_rows, score_timeline, gate_test_rows, db_path
-        )
-        print(f"\n[Runner] Saved {saved} proposal(s) to config_proposals.")
+        last_result = None
 
-        # Check if run was stopped vs completed
+        for cycle in range(1, max_cycles + 1):
+            # Stop flag ellenőrzés ciklus előtt
+            if stop_flag and stop_flag.exists():
+                print(f"\n[Runner] Stop flag detected before cycle {cycle} — aborting.")
+                break
+
+            print(f"\n{'=' * 60}")
+            print(f"[Runner] CYCLE {cycle}/{max_cycles}")
+            print(f"{'=' * 60}")
+
+            _update_run_cycle(run_id, cycle, db_path)
+
+            # GA futtatás — minden ciklusban más véletlenszám mag
+            result = run_optimizer(
+                run_id=run_id,
+                population_size=args.population,
+                max_generations=args.generations,
+                crossover_prob=args.crossover,
+                mutation_prob=args.mutation,
+                stop_flag_path=stop_flag,
+                db_path=db_path,
+                trade_mode=args.trade_mode,
+                include_archive=args.include_archive,
+                phase=args.phase,
+                random_seed=run_id * 100 + cycle,
+            )
+            last_result = result
+
+            elapsed = time.time() - t_start
+            print(f"\n[Runner] Cycle {cycle} GA complete in {elapsed:.0f}s total")
+            print(f"  Best train fitness: {result['best_train_fitness']:.4f}")
+            print(f"  Best val fitness:   {result['best_val_fitness']:.4f}")
+            print(f"  Generations run:    {result['generations_run']}")
+            print(f"  Proposals to save:  {len(result['proposals'])}")
+
+            # Validáció és mentés
+            saved, has_acceptable = _validate_and_save_proposals(
+                result, run_id, all_rows, score_timeline, gate_test_rows, db_path,
+                cycle=cycle,
+            )
+            total_saved += saved
+            print(f"\n[Runner] Cycle {cycle}: saved {saved} proposal(s), "
+                  f"acceptable={'YES' if has_acceptable else 'NO'}")
+
+            # Ha van elfogadható javaslat → megállunk
+            if has_acceptable:
+                print(f"[Runner] Acceptable proposal found in cycle {cycle} — stopping.")
+                break
+
+            # Ha nem az utolsó ciklus és nincs acceptable → folytatás
+            if cycle < max_cycles:
+                print(f"[Runner] All proposals REJECTED in cycle {cycle} — retrying "
+                      f"({cycle + 1}/{max_cycles})...")
+
+        # Futás lezárása
+        elapsed = time.time() - t_start
         was_stopped = stop_flag and stop_flag.exists()
-        if was_stopped:
-            _mark_run_stopped(run_id, elapsed, saved, db_path)
-            print(f"[Runner] Run {run_id} marked STOPPED.")
-        else:
-            _mark_run_complete(run_id, elapsed, saved, db_path)
-            print(f"[Runner] Run {run_id} marked COMPLETED.")
 
-        # Update baseline fitness on run record
-        conn = _db(db_path)
-        conn.execute(
-            "UPDATE optimization_runs SET baseline_fitness=?, best_test_fitness=? WHERE id=?",
-            (result.get("baseline_fitness"), result.get("best_train_fitness"), run_id)
-        )
-        conn.commit()
-        conn.close()
+        if was_stopped:
+            _mark_run_stopped(run_id, elapsed, total_saved, db_path)
+            print(f"\n[Runner] Run {run_id} marked STOPPED.")
+        else:
+            _mark_run_complete(run_id, elapsed, total_saved, db_path)
+            print(f"\n[Runner] Run {run_id} marked COMPLETED ({total_saved} proposals total).")
+
+        # Baseline fitness frissítése az utolsó ciklus alapján
+        if last_result:
+            conn = _db(db_path)
+            conn.execute(
+                "UPDATE optimization_runs SET baseline_fitness=?, best_test_fitness=? WHERE id=?",
+                (last_result.get("baseline_fitness"), last_result.get("best_train_fitness"), run_id)
+            )
+            conn.commit()
+            conn.close()
 
         print("\n[Runner] Done.")
         sys.exit(0)

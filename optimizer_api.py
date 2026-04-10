@@ -52,6 +52,7 @@ class RunRequest(BaseModel):
     trade_mode:      str   = "all"     # "all" | "long" | "short"
     include_archive: bool  = False     # archive_signals CLOSED trade-ek bevonása
     phase:           str   = "all"     # "all" | "score_only" | "thresholds_only"
+    max_cycles:      int   = 10        # max ismétlési ciklus (1-10)
 
 
 class RunResponse(BaseModel):
@@ -71,6 +72,8 @@ class ProgressResponse(BaseModel):
     recent_generations:  List[dict]
     proposals_ready:     int
     elapsed_seconds:     Optional[float]
+    current_cycle:       int = 1
+    max_cycles:          int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +175,7 @@ async def start_optimizer(req: RunRequest):
         "--stop-flag",   str(STOP_FLAG),
         "--trade-mode",  req.trade_mode,
         "--phase",       req.phase,
+        "--max-cycles",  str(max(1, min(10, req.max_cycles))),
     ]
     if req.include_archive:
         cmd.append("--include-archive")
@@ -273,6 +277,8 @@ async def get_progress(run_id: int):
         recent_generations=[dict(g) for g in gens],
         proposals_ready=proposals_ready,
         elapsed_seconds=elapsed,
+        current_cycle=run["current_cycle"] or 1,
+        max_cycles=run["max_cycles"] or 1,
     )
 
 

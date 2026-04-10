@@ -419,6 +419,8 @@ export interface OptimizerProgress {
   recent_generations: GenerationRow[];
   proposals_ready: number;
   elapsed_seconds: number | null;
+  current_cycle: number;
+  max_cycles: number;
 }
 
 export interface RegimeStats {
@@ -506,6 +508,7 @@ export interface StartRunRequest {
   trade_mode?: 'all' | 'long' | 'short';
   include_archive?: boolean;
   phase?: 'all' | 'score_only' | 'thresholds_only';
+  max_cycles?: number;
 }
 
 export interface StartRunResponse {
