@@ -65,8 +65,8 @@ PARAM_DEFS: List[ParamDef] = [
     # ------------------------------------------------------------------
     # Group 2: Signal Thresholds  (dim 2-5)
     # ------------------------------------------------------------------
-    ParamDef(2,  "hold_zone_threshold", "HOLD_ZONE_THRESHOLD", 5.0,  30.0, False,
-             "Score below which decision is HOLD"),
+    ParamDef(2,  "hold_zone_threshold", "HOLD_ZONE_THRESHOLD", 5.0,  15.0, False,
+             "Score below which decision is HOLD (max 15 — above 15 túl kevés trade aktiválódik)"),
     ParamDef(3,  "strong_buy_score",    "STRONG_BUY_SCORE",    35.0, 80.0, False,
              "Minimum score for STRONG BUY decision"),
     ParamDef(4,  "moderate_buy_score",  "MODERATE_BUY_SCORE",  15.0, 55.0, False,
@@ -422,11 +422,29 @@ def get_current_baseline_vector() -> List[float]:
 # Dimenzió-csoportok trade_mode szerinti befagyasztáshoz
 # ---------------------------------------------------------------------------
 
-# Dim indexek, amelyek kizárólag LONG SL/TP-t érintenek
-_LONG_ONLY_DIMS  = list(range(40, 46))   # 40-45: ATR_STOP_*, ATR_TP_*, SR_SUPPORT_HARD_PCT
+# Dim indexek, amelyek kizárólag LONG/BUY irányhoz tartoznak.
+# SHORT módban ezeket befagyasztjuk → GA csak SHORT-specifikus paramétereket változtat.
+#
+#   40-45: LONG ATR SL/TP multiplierek, SR_SUPPORT_HARD_PCT
+#    3-5:  STRONG_BUY_SCORE, MODERATE_BUY_SCORE, STRONG_BUY_CONFIDENCE
+#          (a BUY döntés küszöbei — SHORT módban irrelevánsak)
+#   52:    ENTRY_GATE_RSI_BUY_MAX
+#   54:    ENTRY_GATE_MACD_HIST_BUY_MIN
+#   56:    ENTRY_GATE_SMA200_BUY_MAX_PCT
+#   58:    ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT
+#
+# Megjegyzés: HOLD_ZONE_THRESHOLD (dim 2) szimmetrikus (|score| < küszöb → HOLD
+# mindkét irányban) → nem fagyasztjuk be.
+_LONG_ONLY_DIMS = list(range(40, 46)) + [3, 4, 5, 52, 54, 56, 58]
 
-# Dim indexek, amelyek kizárólag SHORT SL/TP-t érintenek
-_SHORT_ONLY_DIMS = list(range(46, 52))   # 46-51: SHORT_ATR_STOP_*, SHORT_ATR_TP_*, SHORT_SL_MAX_PCT
+# Dim indexek, amelyek kizárólag SHORT/SELL irányhoz tartoznak.
+# LONG módban ezeket befagyasztjuk.
+#
+#   46-51: SHORT ATR SL/TP multiplierek, SHORT_SL_MAX_PCT
+#   53:    ENTRY_GATE_RSI_SELL_MIN
+#   55:    ENTRY_GATE_MACD_HIST_SELL_MAX
+#   57:    ENTRY_GATE_SMA200_SELL_MIN_PCT
+_SHORT_ONLY_DIMS = list(range(46, 52)) + [53, 55, 57]
 
 # Signal küszöb dimenziók — ezeket a phase-alapú befagyasztás kezeli
 # dim 2: HOLD_ZONE_THRESHOLD, dim 3: STRONG_BUY_SCORE,

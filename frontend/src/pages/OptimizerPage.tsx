@@ -282,7 +282,7 @@ function ProposalCard({
         <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">Acceptance Gates</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1">
           {[
-            { label: 'Min. 50 trade',      ok: proposal.gate_min_trades_ok,           val: `${proposal.test_trade_count ?? 0} db` },
+            { label: 'Min. 150 trade',      ok: proposal.gate_min_trades_ok,           val: `${proposal.test_trade_count ?? 0} db` },
             { label: 'Fitness +10%',       ok: proposal.gate_fitness_improvement_ok,  val: fmtPct(proposal.fitness_improvement_pct) },
             { label: 'PF delta ≥ 0.10',    ok: proposal.gate_profit_factor_ok,        val: fmt2((proposal.test_profit_factor ?? 0) - (proposal.baseline_profit_factor ?? 0)) },
             { label: 'Bootstrap p<0.10',   ok: proposal.gate_bootstrap_ok,            val: `p=${fmt4(proposal.bootstrap_p_value)}` },
@@ -396,10 +396,10 @@ function IdlePanel({
   const [generations, setGenerations] = useState(100);
   const [advanced, setAdvanced] = useState(false);
   const [tradeMode, setTradeMode] = useState<'all' | 'long' | 'short'>('all');
-  const [includeArchive, setIncludeArchive] = useState(false);
+  const [includeArchive, setIncludeArchive] = useState(true);
   const [phase, setPhase] = useState<'all' | 'score_only' | 'thresholds_only'>('all');
 
-  const minTrades = 50; // acceptance gate minimum
+  const minTrades = 150; // acceptance gate minimum
   const ready = tradeCount >= minTrades;
 
   return (
@@ -818,7 +818,7 @@ function NoProposalPanel({
                 { label: 'Val fitness',    value: fmt4(best.val_fitness),    color: best.val_fitness > 0 ? 'text-emerald-400' : 'text-red-400' },
                 { label: 'Test fitness',   value: fmt4(best.test_fitness),   color: best.test_fitness > 0 ? 'text-emerald-400' : 'text-red-400' },
                 { label: 'Train/Val gap',  value: fmtPct(best.train_val_gap), color: (best.train_val_gap ?? 100) > 20 ? 'text-amber-400' : 'text-gray-300' },
-                { label: 'Test trades',    value: `${best.test_trade_count ?? 0} db`, color: (best.test_trade_count ?? 0) >= 50 ? 'text-emerald-400' : 'text-red-400' },
+                { label: 'Test trades',    value: `${best.test_trade_count ?? 0} db`, color: (best.test_trade_count ?? 0) >= 150 ? 'text-emerald-400' : 'text-red-400' },
                 { label: 'Profit Factor',  value: fmt2(best.test_profit_factor), color: 'text-gray-200' },
                 { label: 'Bootstrap p',    value: fmt4(best.bootstrap_p_value),  color: (best.bootstrap_p_value ?? 1) < 0.10 ? 'text-emerald-400' : 'text-red-400' },
                 { label: 'Fitness javulás',value: fmtPct(best.fitness_improvement_pct), color: (best.fitness_improvement_pct ?? 0) >= 10 ? 'text-emerald-400' : 'text-red-400' },
@@ -834,7 +834,7 @@ function NoProposalPanel({
           {/* Gate eredmények */}
           <div className="bg-gray-800 rounded-xl p-4 space-y-2">
             <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">Gate eredmények</p>
-            <FailedGateBadge label="Min. 50 trade a test seten"  ok={best.gate_min_trades_ok}          val={`${best.test_trade_count ?? 0} / 50`} />
+            <FailedGateBadge label="Min. 150 trade a val+test halmazon"  ok={best.gate_min_trades_ok}          val={`${best.test_trade_count ?? 0} / 150`} />
             <FailedGateBadge label="Fitness javulás ≥ 10%"       ok={best.gate_fitness_improvement_ok} val={fmtPct(best.fitness_improvement_pct)} />
             <FailedGateBadge label="Profit Factor delta ≥ 0.10"  ok={best.gate_profit_factor_ok}       val={fmt2((best.test_profit_factor ?? 0) - (best.baseline_profit_factor ?? 0))} />
             <FailedGateBadge label="Bootstrap p-érték < 0.10"    ok={best.gate_bootstrap_ok}           val={`p = ${fmt4(best.bootstrap_p_value)}`} />

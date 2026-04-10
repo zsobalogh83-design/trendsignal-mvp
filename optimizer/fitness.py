@@ -5,20 +5,31 @@ Evaluates how good a config vector is based on full trade re-simulation:
   1. Replays all signals with new config → new BUY/SELL/HOLD decisions
   2. Computes new SL/TP for each active signal under the new config
   3. Simulates each trade candle-by-candle against price_data
-  4. Computes fitness = win_rate × profit_factor on simulated P&L
+  4. Computes fitness = win_rate × profit_factor × volume_factor on simulated P&L
 
 Key design change from v1:
   - v1 looked up FIXED P&L from simulated_trades (fundamentally flawed)
   - v2 derives P&L from fresh simulation → changing config truly changes outcomes
 
-Fitness formula:
-    fitness = win_rate × profit_factor
+Fitness formula (v4.0):
+    fitness = win_rate × profit_factor × volume_factor
     where:
       win_rate      = winning_trades / total_trades
       profit_factor = total_gross_profit / total_gross_loss
+      volume_factor = min(1.0, sqrt(total_trades / VOLUME_TARGET))
+                      — bünteti a kis trade-számot, megakadályozza a cherry-pickinget
 
-    If total_trades < MIN_TRADES: fitness = 0.0 (penalty)
-    If total_gross_loss == 0:     fitness = win_rate × 3.0 (cap)
+    If total_trades == 0:         fitness = 0.0
+    If total_gross_loss == 0:     fitness = win_rate × 3.0 × volume_factor (cap)
+
+    Nincs hard MIN_TRADES floor a fitness-ben — a GA minden trade-számnál kap
+    gradienst, így short módban (kevés induló trade) sem bolyong vakon.
+    Az elfogadási kapu (validation.py gate_min_trades ≥ 150) változatlan.
+
+    VOLUME_TARGET: az a trade-szám, aminél volume_factor = 1.0 (teljes pontszám).
+    Ennél kevesebb trade esetén sqrt-alapú fokozatos büntetés érvényesül.
+    Indoklás: a GA így nem tud 50-100 db „cherry-picked" trade-del hamisan magas
+    fitnesst elérni — ösztönözve van arra, hogy minél több jelet aktiváljon.
 
 Data split (v3.0 — random):
     Véletlenszerű felosztás időszak-független stabilitásért.
@@ -31,20 +42,26 @@ Data split (v3.0 — random):
       - A GA általánosan jobb konfigurációkat talál
       - Train/val/test fitness értékek összehasonlíthatóak és stabilak
 
-Version: 3.0
-Date: 2026-03-29
+Version: 4.0 — volume_factor anti-cherry-picking, MIN_TRADES 50→150
+Date: 2026-04-08
 """
 
+import math
 import random
 from typing import Dict, List, Optional, Tuple
 
 from optimizer.trade_simulator import TradeSimResult
 from optimizer.signal_data import SignalSimRow
 
-# Minimum trades for a valid fitness score.
-# 50 alatt a GA cherry-picking-et végez (kevés, de mind nyerő trade → hamisan magas fitness).
-# Ez az érték megegyezik a validációs gate min_trades küszöbével.
-MIN_TRADES = 50
+# Minimum trades for a valid fitness score (hard floor — below this: fitness = 0.0).
+# 150 alatt a GA még mindig cherry-pickinget végezhet; 150-nél a 7500-as train seten
+# ez ~2% aktivációs rátát jelent, ami már statisztikailag értékelhető.
+MIN_TRADES = 150
+
+# Volume target: ennél a trade-számnál volume_factor = 1.0 (nincs büntetés).
+# A train set ~50%-a az összes adatnak; 300 trade a teljes adaton → 150 a train seten.
+# A GA ösztönözve van, hogy legalább ennyi trade-et aktiváljon.
+VOLUME_TARGET = 300
 
 
 # ---------------------------------------------------------------------------
@@ -112,22 +129,29 @@ def compute_fitness(
     else:
         profit_factor = 0.0
 
-    if total < min_trades:
-        fitness = 0.0
-    else:
-        fitness = win_rate * profit_factor
+    # Volume factor: bünteti az alacsony trade-számot (cherry-picking elleni védelem).
+    # sqrt skálázás: fokozatos, nem bináris büntetés.
+    # Nincs hard floor — a GA akkor is kap gradienst, ha total < min_trades.
+    # Ez kritikus pl. short módban, ahol az induló config kevés trade-et aktivál:
+    # a hard floor esetén minden konfiguráció fitness=0 lenne, és a GA vakon bolyongna.
+    # Az elfogadási kapu (validation.py, gate_min_trades) marad 150 — gyenge javaslat
+    # nem kerülhet elfogadásra, de a GA navigálni tud a helyes irányba.
+    volume_factor = min(1.0, math.sqrt(total / VOLUME_TARGET)) if total > 0 else 0.0
+
+    fitness = win_rate * profit_factor * volume_factor
 
     stats = {
-        "fitness":       round(fitness, 6),
-        "win_rate":      round(win_rate, 4),
-        "profit_factor": round(profit_factor, 4),
-        "total_trades":  total,
-        "wins":          wins,
-        "losses":        losses,
-        "skipped":       skipped,
-        "gross_profit":  round(gross_profit, 4),
-        "gross_loss":    round(gross_loss, 4),
-        "exit_reasons":  exit_reasons,
+        "fitness":        round(fitness, 6),
+        "win_rate":       round(win_rate, 4),
+        "profit_factor":  round(profit_factor, 4),
+        "volume_factor":  round(volume_factor, 4),
+        "total_trades":   total,
+        "wins":           wins,
+        "losses":         losses,
+        "skipped":        skipped,
+        "gross_profit":   round(gross_profit, 4),
+        "gross_loss":     round(gross_loss, 4),
+        "exit_reasons":   exit_reasons,
     }
     return fitness, stats
 

@@ -82,13 +82,15 @@ def check_acceptance_gates(proposal: dict, baseline: dict) -> dict:
     gates = {}
 
     # Gate 1: Minimum trade count (REQUIRED)
+    # 150 trade a val+test (50%) halmazon → ~300 a teljes adaton → statisztikailag értékelhető.
+    # 50-es határral a GA cherry-pickinget végzett (kevés, de szinte mind nyerő trade).
     trade_count = proposal.get("test_trade_count", 0)
     gates["min_trades"] = {
-        "passed":      trade_count >= 50,
+        "passed":      trade_count >= 150,
         "value":       trade_count,
-        "threshold":   50,
+        "threshold":   150,
         "required":    True,
-        "description": "Min. 50 trade a test seten",
+        "description": "Min. 150 trade a val+test halmazon",
     }
 
     # Gate 2: Fitness improvement >= 10% (REQUIRED)

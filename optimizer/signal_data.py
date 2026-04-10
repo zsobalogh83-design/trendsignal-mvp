@@ -514,11 +514,16 @@ def _load_archive_signal_rows(
     trade_mode: str = "all",
 ) -> List[SignalSimRow]:
     """
-    Load archive_signals that have a CLOSED archive_simulated_trade.
+    Load archive_signals that have future price_data available for simulation.
 
-    Csak azokat a jelzéseket vesszük be, amelyekhez létezik CLOSED szimulált trade —
-    ezzel garantáljuk, hogy van elegendő árfolyam-adat a szimulációhoz.
-    A legutóbbi max_signals darabot töltjük be (teljesítmény-limit).
+    Korábban az INNER JOIN archive_simulated_trades feltételt használtuk a price adat
+    elérhetőségének garantálásához — ez azonban cirkuláris függőséget okozott:
+    SHORT optimalizálásnál az előző (LONG-ra hangolt) config alig generált SHORT trade-et,
+    így az optimizer is csak ~300-400 SELL signalt látott a ~28 000 helyett.
+
+    Javítás: az archive jelzések betöltési feltétele az EXISTS (price_data) —
+    így az optimizer az összes olyan signalt látja, amelyhez ténylegesen szimulálható
+    a trade, függetlenül attól, hogy az aktuális config aktivált-e már trade-et rá.
 
     Schema mapping (archive_signals → SignalSimRow):
       signal_timestamp → calculated_at
@@ -567,14 +572,17 @@ def _load_archive_signal_rows(
             a.reasoning_json
 
         FROM archive_signals a
-        INNER JOIN archive_simulated_trades t
-            ON t.archive_signal_id = a.id
-           AND t.status = 'CLOSED'
         WHERE a.sentiment_score IS NOT NULL
           AND a.technical_score IS NOT NULL
           AND a.risk_score      IS NOT NULL
           AND a.combined_score  IS NOT NULL
           AND a.decision NOT IN ('HOLD', 'NEUTRAL')
+          AND EXISTS (
+              SELECT 1 FROM price_data p
+              WHERE p.ticker_symbol = a.ticker_symbol
+                AND p.interval = '15m'
+                AND p.timestamp > a.signal_timestamp
+          )
           {_trade_mode_sql_filter(trade_mode)}
         ORDER BY a.signal_timestamp DESC
         LIMIT {int(max_signals)}
