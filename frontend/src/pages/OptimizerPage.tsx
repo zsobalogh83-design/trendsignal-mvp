@@ -11,10 +11,11 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   FiPlay, FiSquare, FiCheckCircle, FiXCircle, FiAlertTriangle,
   FiTrendingUp, FiActivity, FiClock, FiDatabase, FiSettings,
-  FiChevronDown, FiChevronUp, FiInfo,
+  FiChevronDown, FiChevronUp, FiInfo, FiArrowLeft,
 } from 'react-icons/fi';
 import {
   useOptimizerStatus,
@@ -1033,9 +1034,19 @@ export function OptimizerPage() {
       {/* Top bar */}
       <div className="border-b border-gray-800 bg-gray-900/80 sticky top-0 z-10 backdrop-blur">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-gray-100">Self-Tuning Engine</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Genetikus algoritmus alapú paraméter-optimalizáló</p>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/"
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+            >
+              <FiArrowLeft className="w-3.5 h-3.5" />
+              Dashboard
+            </Link>
+            <div className="w-px h-4 bg-gray-700" />
+            <div>
+              <h1 className="text-lg font-bold text-gray-100">Self-Tuning Engine</h1>
+              <p className="text-xs text-gray-500 mt-0.5">Genetikus algoritmus alapú paraméter-optimalizáló</p>
+            </div>
           </div>
           {/* Status pill */}
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border ${
