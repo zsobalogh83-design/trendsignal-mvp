@@ -84,9 +84,12 @@ export function TickerManagement() {
     };
     const style = styles[priority as keyof typeof styles] || styles.medium;
     return (
-      <span style={{ padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: '600',
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px',
+        padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '600',
         background: style.bg, color: style.text, border: `1px solid ${style.border}` }}>
-        {priority === 'high' ? '🔴' : priority === 'medium' ? '🟡' : '⚪'} {priority.toUpperCase()}
+        <span style={{ width: '7px', height: '7px', borderRadius: '50%',
+          background: style.text, flexShrink: 0, display: 'inline-block' }} />
+        {priority.toUpperCase()}
       </span>
     );
   };
