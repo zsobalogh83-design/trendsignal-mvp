@@ -325,7 +325,7 @@ export function SignalHistory() {
                   onClick={() => {
                     setViewMode(mode);
                     if (mode === 'archive') {
-                      setFilters(f => ({ ...f, from_date: '2024-03-11', to_date: '2026-03-06' }));
+                      setFilters(f => ({ ...f, from_date: '2024-03-20', to_date: getDefaultToDate() }));
                     } else {
                       setFilters(f => ({ ...f, from_date: getDefaultFromDate(), to_date: getDefaultToDate() }));
                     }
