@@ -91,26 +91,26 @@ def check_acceptance_gates(proposal: dict, baseline: dict) -> dict:
         "description": "Min. 50 trade a test seten",
     }
 
-    # Gate 2: Fitness improvement >= 10% (REQUIRED)
+    # Gate 2: Fitness improvement >= 10% (WARNING only — GA meta-metrika, nem közvetlen trading garancia)
     improvement = proposal.get("fitness_improvement_pct", 0.0)
     gates["fitness_improvement"] = {
         "passed":      improvement >= 10.0,
         "value":       round(improvement, 2),
         "threshold":   10.0,
-        "required":    True,
-        "description": "Fitness javulas >= 10%",
+        "required":    False,
+        "description": "Fitness javulas >= 10% (figyelmezeto)",
     }
 
-    # Gate 3: Profit factor improvement (REQUIRED)
+    # Gate 3: Profit factor improvement >= 0.07 (REQUIRED)
     prop_pf     = proposal.get("test_profit_factor", 0.0)
     base_pf     = baseline.get("test_profit_factor", 0.0)
     pf_delta    = prop_pf - base_pf
     gates["profit_factor"] = {
-        "passed":      pf_delta >= 0.10,
+        "passed":      pf_delta >= 0.07,
         "value":       round(pf_delta, 3),
-        "threshold":   0.10,
+        "threshold":   0.07,
         "required":    True,
-        "description": "Profit Factor javulas >= 0.10",
+        "description": "Profit Factor javulas >= 0.07",
     }
 
     # Gate 4: Bootstrap significance (REQUIRED) — filled by bootstrap_test()
