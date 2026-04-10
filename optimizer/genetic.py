@@ -281,7 +281,7 @@ def run_optimizer(
     # deadlock the pool initialisation. Force single-process mode in that case.
     if include_archive:
         n_workers = 1
-        print("[GA] include_archive=True → single-process mode (Windows IPC limit)")
+        print("[GA] include_archive=True -> single-process mode (Windows IPC limit)")
     else:
         n_workers = int(os.environ.get("OPTIMIZER_WORKERS", _DEFAULT_WORKERS)) \
             if n_workers is None else max(1, n_workers)
