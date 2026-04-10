@@ -622,6 +622,7 @@ function RunningPanel({
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
               {progress.generations_run} / {progress.max_generations} generáció
+              {progress.max_cycles > 1 && ` · Ciklus ${progress.current_cycle}/${progress.max_cycles}`}
               {progress.elapsed_seconds != null && ` · ${fmtDuration(progress.elapsed_seconds)} eltelt`}
             </p>
           </div>

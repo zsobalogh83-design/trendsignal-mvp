@@ -232,6 +232,7 @@ def run_optimizer(
     trade_mode: str = "all",
     include_archive: bool = False,
     phase: str = "all",
+    random_seed: Optional[int] = None,
 ) -> dict:
     """
     Run the genetic optimizer and return results.
@@ -320,7 +321,7 @@ def run_optimizer(
     toolbox.register("evaluate", evaluate_single)
 
     # --- Initialize population ---
-    rng_seed = int(time.time()) % 100000
+    rng_seed = random_seed if random_seed is not None else int(time.time()) % 100000
     random.seed(rng_seed)
     np.random.seed(rng_seed)
 
