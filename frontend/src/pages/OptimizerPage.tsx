@@ -484,12 +484,12 @@ function IdlePanel({
         <div className="flex items-start gap-3 bg-gray-900/40 rounded-lg p-3">
           <button
             onClick={() => setIncludeArchive(a => !a)}
-            className={`mt-0.5 flex-shrink-0 w-9 h-5 rounded-full transition-colors relative ${
+            className={`mt-0.5 flex-shrink-0 w-10 h-5 rounded-full transition-colors relative overflow-hidden ${
               includeArchive ? 'bg-blue-600' : 'bg-gray-600'
             }`}
           >
-            <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-              includeArchive ? 'translate-x-4' : 'translate-x-0.5'
+            <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+              includeArchive ? 'translate-x-5' : 'translate-x-0'
             }`} />
           </button>
           <div>
