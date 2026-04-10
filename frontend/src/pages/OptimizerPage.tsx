@@ -475,8 +475,8 @@ function IdlePanel({
           {tradeMode !== 'all' && (
             <p className="text-xs text-amber-400 mt-1">
               {tradeMode === 'long'
-                ? 'Csak BUY jelzések alapján optimalizál — SHORT paraméterek változatlanok maradnak.'
-                : 'Csak SELL jelzések alapján optimalizál — LONG paraméterek változatlanok maradnak.'}
+                ? 'Csak BUY jelzések alapján optimalizál — SHORT SL/TP és SELL küszöbök befagyasztva.'
+                : 'BUY-orientált rendszer: csak SHORT SL/TP multiplierek és SELL küszöbök optimalizálódnak — minden közös/BUY paraméter változatlan.'}
             </p>
           )}
         </div>
@@ -527,14 +527,14 @@ function IdlePanel({
           </div>
           {phase === 'score_only' && (
             <p className="text-xs text-violet-400 mt-1">
-              1. fázis: HOLD_ZONE és BUY küszöbök rögzítve — csak a score-kalkuláció
+              1. fázis: BUY és SELL küszöbök rögzítve — csak a score-kalkuláció
               (súlyok, decay, RSI/tech paraméterek, SL/TP) optimalizálódik.
             </p>
           )}
           {phase === 'thresholds_only' && (
             <p className="text-xs text-violet-400 mt-1">
-              2. fázis: minden score-paraméter rögzítve — csak a HOLD_ZONE és BUY küszöbök
-              finomhangolódnak a meglévő score-kalkuláció felett.
+              2. fázis: minden score-paraméter rögzítve — BUY és SELL küszöbök
+              finomhangolódnak önállóan a meglévő score-kalkuláció felett.
             </p>
           )}
         </div>
