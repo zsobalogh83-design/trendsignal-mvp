@@ -512,6 +512,13 @@ async def approve_proposal(proposal_id: int):
     with open(config_path) as f:
         current_cfg = json.load(f)
 
+    # Mentjük az írás ELŐTTI állapotot a config_history táblába
+    try:
+        from src.config_history import save_config_history
+        save_config_history(f"optimizer:{proposal_id}", dict(current_cfg))
+    except Exception as _he:
+        print(f"[WARN] config_history: optimizer snapshot mentés sikertelen: {_he}")
+
     current_cfg.update(decoded_cfg)
 
     # Handle DECAY_WEIGHTS dict format
