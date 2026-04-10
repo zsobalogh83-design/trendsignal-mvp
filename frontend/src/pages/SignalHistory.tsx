@@ -1161,24 +1161,40 @@ function renderPnl(
   if (!trade) {
     // No simulated trade for this signal yet.
     // Could be: backtest not yet run, signal too recent (active), or genuinely outside hours.
-    const title = 'Nincs szimulált trade ehhez a signalhoz (backtest még nem futott rá, vagy a signal aktív/mai)';
+    const noTradeTooltips: Record<string, string> = {
+      'nogo':          'NOGO – a signal nem felelt meg a belépési feltételeknek',
+      'no_data':       'No Data – nincs elegendő piaci adat a belépéshez',
+      'skip_hours':    'Skip Hours – kereskedési időn kívül érkezett a signal',
+      'invalid_levels':'Invalid Levels – érvénytelen SL/TP szintek (pl. SL > entry)',
+      'parallel_skip': 'Parallel Skip – már volt nyitott pozíció ennél a tickernél',
+    };
+    const statusLabel: Record<string, string> = {
+      'nogo':          'NOGO',
+      'no_data':       'N/D',
+      'skip_hours':    'HOURS',
+      'invalid_levels':'INV',
+      'parallel_skip': 'PAR',
+    };
+    const status = signal?.status ?? '';
+    const title = noTradeTooltips[status]
+      ?? 'Nincs szimulált trade ehhez a signalhoz (backtest még nem futott rá, vagy a signal aktív/mai)';
+    const label = statusLabel[status] ?? '—';
     return (
-      <span title={title}>
-        <span style={{
-          display: 'inline-block',
-          background: 'rgba(71, 85, 105, 0.15)',
-          border: '1px solid rgba(71, 85, 105, 0.35)',
-          color: '#475569',
-          fontSize: '9px',
-          fontWeight: '700',
-          letterSpacing: '0.03em',
-          padding: '1px 5px',
-          borderRadius: '4px',
-          verticalAlign: 'middle',
-          opacity: 0.7,
-        }}>
-          —
-        </span>
+      <span style={{
+        display: 'inline-block',
+        background: 'rgba(71, 85, 105, 0.15)',
+        border: '1px solid rgba(71, 85, 105, 0.35)',
+        color: '#475569',
+        fontSize: '9px',
+        fontWeight: '700',
+        letterSpacing: '0.03em',
+        padding: '1px 5px',
+        borderRadius: '4px',
+        verticalAlign: 'middle',
+        opacity: 0.7,
+        cursor: 'help',
+      }} title={title}>
+        {label}
       </span>
     );
   }
@@ -1200,7 +1216,8 @@ function renderPnl(
         borderRadius: '4px',
         marginRight: '5px',
         verticalAlign: 'middle',
-      }}>OPEN</span>
+        cursor: 'help',
+      }} title="Nyitott pozíció – még nem zárult le">OPEN</span>
     );
 
     if (pnl === null || pnl === undefined) {
@@ -1233,6 +1250,16 @@ function renderPnl(
     : 'CL'
     : 'CL';
 
+  const exitTooltip = trade.exit_reason
+    ? trade.exit_reason === 'SL_HIT'              ? 'Stop Loss – a pozíció a stop loss szinten zárult'
+    : trade.exit_reason === 'TP_HIT'              ? 'Take Profit – a pozíció a take profit szinten zárult'
+    : trade.exit_reason === 'OPPOSING_SIGNAL'     ? 'Reversal – ellentétes irányú signal zárta a pozíciót'
+    : trade.exit_reason === 'EOD_AUTO_LIQUIDATION'? 'End of Day – napi automatikus likvidáció (kereskedési nap vége)'
+    : trade.exit_reason === 'STAGNATION_EXIT'     ? 'Stagnáció – az árfolyam nem mozdult, stagnálás miatti kilépés'
+    : trade.exit_reason === 'MAX_HOLD_LIQUIDATION'? 'Max Hold – maximális tartási idő lejárt, kényszerzárás'
+    : `Lezárt – ${trade.exit_reason}`
+    : 'Lezárt pozíció';
+
   const badge = (
     <span style={{
       display: 'inline-block',
@@ -1246,7 +1273,8 @@ function renderPnl(
       borderRadius: '4px',
       marginRight: '5px',
       verticalAlign: 'middle',
-    }} title={trade.exit_reason || 'CLOSED'}>{exitLabel}</span>
+      cursor: 'help',
+    }} title={exitTooltip}>{exitLabel}</span>
   );
 
   if (pnl === null || pnl === undefined) {
