@@ -493,7 +493,7 @@ CONFIDENCE_WEIGHTS = {
 
 CONFIG_FILE = Path(__file__).parent.parent / "config.json"
 
-def save_config_to_file(config_instance):
+def save_config_to_file(config_instance, source: str = "manual:unknown"):
     """Save current configuration to JSON file for persistence"""
     try:
         config_dict = {
@@ -678,10 +678,20 @@ def save_config_to_file(config_instance):
             "SHORT_ATR_TP_HIGH_VOL": config_instance.short_atr_tp_high_vol,
         }
         
+        # Írás előtti snapshot mentése a config_history táblába
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as _f:
+                    _before = json.load(_f)
+                from src.config_history import save_config_history
+                save_config_history(source, _before)
+            except Exception as _he:
+                print(f"[WARN] config_history: before-snapshot olvasás sikertelen: {_he}")
+
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config_dict, f, indent=2)
-        
+
         print(f"[OK] Configuration saved to {CONFIG_FILE}")
         return True
     except Exception as e:
@@ -702,7 +712,7 @@ def load_config_from_file():
         print(f"Config file not found at {CONFIG_FILE}, using defaults")
     return None
 
-def update_config_values(config_instance, updates: dict):
+def update_config_values(config_instance, updates: dict, source: str = "manual:unknown"):
     """Update configuration values and save to file"""
     
     # Mapping from JSON keys to dataclass attribute names
@@ -723,7 +733,7 @@ def update_config_values(config_instance, updates: dict):
         else:
             print(f"  [WARN] Attribute not found: {attr_name} (from key: {key})")
 
-    save_config_to_file(config_instance)
+    save_config_to_file(config_instance, source=source)
     print(f"[OK] Configuration updated with {len(updates)} changes")
     return config_instance
 
@@ -1212,7 +1222,7 @@ class TrendSignalConfig:
             if missing_params:
                 print(f"[INFO] Auto-migration: Detected {len(missing_params)} new parameters")
                 print(f"   New params: {', '.join(missing_params[:3])}...")
-                save_config_to_file(self)
+                save_config_to_file(self, source="auto_migration")
                 print("[OK] Config auto-migrated with new parameters")
     
     @property

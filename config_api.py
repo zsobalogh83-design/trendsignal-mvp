@@ -375,8 +375,8 @@ async def update_signal_config(config_update: SignalConfigUpdate):
             )
         
         # Update config
-        update_config_values(config, updates)
-        
+        update_config_values(config, updates, source="manual:signal")
+
         logger.info(f"Config updated: {updates}")
         
         # Return updated config
@@ -423,8 +423,8 @@ async def reset_signal_config():
             "ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT": _cfg_module.ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT,
         }
         
-        update_config_values(config, updates)
-        
+        update_config_values(config, updates, source="manual:signal_reset")
+
         logger.info("Config reset to defaults")
         
         return {
@@ -504,8 +504,8 @@ async def update_decay_weights(updates: DecayWeightsUpdate):
             config.decay_weights['12-24h'] = updates.overnight_12_24h / 100
         
         # Save to file
-        save_config_to_file(config)
-        
+        save_config_to_file(config, source="manual:decay")
+
         logger.info(f"Decay weights updated: {config.decay_weights}")
         
         return await get_decay_weights()
@@ -585,8 +585,8 @@ async def update_technical_weights(updates: TechnicalWeightsUpdate):
                 detail="No updates provided"
             )
         
-        update_config_values(config, config_updates)
-        
+        update_config_values(config, config_updates, source="manual:technical_weights")
+
         logger.info(f"Technical weights updated: {config_updates}")
         
         return await get_technical_weights()
@@ -751,8 +751,8 @@ async def update_indicator_parameters(updates: IndicatorParametersUpdate):
                 detail="No updates provided"
             )
         
-        update_config_values(config, config_updates)
-        
+        update_config_values(config, config_updates, source="manual:indicator_parameters")
+
         logger.info(f"Indicator parameters updated: {config_updates}")
         
         return await get_indicator_parameters()
@@ -861,8 +861,8 @@ async def update_risk_parameters(updates: RiskParametersUpdate):
                 detail="No updates provided"
             )
         
-        update_config_values(config, config_updates)
-        
+        update_config_values(config, config_updates, source="manual:risk_parameters")
+
         logger.info(f"Risk parameters updated: {config_updates}")
         
         return await get_risk_parameters()
@@ -977,8 +977,8 @@ async def update_technical_component_weights(updates: TechnicalComponentWeightsU
                 detail="No updates provided"
             )
         
-        update_config_values(config, config_updates)
-        
+        update_config_values(config, config_updates, source="manual:technical_component_weights")
+
         logger.info(f"Technical component weights updated: {config_updates}")
         
         return await get_technical_component_weights()
@@ -1053,7 +1053,7 @@ async def update_component_weights(updates: ComponentWeightsUpdate):
             "CW_TREND_STRENGTH":    updates.trend_strength,
             "CW_RR_QUALITY":        updates.rr_quality,
         }
-        update_config_values(config, config_updates)
+        update_config_values(config, config_updates, source="manual:component_weights")
         logger.info(f"12-component weights updated: {config_updates}")
 
         # Automatically recalculate all stored scores with the new weights
@@ -1181,7 +1181,7 @@ async def update_advanced_signal_params(updates: AdvancedSignalParamsUpdate):
                 config_updates[key] = v
         if not config_updates:
             raise HTTPException(status_code=400, detail="No updates provided")
-        update_config_values(get_config(), config_updates)
+        update_config_values(get_config(), config_updates, source="manual:advanced_signal")
         return await get_advanced_signal_params()
     except HTTPException:
         raise
@@ -1247,7 +1247,7 @@ async def update_advanced_risk_scoring(updates: AdvancedRiskScoringUpdate):
                 config_updates[key] = v
         if not config_updates:
             raise HTTPException(status_code=400, detail="No updates provided")
-        update_config_values(get_config(), config_updates)
+        update_config_values(get_config(), config_updates, source="manual:advanced_risk_scoring")
         return await get_advanced_risk_scoring()
     except HTTPException:
         raise
@@ -1346,7 +1346,7 @@ async def update_advanced_confidence(updates: AdvancedConfidenceUpdate):
                 config_updates[key] = v
         if not config_updates:
             raise HTTPException(status_code=400, detail="No updates provided")
-        update_config_values(get_config(), config_updates)
+        update_config_values(get_config(), config_updates, source="manual:advanced_confidence")
         return await get_advanced_confidence()
     except HTTPException:
         raise
@@ -1423,7 +1423,7 @@ async def update_trade_management(updates: TradeManagementUpdate):
                 config_updates[key] = v
         if not config_updates:
             raise HTTPException(status_code=400, detail="No updates provided")
-        update_config_values(get_config(), config_updates)
+        update_config_values(get_config(), config_updates, source="manual:trade_management")
         return await get_trade_management()
     except HTTPException:
         raise
