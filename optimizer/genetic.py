@@ -53,8 +53,10 @@ Date: 2026-03-01
 import json
 import multiprocessing
 import os
+import pickle
 import random
 import sqlite3
+import tempfile
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -129,19 +131,19 @@ _worker_val_rows   = None   # v2.3: igazi val, nem proxy — ez kerül a fitness
 _worker_score_timeline = None
 
 
-def _worker_init(train_rows, val_rows, score_timeline):
+def _worker_init(data_file: str):
     """
     Called once per worker process when the Pool is created.
-    Stores the shared data in module-level globals so that
-    _worker_evaluate() can access it without pickling per-call.
-
-    v2.3: val_rows az igazi validációs szett (nem proxy-val a train-ből).
-    Mindkét szett bekerül a fitness számításba.
+    Loads shared data from a temp pickle file instead of receiving it
+    via multiprocessing IPC pipe — avoids Windows pipe buffer overflow
+    deadlock when dataset is large (e.g. include_archive=True, ~50K rows).
     """
     global _worker_train_rows, _worker_val_rows, _worker_score_timeline
-    _worker_train_rows     = train_rows
-    _worker_val_rows       = val_rows
-    _worker_score_timeline = score_timeline
+    with open(data_file, "rb") as f:
+        data = pickle.load(f)
+    _worker_train_rows     = data["train"]
+    _worker_val_rows       = data["val"]
+    _worker_score_timeline = data["score_timeline"]
 
 
 def _worker_evaluate(individual):
@@ -274,17 +276,9 @@ def run_optimizer(
     """
     t_start = time.time()
 
-    # Resolve worker count.
-    # Windows multiprocessing "spawn" method pickles initargs (train, val, score_timeline)
-    # and sends them to each worker via named pipe. With include_archive=True the dataset
-    # can exceed 50 K rows (~400–600 MB pickled), causing the pipe buffer to overflow and
-    # deadlock the pool initialisation. Force single-process mode in that case.
-    if include_archive:
-        n_workers = 1
-        print("[GA] include_archive=True -> single-process mode (Windows IPC limit)")
-    else:
-        n_workers = int(os.environ.get("OPTIMIZER_WORKERS", _DEFAULT_WORKERS)) \
-            if n_workers is None else max(1, n_workers)
+    # Resolve worker count
+    n_workers = int(os.environ.get("OPTIMIZER_WORKERS", _DEFAULT_WORKERS)) \
+        if n_workers is None else max(1, n_workers)
 
     # --- Load data (v2: single pass, includes price candles for full sim) ---
     print(f"[GA] Loading signal data for run_id={run_id}...")
@@ -341,6 +335,20 @@ def run_optimizer(
 
     print(f"[GA] Starting parallel fitness evaluation with {n_workers} worker(s)...")
 
+    # --- Shared data -> temp pickle file ---
+    # Passing large initargs (train, val, score_timeline) directly via multiprocessing
+    # IPC pipe overflows the Windows named pipe buffer when the dataset is large
+    # (e.g. include_archive=True, ~50 K rows). Instead we write a single temp file
+    # and pass only the file path to each worker — the OS file cache makes this fast.
+    _tmp_data_file = tempfile.NamedTemporaryFile(
+        suffix=".pkl", delete=False, prefix="optimizer_data_"
+    )
+    _tmp_data_path = _tmp_data_file.name
+    with open(_tmp_data_path, "wb") as _f:
+        pickle.dump({"train": train, "val": val, "score_timeline": score_timeline}, _f)
+    _tmp_data_file.close()
+    print(f"[GA] Shared data written to temp file ({os.path.getsize(_tmp_data_path) // 1024 // 1024} MB)")
+
     # --- Open the worker pool (stays open for the entire run) ---
     # Windows requires the pool to be created inside an if __name__ == '__main__'
     # guard in scripts, but since this runs as a subprocess spawned by _runner.py
@@ -348,7 +356,7 @@ def run_optimizer(
     with multiprocessing.Pool(
         processes=n_workers,
         initializer=_worker_init,
-        initargs=(train, val, score_timeline),
+        initargs=(_tmp_data_path,),
     ) as pool:
 
         # Evaluate baseline individual (in-process, avoids pickling overhead)
@@ -521,6 +529,12 @@ def run_optimizer(
             "overfitting_ok":         1 if overfitting_ok else 0,
             "config_diff":            vector_to_config_diff(ind, trade_mode=trade_mode),
         })
+
+    # Clean up temp data file
+    try:
+        os.unlink(_tmp_data_path)
+    except Exception:
+        pass
 
     elapsed = time.time() - t_start
     print(f"\n[GA] Done in {elapsed:.0f}s ({elapsed/60:.1f} min). "
