@@ -778,25 +778,26 @@ export function SignalHistory() {
                   <label style={{ display: 'block', color: '#cbd5e1', fontSize: '12px', marginBottom: '6px', fontWeight: '500' }}>Exit / Státusz</label>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                     {([
-                      { key: 'TP',   label: 'TP',   activeColor: '#34d399', activeBg: 'rgba(16, 185, 129, 0.2)',  activeBorder: '#10b981' },
-                      { key: 'SL',   label: 'SL',   activeColor: '#f87171', activeBg: 'rgba(239, 68, 68, 0.2)',   activeBorder: '#ef4444' },
-                      { key: 'REV',  label: 'REV',  activeColor: '#fb923c', activeBg: 'rgba(251, 146, 60, 0.2)',  activeBorder: '#f97316' },
-                      { key: 'EOD',  label: 'EOD',  activeColor: '#94a3b8', activeBg: 'rgba(100, 116, 139, 0.2)', activeBorder: '#64748b' },
-                      { key: 'STAG', label: 'STAG', activeColor: '#c084fc', activeBg: 'rgba(192, 132, 252, 0.2)', activeBorder: '#a855f7' },
-                      { key: 'MAX',  label: 'MAX',  activeColor: '#67e8f9', activeBg: 'rgba(103, 232, 249, 0.2)', activeBorder: '#22d3ee' },
-                      { key: 'OPEN',     label: 'OPEN',  activeColor: '#fbbf24', activeBg: 'rgba(251, 191, 36, 0.2)',  activeBorder: '#f59e0b' },
-                      { key: 'NOGO',     label: 'NOGO',  activeColor: '#f97316', activeBg: 'rgba(249, 115, 22, 0.2)',  activeBorder: '#ea580c' },
-                      { key: 'NO_DATA',  label: 'N/D',   activeColor: '#94a3b8', activeBg: 'rgba(100, 116, 139, 0.2)', activeBorder: '#64748b' },
-                      { key: 'SKIP_HRS', label: 'HOURS', activeColor: '#818cf8', activeBg: 'rgba(129, 140, 248, 0.2)', activeBorder: '#6366f1' },
-                      { key: 'INV_LVL',  label: 'INV',   activeColor: '#fde047', activeBg: 'rgba(253, 224, 71, 0.15)', activeBorder: '#eab308' },
-                      { key: 'PAR_SKIP', label: 'PAR',   activeColor: '#38bdf8', activeBg: 'rgba(56, 189, 248, 0.2)',  activeBorder: '#0ea5e9' },
-                      { key: 'NONE',     label: '—',     activeColor: '#64748b', activeBg: 'rgba(51, 65, 85, 0.4)',    activeBorder: '#475569' },
-                    ] as const).map(({ key, label, activeColor, activeBg, activeBorder }) => {
+                      { key: 'TP',       label: 'TP',    tooltip: 'Take Profit – a pozíció a take profit szinten zárult',                   activeColor: '#34d399', activeBg: 'rgba(16, 185, 129, 0.2)',  activeBorder: '#10b981' },
+                      { key: 'SL',       label: 'SL',    tooltip: 'Stop Loss – a pozíció a stop loss szinten zárult',                       activeColor: '#f87171', activeBg: 'rgba(239, 68, 68, 0.2)',   activeBorder: '#ef4444' },
+                      { key: 'REV',      label: 'REV',   tooltip: 'Reversal – ellentétes irányú signal zárta a pozíciót',                   activeColor: '#fb923c', activeBg: 'rgba(251, 146, 60, 0.2)',  activeBorder: '#f97316' },
+                      { key: 'EOD',      label: 'EOD',   tooltip: 'End of Day – napi automatikus likvidáció (kereskedési nap vége)',         activeColor: '#94a3b8', activeBg: 'rgba(100, 116, 139, 0.2)', activeBorder: '#64748b' },
+                      { key: 'STAG',     label: 'STAG',  tooltip: 'Stagnáció – az árfolyam nem mozdult, stagnálás miatti kilépés',          activeColor: '#c084fc', activeBg: 'rgba(192, 132, 252, 0.2)', activeBorder: '#a855f7' },
+                      { key: 'MAX',      label: 'MAX',   tooltip: 'Max Hold – maximális tartási idő lejárt, kényszerzárás',                  activeColor: '#67e8f9', activeBg: 'rgba(103, 232, 249, 0.2)', activeBorder: '#22d3ee' },
+                      { key: 'OPEN',     label: 'OPEN',  tooltip: 'Nyitott pozíció – még nem zárult le',                                    activeColor: '#fbbf24', activeBg: 'rgba(251, 191, 36, 0.2)',  activeBorder: '#f59e0b' },
+                      { key: 'NOGO',     label: 'NOGO',  tooltip: 'NOGO – a signal nem felelt meg a belépési feltételeknek',                 activeColor: '#f97316', activeBg: 'rgba(249, 115, 22, 0.2)',  activeBorder: '#ea580c' },
+                      { key: 'NO_DATA',  label: 'N/D',   tooltip: 'No Data – nincs elegendő piaci adat a belépéshez',                       activeColor: '#94a3b8', activeBg: 'rgba(100, 116, 139, 0.2)', activeBorder: '#64748b' },
+                      { key: 'SKIP_HRS', label: 'HOURS', tooltip: 'Skip Hours – kereskedési időn kívül érkezett a signal',                  activeColor: '#818cf8', activeBg: 'rgba(129, 140, 248, 0.2)', activeBorder: '#6366f1' },
+                      { key: 'INV_LVL',  label: 'INV',   tooltip: 'Invalid Levels – érvénytelen SL/TP szintek (pl. SL > entry)',            activeColor: '#fde047', activeBg: 'rgba(253, 224, 71, 0.15)', activeBorder: '#eab308' },
+                      { key: 'PAR_SKIP', label: 'PAR',   tooltip: 'Parallel Skip – már volt nyitott pozíció ennél a tickernél',             activeColor: '#38bdf8', activeBg: 'rgba(56, 189, 248, 0.2)',  activeBorder: '#0ea5e9' },
+                      { key: 'NONE',     label: '—',     tooltip: 'Nincs szimulált trade (backtest még nem futott rá, vagy a signal aktív)', activeColor: '#64748b', activeBg: 'rgba(51, 65, 85, 0.4)',    activeBorder: '#475569' },
+                    ] as const).map(({ key, label, tooltip, activeColor, activeBg, activeBorder }) => {
                       const active = (filters.exit_reasons || []).includes(key);
                       return (
                         <button
                           key={key}
                           onClick={() => toggleExitReasonFilter(key)}
+                          title={tooltip}
                           style={{
                             background: active ? activeBg : 'rgba(51, 65, 85, 0.5)',
                             border: `1px solid ${active ? activeBorder : 'rgba(99, 102, 241, 0.3)'}`,
