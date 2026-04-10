@@ -1,11 +1,12 @@
 """
 TrendSignal Self-Tuning Engine - Parameter Space Definition
 
-Defines the 61-dimensional parameter vector for the genetic optimizer.
+Defines the 66-dimensional parameter vector for the genetic optimizer.
 
 Dimension layout (0-indexed):
   [0-1]   12-component CW_ weights: sentiment (2 free)
-  [2-5]   Signal thresholds (4)
+  [2-5]   BUY signal thresholds: HOLD_ZONE, STRONG_BUY_SCORE, MODERATE_BUY_SCORE,
+           STRONG_BUY_CONFIDENCE (4)
   [6-8]   Sentiment decay (3 free; DECAY_0_2h fixed at 1.0)
   [9-13]  12-component CW_ weights: technical (5 free)
   [14-21] Technical signal scores (8)
@@ -20,14 +21,20 @@ Dimension layout (0-indexed):
   [46-51] SHORT daytrade SL/TP multipliers (6)
   [52-58] Entry gate thresholds (7)
   [59-60] 12-component CW_ weights: sr_proximity + trend_strength (2 free)
+  [61]    MODERATE_BUY_CONFIDENCE — önálló dim (korábban STRONG_BUY_CONFIDENCE-0.10) (1)
+  [62-65] SELL signal thresholds: STRONG_SELL_SCORE, MODERATE_SELL_SCORE,
+           STRONG_SELL_CONFIDENCE, MODERATE_SELL_CONFIDENCE — önálló, nem tükrözött (4)
 
   All 11 free CW_ dims [0,1,9,10,11,12,13,22,23,59,60] share a sum=1.0
   normalization in decode_vector(); CW_RR_QUALITY is derived as the residual.
 
-Total: 61 dimensions
+  BUY-orientált rendszer: trade_mode="short" esetén kizárólag a [46-51] és [62-65]
+  dimenziók optimalizálódnak — minden közös/BUY paraméter befagyasztva.
 
-Version: 3.0 — 12-component CW_ weight architecture
-Date: 2026-04-07
+Total: 66 dimensions
+
+Version: 3.1 — independent SELL thresholds, freed MODERATE_BUY_CONFIDENCE
+Date: 2026-04-10
 """
 
 from dataclasses import dataclass
@@ -65,8 +72,8 @@ PARAM_DEFS: List[ParamDef] = [
     # ------------------------------------------------------------------
     # Group 2: Signal Thresholds  (dim 2-5)
     # ------------------------------------------------------------------
-    ParamDef(2,  "hold_zone_threshold", "HOLD_ZONE_THRESHOLD", 5.0,  15.0, False,
-             "Score below which decision is HOLD (max 15 — above 15 túl kevés trade aktiválódik)"),
+    ParamDef(2,  "hold_zone_threshold", "HOLD_ZONE_THRESHOLD", 5.0,  30.0, False,
+             "Score below which decision is HOLD"),
     ParamDef(3,  "strong_buy_score",    "STRONG_BUY_SCORE",    35.0, 80.0, False,
              "Minimum score for STRONG BUY decision"),
     ParamDef(4,  "moderate_buy_score",  "MODERATE_BUY_SCORE",  15.0, 55.0, False,
@@ -271,10 +278,34 @@ PARAM_DEFS: List[ParamDef] = [
              "Direct weight of sr_proximity score (S/R distance quality)"),
     ParamDef(60, "cw_trend_strength",    "CW_TREND_STRENGTH",   0.00, 0.15, False,
              "Direct weight of trend_strength score (ADX-based)"),
+
+    # ------------------------------------------------------------------
+    # Group 16: MODERATE_BUY_CONFIDENCE — önálló dim (dim 61)
+    # Korábban hardcoded: STRONG_BUY_CONFIDENCE - 0.10
+    # Constraint: MODERATE_BUY_CONFIDENCE <= STRONG_BUY_CONFIDENCE (enforced in decode)
+    # ------------------------------------------------------------------
+    ParamDef(61, "moderate_buy_confidence", "MODERATE_BUY_CONFIDENCE",
+             0.40, 0.90, False,
+             "Minimum confidence for MODERATE BUY (must be <= STRONG_BUY_CONFIDENCE)"),
+
+    # ------------------------------------------------------------------
+    # Group 17: SELL signal thresholds — önálló, nem szimmetrikus (dim 62-65)
+    # Korábban: SELL paraméterek = BUY tükrei (hardcoded szimmetria)
+    # Most: önállóan optimalizálható SHORT-only dimenziók.
+    # Constraint: MODERATE_SELL_CONFIDENCE <= STRONG_SELL_CONFIDENCE (enforced in decode)
+    # ------------------------------------------------------------------
+    ParamDef(62, "strong_sell_score",      "STRONG_SELL_SCORE",      -80.0, -35.0, False,
+             "Minimum (negative) score for STRONG SELL decision"),
+    ParamDef(63, "moderate_sell_score",    "MODERATE_SELL_SCORE",    -55.0, -15.0, False,
+             "Minimum (negative) score for MODERATE SELL decision"),
+    ParamDef(64, "strong_sell_confidence", "STRONG_SELL_CONFIDENCE",   0.50,  0.95, False,
+             "Minimum confidence for STRONG SELL"),
+    ParamDef(65, "moderate_sell_confidence","MODERATE_SELL_CONFIDENCE", 0.40,  0.90, False,
+             "Minimum confidence for MODERATE SELL (must be <= STRONG_SELL_CONFIDENCE)"),
 ]
 
 # Convenience: number of dimensions
-N_DIMS: int = len(PARAM_DEFS)  # 61
+N_DIMS: int = len(PARAM_DEFS)  # 66
 
 # Lower and upper bounds as numpy arrays (for DEAP initialisation)
 LOWER_BOUNDS: np.ndarray = np.array([p.low  for p in PARAM_DEFS], dtype=float)
@@ -363,6 +394,13 @@ BASELINE_VECTOR: List[float] = [
     0.08,   # 59 CW_SR_PROXIMITY
     0.04,   # 60 CW_TREND_STRENGTH
     # CW_RR_QUALITY = 1.0 - sum(dims[0,1,9-13,22,23,59,60]) = 0.02 (derived)
+    # Group 16: MODERATE_BUY_CONFIDENCE (önálló)
+    0.65,   # 61 MODERATE_BUY_CONFIDENCE  (volt: STRONG_BUY_CONFIDENCE - 0.10 = 0.65)
+    # Group 17: SELL signal thresholds (önálló, nem szimmetrikus)
+    -55.0,  # 62 STRONG_SELL_SCORE        (volt: -STRONG_BUY_SCORE = -55.0)
+    -35.0,  # 63 MODERATE_SELL_SCORE      (volt: -MODERATE_BUY_SCORE = -35.0)
+    0.75,   # 64 STRONG_SELL_CONFIDENCE   (volt: STRONG_BUY_CONFIDENCE = 0.75)
+    0.65,   # 65 MODERATE_SELL_CONFIDENCE (volt: STRONG_BUY_CONFIDENCE - 0.10 = 0.65)
 ]
 
 assert len(BASELINE_VECTOR) == N_DIMS, \
@@ -422,34 +460,27 @@ def get_current_baseline_vector() -> List[float]:
 # Dimenzió-csoportok trade_mode szerinti befagyasztáshoz
 # ---------------------------------------------------------------------------
 
-# Dim indexek, amelyek kizárólag LONG/BUY irányhoz tartoznak.
-# SHORT módban ezeket befagyasztjuk → GA csak SHORT-specifikus paramétereket változtat.
-#
-#   40-45: LONG ATR SL/TP multiplierek, SR_SUPPORT_HARD_PCT
-#    3-5:  STRONG_BUY_SCORE, MODERATE_BUY_SCORE, STRONG_BUY_CONFIDENCE
-#          (a BUY döntés küszöbei — SHORT módban irrelevánsak)
-#   52:    ENTRY_GATE_RSI_BUY_MAX
-#   54:    ENTRY_GATE_MACD_HIST_BUY_MIN
-#   56:    ENTRY_GATE_SMA200_BUY_MAX_PCT
-#   58:    ENTRY_GATE_DIST_RESIST_BUY_MAX_PCT
-#
-# Megjegyzés: HOLD_ZONE_THRESHOLD (dim 2) szimmetrikus (|score| < küszöb → HOLD
-# mindkét irányban) → nem fagyasztjuk be.
-_LONG_ONLY_DIMS = list(range(40, 46)) + [3, 4, 5, 52, 54, 56, 58]
+# Dim indexek, amelyek kizárólag LONG SL/TP-t érintenek (referencia, nem trade_mode logikában)
+_LONG_ONLY_DIMS  = list(range(40, 46))   # 40-45: ATR_STOP_*, ATR_TP_*, SR_SUPPORT_HARD_PCT
 
-# Dim indexek, amelyek kizárólag SHORT/SELL irányhoz tartoznak.
-# LONG módban ezeket befagyasztjuk.
-#
-#   46-51: SHORT ATR SL/TP multiplierek, SHORT_SL_MAX_PCT
-#   53:    ENTRY_GATE_RSI_SELL_MIN
-#   55:    ENTRY_GATE_MACD_HIST_SELL_MAX
-#   57:    ENTRY_GATE_SMA200_SELL_MIN_PCT
-_SHORT_ONLY_DIMS = list(range(46, 52)) + [53, 55, 57]
+# Dim indexek, amelyek kizárólag SHORT-ot érintenek:
+#   46-51: SHORT SL/TP multiplierek
+#   62-65: SELL küszöbök (STRONG/MODERATE_SELL_SCORE, STRONG/MODERATE_SELL_CONFIDENCE)
+_SHORT_ONLY_DIMS = list(range(46, 52)) + [62, 63, 64, 65]
 
-# Signal küszöb dimenziók — ezeket a phase-alapú befagyasztás kezeli
+# BUY signal küszöb dimenziók (phase-alapú befagyasztás)
 # dim 2: HOLD_ZONE_THRESHOLD, dim 3: STRONG_BUY_SCORE,
-# dim 4: MODERATE_BUY_SCORE,  dim 5: STRONG_BUY_CONFIDENCE
-_THRESHOLD_DIMS = [2, 3, 4, 5]
+# dim 4: MODERATE_BUY_SCORE,  dim 5: STRONG_BUY_CONFIDENCE,
+# dim 61: MODERATE_BUY_CONFIDENCE
+_THRESHOLD_DIMS = [2, 3, 4, 5, 61]
+
+# SELL signal küszöb dimenziók (phase-alapú befagyasztás)
+# dim 62: STRONG_SELL_SCORE, dim 63: MODERATE_SELL_SCORE,
+# dim 64: STRONG_SELL_CONFIDENCE, dim 65: MODERATE_SELL_CONFIDENCE
+_SELL_THRESHOLD_DIMS = [62, 63, 64, 65]
+
+# Összes küszöb dim (BUY + SELL) — phase="score_only"/"thresholds_only" logikához
+_ALL_THRESHOLD_DIMS = _THRESHOLD_DIMS + _SELL_THRESHOLD_DIMS
 
 
 def get_mode_bounds(trade_mode: str = "all", phase: str = "all"):
@@ -457,19 +488,24 @@ def get_mode_bounds(trade_mode: str = "all", phase: str = "all"):
     Returns (lower_bounds, upper_bounds) arrays for the given trade_mode and phase.
 
     trade_mode freezing:
-      'long'  → SHORT SL/TP dimenziók (46-51) befagyasztva az aktuális config értékein
-      'short' → LONG SL/TP dimenziók (40-45) befagyasztva
+      'long'  → SHORT-specifikus dimenziók (46-51 + 62-65) befagyasztva.
+                BUY/közös paraméterek mind szabadok.
+      'short' → BUY-orientált rendszer: CSAK a SHORT-specifikus dimenziók (46-51 + 62-65)
+                maradnak szabadok — minden közös/BUY paraméter befagyasztva.
       'all'   → nincs trade_mode-alapú befagyasztás
 
     phase freezing (kétfázisú optimalizáció):
-      'score_only'      → signal küszöbök (dim 2-5: HOLD_ZONE, STRONG/MODERATE_BUY_SCORE,
-                          STRONG_BUY_CONFIDENCE) befagyasztva az aktuális értéken.
-                          Csak a score komponensek (súlyok, decay, tech paraméterek,
-                          SL/TP multiplierek) optimalizálódnak.
-      'thresholds_only' → minden dim befagyasztva a 2-5-ös kivételével.
-                          Csak a signal küszöbök finomhangolódnak a már optimalizált
-                          score-kalkuláció felett.
+      'score_only'      → BUY + SELL küszöbök (dim 2-5, 61-65) befagyasztva.
+                          Csak a score komponensek optimalizálódnak.
+      'thresholds_only' → minden dim befagyasztva a küszöbök kivételével (dim 2-5, 61-65).
+                          Csak a signal küszöbök finomhangolódnak.
       'all'             → nincs phase-alapú befagyasztás (teljes tér)
+
+    Phase + trade_mode kombináció:
+      short + thresholds_only → csak SELL küszöbök (62-65) szabadok
+      short + score_only      → csak SHORT SL/TP (46-51) szabadok
+      long  + thresholds_only → csak BUY küszöbök (2-5, 61) szabadok
+      long  + score_only      → közös + BUY score paraméterek szabadok (küszöbök nélkül)
 
     A befagyasztás az aktuális config.json értékeit használja (nem a hardcoded
     BASELINE_VECTOR-t), így a kétfázisú futásban a 2. fázis az 1. fázis
@@ -482,23 +518,27 @@ def get_mode_bounds(trade_mode: str = "all", phase: str = "all"):
     current = get_current_baseline_vector()
 
     if trade_mode == "long":
+        # SHORT-specifikus dimek befagyasztva (SL/TP + SELL küszöbök)
         for i in _SHORT_ONLY_DIMS:
             lb[i] = current[i]
             ub[i] = current[i]
     elif trade_mode == "short":
-        for i in _LONG_ONLY_DIMS:
-            lb[i] = current[i]
-            ub[i] = current[i]
+        # BUY-orientált rendszer: SHORT módban CSAK a SHORT-specifikus dimek szabadok.
+        # Minden közös/BUY paraméter befagyasztva — nem optimalizálódnak SELL adatokon.
+        for i in range(N_DIMS):
+            if i not in _SHORT_ONLY_DIMS:
+                lb[i] = current[i]
+                ub[i] = current[i]
 
     if phase == "score_only":
-        # Signal küszöbök befagyasztása → GA csak a score-kalkulációt optimalizálja
-        for i in _THRESHOLD_DIMS:
+        # BUY + SELL küszöbök befagyasztása → GA csak a score-kalkulációt optimalizálja
+        for i in _ALL_THRESHOLD_DIMS:
             lb[i] = current[i]
             ub[i] = current[i]
     elif phase == "thresholds_only":
-        # Minden befagyasztva a küszöbök kivételével
+        # Minden befagyasztva a küszöbök kivételével (BUY + SELL)
         for i in range(N_DIMS):
-            if i not in _THRESHOLD_DIMS:
+            if i not in _ALL_THRESHOLD_DIMS:
                 lb[i] = current[i]
                 ub[i] = current[i]
     # "all" → nincs phase-alapú befagyasztás
@@ -622,12 +662,13 @@ def decode_vector(v: List[float]) -> dict:
     cfg["VOL_LOW_THRESHOLD"]       = 2.0    # fixed (atr_pct % below = low vol)
     cfg["VOL_HIGH_THRESHOLD"]      = 4.0    # fixed (atr_pct % above = high vol)
 
-    # SELL thresholds are symmetric
-    cfg["STRONG_SELL_SCORE"]        = -cfg["STRONG_BUY_SCORE"]
-    cfg["MODERATE_SELL_SCORE"]      = -cfg["MODERATE_BUY_SCORE"]
-    cfg["STRONG_SELL_CONFIDENCE"]   = cfg["STRONG_BUY_CONFIDENCE"]
-    cfg["MODERATE_BUY_CONFIDENCE"]  = cfg["STRONG_BUY_CONFIDENCE"] - 0.10
-    cfg["MODERATE_SELL_CONFIDENCE"] = cfg["STRONG_BUY_CONFIDENCE"] - 0.10
+    # Confidence ordering constraints (enforced after PARAM_DEFS loop sets the values)
+    # MODERATE_BUY_CONFIDENCE <= STRONG_BUY_CONFIDENCE
+    if cfg["MODERATE_BUY_CONFIDENCE"] > cfg["STRONG_BUY_CONFIDENCE"]:
+        cfg["MODERATE_BUY_CONFIDENCE"] = cfg["STRONG_BUY_CONFIDENCE"]
+    # MODERATE_SELL_CONFIDENCE <= STRONG_SELL_CONFIDENCE
+    if cfg["MODERATE_SELL_CONFIDENCE"] > cfg["STRONG_SELL_CONFIDENCE"]:
+        cfg["MODERATE_SELL_CONFIDENCE"] = cfg["STRONG_SELL_CONFIDENCE"]
 
     # BEARISH scores are symmetric with BULLISH
     cfg["TECH_SMA20_BEARISH"]       = cfg["TECH_SMA20_BULLISH"]
@@ -662,16 +703,13 @@ def vector_to_config_diff(
         baseline_vector = get_current_baseline_vector()
     baseline = decode_vector(baseline_vector)
 
-    # Ezek mindig a BUY/BULLISH paraméterek tükrei — trade_mode=long esetén
-    # nem önállóan optimalizáltak, csak zaj lenne a diffben.
+    # SELL/BUY küszöbök mostantól önálló dimenziók — ha befagyasztva vannak (trade_mode),
+    # nem változnak, tehát nem jelennének meg a diffben. Csak a TECH derived paraméterek
+    # maradnak tükrözöttek (nem önálló dimek), azokat szűrjük a diffből.
     _SELL_DERIVED = {
-        "STRONG_SELL_SCORE", "MODERATE_SELL_SCORE",
-        "STRONG_SELL_CONFIDENCE", "MODERATE_SELL_CONFIDENCE",
         "TECH_SMA20_BEARISH", "TECH_SMA50_BEARISH", "TECH_DEATH_CROSS",
     }
     _BUY_DERIVED = {
-        "STRONG_BUY_SCORE", "MODERATE_BUY_SCORE",
-        "STRONG_BUY_CONFIDENCE", "MODERATE_BUY_CONFIDENCE",
         "TECH_SMA20_BULLISH", "TECH_SMA50_BULLISH", "TECH_GOLDEN_CROSS",
     }
 
