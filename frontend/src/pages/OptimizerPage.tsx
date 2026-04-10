@@ -394,7 +394,6 @@ function IdlePanel({
 }) {
   const [population, setPopulation] = useState(80);
   const [generations, setGenerations] = useState(100);
-  const [advanced, setAdvanced] = useState(false);
   const [tradeMode, setTradeMode] = useState<'all' | 'long' | 'short'>('all');
   const [includeArchive, setIncludeArchive] = useState(false);
   const [phase, setPhase] = useState<'all' | 'score_only' | 'thresholds_only'>('all');
@@ -547,24 +546,6 @@ function IdlePanel({
             {Math.round(population * generations * (includeArchive ? 0.18 : 0.06) / 60)} perc
           </span>
         </div>
-
-        {/* Advanced toggle */}
-        <button
-          onClick={() => setAdvanced(a => !a)}
-          className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 transition-colors"
-        >
-          {advanced ? <FiChevronUp /> : <FiChevronDown />} Haladó beállítások
-        </button>
-
-        {advanced && (
-          <div className="text-xs text-gray-500 bg-gray-900/50 rounded-lg p-3 space-y-1">
-            <p>• Crossover valószínűség: 0.70 (2-pont)</p>
-            <p>• Mutáció valószínűség: 0.20 (Gauss, σ=5%)</p>
-            <p>• Szelekció: Tournament (k=3)</p>
-            <p>• Elitizmus: Top-2 megőrzése</p>
-            <p>• Dimenziók: 40 (periódusok nélkül)</p>
-          </div>
-        )}
 
         {!ready && (
           <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-800 rounded-lg p-3">
