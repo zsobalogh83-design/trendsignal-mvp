@@ -274,9 +274,17 @@ def run_optimizer(
     """
     t_start = time.time()
 
-    # Resolve worker count
-    n_workers = int(os.environ.get("OPTIMIZER_WORKERS", _DEFAULT_WORKERS)) \
-        if n_workers is None else max(1, n_workers)
+    # Resolve worker count.
+    # Windows multiprocessing "spawn" method pickles initargs (train, val, score_timeline)
+    # and sends them to each worker via named pipe. With include_archive=True the dataset
+    # can exceed 50 K rows (~400–600 MB pickled), causing the pipe buffer to overflow and
+    # deadlock the pool initialisation. Force single-process mode in that case.
+    if include_archive:
+        n_workers = 1
+        print("[GA] include_archive=True → single-process mode (Windows IPC limit)")
+    else:
+        n_workers = int(os.environ.get("OPTIMIZER_WORKERS", _DEFAULT_WORKERS)) \
+            if n_workers is None else max(1, n_workers)
 
     # --- Load data (v2: single pass, includes price candles for full sim) ---
     print(f"[GA] Loading signal data for run_id={run_id}...")
