@@ -827,27 +827,46 @@ async def get_signals(
     status: str = "active",
     limit: int = 50,
     ticker_symbol: Optional[str] = None,
+    latest_per_ticker: bool = False,
     db: Session = Depends(get_db)
 ):
     """
     Get all stored signals from database
-    
+
     Query params:
-    - status: active/expired/archived (default: active)
+    - status: active/expired/archived/all (default: active)
     - limit: max results (default: 50)
     - ticker_symbol: filter by ticker (optional)
+    - latest_per_ticker: if true, return only the most recent signal per ticker regardless of status (default: false)
     """
     try:
-        query = db.query(Signal)
-        
-        # Filter by status
-        if status and status != "all":
-            query = query.filter(Signal.status == status)
-        
+        if latest_per_ticker:
+            # Subquery: max created_at per ticker
+            subq = (
+                db.query(
+                    Signal.ticker_symbol,
+                    func.max(Signal.created_at).label("max_created_at")
+                )
+                .group_by(Signal.ticker_symbol)
+                .subquery()
+            )
+            query = db.query(Signal).join(
+                subq,
+                (Signal.ticker_symbol == subq.c.ticker_symbol) &
+                (Signal.created_at == subq.c.max_created_at)
+            )
+            # Optional status filter on top of latest-per-ticker
+            if status and status != "all" and status != "active":
+                query = query.filter(Signal.status == status)
+        else:
+            query = db.query(Signal)
+            if status and status != "all":
+                query = query.filter(Signal.status == status)
+
         # Filter by ticker if provided
         if ticker_symbol:
             query = query.filter(Signal.ticker_symbol == ticker_symbol.upper())
-        
+
         # Order and limit
         signals = query.order_by(Signal.created_at.desc()).limit(limit).all()
         

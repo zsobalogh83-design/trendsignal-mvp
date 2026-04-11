@@ -6,11 +6,10 @@ import { useQueryClient } from '@tanstack/react-query';
 
 export function Dashboard() {
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<'active' | 'expired' | 'archived'>('active');
   const [activeFilter, setActiveFilter] = useState('all');
   const [isGenerating, setIsGenerating] = useState(false);
-  
-  const { data, isLoading, error, refetch } = useSignals({ status: statusFilter, limit: 50 });
+
+  const { data, isLoading, error, refetch } = useSignals({ latest_per_ticker: true, limit: 100 });
 
   const signals = data?.signals || [];
 

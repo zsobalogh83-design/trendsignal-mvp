@@ -97,19 +97,19 @@ class MultilingualSentimentAnalyzer:
                 from finbert_analyzer import get_global_finbert
                 self.finbert = get_global_finbert()
                 self.finbert_available = True
-                print("   ✅ FinBERT ready for English news")
+                print("   [OK] FinBERT ready for English news")
             except Exception as e:
-                print(f"   ⚠️ FinBERT not available: {e}")
+                print(f"   [WARN] FinBERT not available: {e}")
                 self.finbert = None
         else:
             self.finbert = None
-        
+
         # Enhanced keywords for Hungarian (always available)
         from sentiment_analyzer import SentimentAnalyzer
         self.keyword_analyzer = SentimentAnalyzer(self.config, self.ticker_symbol)
         # Force mock mode for Hungarian
         self.keyword_analyzer.use_finbert = False
-        print("🔤 Enhanced keywords ready for Hungarian news")
+        print("[OK] Enhanced keywords ready for Hungarian news")
     
     def analyze_text(self, text: str, ticker_symbol: Optional[str] = None) -> Dict[str, float]:
         """
