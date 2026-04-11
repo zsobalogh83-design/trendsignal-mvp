@@ -15,6 +15,7 @@ import type {
   ConfigProposal,
   StartRunRequest,
   StartRunResponse,
+  ConfigVersion,
 } from '../types/index';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
@@ -261,8 +262,32 @@ class ApiClient {
     return this.request(`/optimizer/proposals/${proposalId}`);
   }
 
-  async approveProposal(proposalId: number): Promise<{ message: string; applied_keys: string[] }> {
-    return this.request(`/optimizer/proposals/${proposalId}/approve`, { method: 'POST' });
+  async approveProposal(proposalId: number, versionName?: string): Promise<{ message: string; applied_keys: string[] }> {
+    return this.request(`/optimizer/proposals/${proposalId}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version_name: versionName ?? null }),
+    });
+  }
+
+  async getConfigVersions(): Promise<ConfigVersion[]> {
+    return this.request('/config/versions');
+  }
+
+  async getActiveConfigVersion(): Promise<ConfigVersion | null> {
+    return this.request('/config/versions/active');
+  }
+
+  async createConfigVersion(name: string, source = 'manual'): Promise<ConfigVersion> {
+    return this.request('/config/versions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, source }),
+    });
+  }
+
+  async restoreConfigVersion(id: number): Promise<ConfigVersion> {
+    return this.request(`/config/versions/${id}/restore`, { method: 'POST' });
   }
 
   async rejectProposal(proposalId: number): Promise<{ message: string }> {

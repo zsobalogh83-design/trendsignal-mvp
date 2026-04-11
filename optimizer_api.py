@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, status
 from pydantic import BaseModel
 
 BASE_DIR   = Path(__file__).resolve().parent
@@ -53,6 +53,10 @@ class RunRequest(BaseModel):
     include_archive: bool  = False     # archive_signals CLOSED trade-ek bevonása
     phase:           str   = "all"     # "all" | "score_only" | "thresholds_only"
     max_cycles:      int   = 10        # max ismétlési ciklus (1-10)
+
+
+class ApproveRequest(BaseModel):
+    version_name: Optional[str] = None  # ha megadják, config verziót ment
 
 
 class RunResponse(BaseModel):
@@ -465,10 +469,14 @@ async def get_proposal(proposal_id: int):
 # ---------------------------------------------------------------------------
 
 @router.post("/proposals/{proposal_id}/approve")
-async def approve_proposal(proposal_id: int):
+async def approve_proposal(
+    proposal_id: int,
+    body: ApproveRequest = Body(default_factory=ApproveRequest),
+):
     """
     Apply the proposed config vector to config.json.
     Updates the live configuration immediately.
+    If body.version_name is provided, saves a named config version.
     """
     conn = _db()
     row = conn.execute(
@@ -539,6 +547,18 @@ async def approve_proposal(proposal_id: int):
     # egészen az alkalmazás következő újraindításáig.
     from src.config import reload_config
     reload_config()
+
+    # Config verzió mentése ha nevet adott a felhasználó
+    if body.version_name:
+        try:
+            from src.config_versions import save_version
+            save_version(
+                name=body.version_name,
+                source=f"optimizer:{proposal_id}",
+                config_snapshot=current_cfg,
+            )
+        except Exception as _ve:
+            print(f"[WARN] config_versions: mentés sikertelen: {_ve}")
 
     # Mark proposal as approved
     conn.execute(

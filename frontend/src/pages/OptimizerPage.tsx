@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { SaveVersionModal } from '../components/SaveVersionModal';
 import {
   FiPlay, FiSquare, FiCheckCircle, FiXCircle, FiAlertTriangle,
   FiTrendingUp, FiActivity, FiClock, FiDatabase, FiSettings,
@@ -936,6 +937,10 @@ export function OptimizerPage() {
   // Track which proposal is being approved/rejected
   const [actingOn, setActingOn] = useState<number | null>(null);
 
+  // Approve modal state
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [approveTarget, setApproveTarget] = useState<number | null>(null);
+
   // ---- forceIdle: visszavisz az IDLE (paraméter-konfiguráció) nézetre ----
   const [forceIdle, setForceIdle] = useState(false);
 
@@ -1000,14 +1005,22 @@ export function OptimizerPage() {
   }, [activeRunId, stopMut]);
 
   const handleApprove = useCallback((proposalId: number) => {
-    setActingOn(proposalId);
-    approveMut.mutate(proposalId, {
+    setApproveTarget(proposalId);
+    setShowApproveModal(true);
+  }, []);
+
+  const handleApproveConfirm = useCallback((versionName: string) => {
+    if (!approveTarget) return;
+    setShowApproveModal(false);
+    setActingOn(approveTarget);
+    approveMut.mutate({ proposalId: approveTarget, versionName }, {
       onSettled: () => {
         setActingOn(null);
+        setApproveTarget(null);
         refetchProposals();
       },
     });
-  }, [approveMut, refetchProposals]);
+  }, [approveTarget, approveMut, refetchProposals]);
 
   const handleReject = useCallback((proposalId: number) => {
     setActingOn(proposalId);
@@ -1153,6 +1166,14 @@ export function OptimizerPage() {
           </div>
         )}
       </div>
+
+      <SaveVersionModal
+        isOpen={showApproveModal}
+        title="Jóváhagyott config mentése"
+        placeholder="pl. Optimizer v3, Q2 Baseline..."
+        onConfirm={handleApproveConfirm}
+        onCancel={() => { setShowApproveModal(false); setApproveTarget(null); }}
+      />
     </div>
   );
 }

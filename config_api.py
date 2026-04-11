@@ -8,8 +8,10 @@ Add to your FastAPI app:
 """
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field, validator
-from typing import Optional
+from typing import Optional, List
+import json
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -1425,6 +1427,107 @@ async def update_trade_management(updates: TradeManagementUpdate):
             raise HTTPException(status_code=400, detail="No updates provided")
         update_config_values(get_config(), config_updates, source="manual:trade_management")
         return await get_trade_management()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONFIG VERSIONS — elnevezett, visszaállítható config snapshots
+# ══════════════════════════════════════════════════════════════════════════════
+
+_CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+
+
+class SaveVersionRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    source: str = "manual"
+
+
+class ConfigVersionResponse(BaseModel):
+    id: int
+    version: int
+    name: str
+    source: str
+    saved_at: str
+    is_active: bool
+
+
+def _version_row_to_response(row: dict) -> ConfigVersionResponse:
+    return ConfigVersionResponse(
+        id=row["id"],
+        version=row["version"],
+        name=row["name"],
+        source=row["source"],
+        saved_at=row["saved_at"],
+        is_active=bool(row["is_active"]),
+    )
+
+
+@router.get("/versions/active", response_model=Optional[ConfigVersionResponse])
+async def get_active_version():
+    """Visszaadja az aktív config verziót, vagy null-t ha nincs mentett verzió."""
+    try:
+        from src.config_versions import get_active
+        row = get_active()
+        return _version_row_to_response(row) if row else None
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/versions", response_model=List[ConfigVersionResponse])
+async def get_config_versions(limit: int = 50):
+    """Visszaadja az összes config verziót csökkenő sorrendben."""
+    try:
+        from src.config_versions import list_versions
+        rows = list_versions(limit=limit)
+        return [_version_row_to_response(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/versions", response_model=ConfigVersionResponse, status_code=201)
+async def create_config_version(req: SaveVersionRequest):
+    """
+    Elmenti az aktuális config.json tartalmát névvel ellátott verzióként.
+    Minden PUT endpoint után hívja a frontend, miután az összes beállítás mentve lett.
+    """
+    try:
+        from src.config_versions import save_version, get_version
+        if not _CONFIG_PATH.exists():
+            raise HTTPException(status_code=500, detail="config.json not found")
+        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+            current_cfg = json.load(f)
+        new_id = save_version(req.name, req.source, current_cfg)
+        row = get_version(new_id)
+        return _version_row_to_response(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/versions/{version_id}/restore", response_model=ConfigVersionResponse)
+async def restore_config_version(version_id: int):
+    """
+    Visszaállítja a megadott config verziót:
+    - config.json felülírása
+    - in-memory singleton újratöltése
+    - is_active beállítása erre a verzióra
+    """
+    try:
+        from src.config_versions import get_version, set_active
+        from src.config import reload_config
+        row = get_version(version_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Version {version_id} not found")
+        cfg = json.loads(row["config_json"])
+        with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        reload_config()
+        set_active(version_id)
+        return _version_row_to_response(row)
     except HTTPException:
         raise
     except Exception as e:

@@ -1,6 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { TickerManagement } from '../components/TickerManagement';
+import { SaveVersionModal } from '../components/SaveVersionModal';
+import {
+  useActiveConfigVersion,
+  useConfigVersions,
+  useCreateConfigVersion,
+  useRestoreConfigVersion,
+} from '../hooks/useApi';
 
 // ── Shared style tokens ──────────────────────────────────────────────────────
 const CSS = `
@@ -235,6 +242,97 @@ function NewsSourcesTab() {
       <div className="cfg-section-title">📰 News Source Configuration</div>
       <div className="cfg-section-desc">Configure news sources, credibility weights, and update frequency</div>
       <div className="cfg-placeholder">News source management coming in Phase 2</div>
+    </div>
+  );
+}
+
+function ConfigVersionsTab() {
+  const { data: versions = [], isLoading } = useConfigVersions();
+  const { data: activeVersion } = useActiveConfigVersion();
+  const restoreVersion = useRestoreConfigVersion();
+
+  const handleRestore = async (id: number, name: string) => {
+    if (!confirm(`Visszaállítod a(z) "${name}" verziót? A jelenlegi config felülíródik.`)) return;
+    try {
+      await restoreVersion.mutateAsync(id);
+      alert(`✅ "${name}" verzió visszaállítva!`);
+    } catch {
+      alert('❌ Visszaállítás sikertelen.');
+    }
+  };
+
+  return (
+    <div className="cfg-section">
+      <div className="cfg-section-title">📜 Config Verziók</div>
+      <div className="cfg-section-desc">
+        Elmentett konfigurációk — bármikor visszaállítható a korábbi állapot.
+      </div>
+      {isLoading ? (
+        <div className="cfg-placeholder">Betöltés...</div>
+      ) : versions.length === 0 ? (
+        <div className="cfg-placeholder">Még nincs mentett verzió.</div>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              {['#', 'Név', 'Forrás', 'Mentve', 'Státusz', ''].map((h, i) => (
+                <th key={i} style={{
+                  fontSize: 11, fontWeight: 700, color: '#64748b',
+                  textTransform: 'uppercase', letterSpacing: '.06em',
+                  padding: '0 8px 10px', textAlign: i === 0 ? 'center' : i >= 4 ? 'center' : 'left',
+                }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {versions.map(v => {
+              const isActive = activeVersion?.id === v.id;
+              return (
+                <tr key={v.id} style={{ borderTop: '1px solid rgba(51,65,85,.35)' }}>
+                  <td style={{ padding: '9px 8px', textAlign: 'center', fontSize: 13, color: '#94a3b8', fontWeight: 700 }}>
+                    v{v.version}
+                  </td>
+                  <td style={{ padding: '9px 8px', fontSize: 13, color: '#f1f5f9', fontWeight: 600 }}>
+                    {v.name}
+                  </td>
+                  <td style={{ padding: '9px 8px', fontSize: 12, color: '#64748b' }}>
+                    {v.source}
+                  </td>
+                  <td style={{ padding: '9px 8px', fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>
+                    {v.saved_at}
+                  </td>
+                  <td style={{ padding: '9px 8px', textAlign: 'center' }}>
+                    {isActive ? (
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, color: '#10b981',
+                        background: 'rgba(16,185,129,.15)', borderRadius: 5,
+                        padding: '2px 8px', textTransform: 'uppercase',
+                      }}>Aktív</span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#475569' }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '9px 8px', textAlign: 'right' }}>
+                    {!isActive && (
+                      <button
+                        onClick={() => handleRestore(v.id, v.name)}
+                        disabled={restoreVersion.isPending}
+                        style={{
+                          padding: '5px 12px', borderRadius: 6, border: '1px solid rgba(99,102,241,.4)',
+                          background: 'rgba(99,102,241,.1)', color: '#a5b4fc',
+                          fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        }}
+                      >
+                        ↩ Visszaállít
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
@@ -1045,6 +1143,9 @@ function RiskTab({ params: rp, setParams: setRp, advSignal: as, setAdvSignal: se
 export function Configuration() {
   const [activeTab, setActiveTab] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const { data: activeVersion } = useActiveConfigVersion();
+  const createVersion = useCreateConfigVersion();
 
   const [sentimentWeights, setSentimentWeights] = useState({
     fresh_0_2h: 100, strong_2_6h: 85, intraday_6_12h: 60, overnight_12_24h: 35,
@@ -1343,7 +1444,7 @@ export function Configuration() {
   };
 
   // ── Save ──────────────────────────────────────────────────────────────────
-  const handleSaveAll = async () => {
+  const handleSaveAll = async (versionName: string) => {
     setSaving(true);
     try {
       const total = componentWeights.sentiment + componentWeights.technical + componentWeights.risk;
@@ -1572,6 +1673,7 @@ export function Configuration() {
         }),
       });
 
+      await createVersion.mutateAsync({ name: versionName, source: 'manual' });
       alert('✅ Configuration saved successfully!');
       await loadConfigFromBackend();
     } catch (error) {
@@ -1589,6 +1691,7 @@ export function Configuration() {
     { id: 3, label: '📈 Technical' },
     { id: 4, label: '🎯 Signals' },
     { id: 5, label: '🛡️ Risk' },
+    { id: 6, label: '📜 Verziók' },
   ];
 
   return (
@@ -1599,8 +1702,19 @@ export function Configuration() {
         {/* Header */}
         <div className="cfg-header">
           <Link to="/" className="cfg-back">← Dashboard</Link>
-          <div className="cfg-title">⚙️ Configuration</div>
-          <button className="cfg-save" onClick={handleSaveAll} disabled={saving}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <div className="cfg-title">⚙️ Configuration</div>
+            {activeVersion && (
+              <div style={{
+                fontSize: 11, color: '#60a5fa', background: 'rgba(59,130,246,.12)',
+                border: '1px solid rgba(59,130,246,.3)', borderRadius: 6,
+                padding: '2px 10px', fontWeight: 600,
+              }}>
+                v{activeVersion.version} · {activeVersion.name}
+              </div>
+            )}
+          </div>
+          <button className="cfg-save" onClick={() => setShowSaveModal(true)} disabled={saving}>
             💾 {saving ? 'Saving...' : 'Save All Changes'}
           </button>
         </div>
@@ -1650,7 +1764,17 @@ export function Configuration() {
             tradeMgmt={tradeMgmt} setTradeMgmt={setTradeMgmt}
           />
         )}
+        {activeTab === 6 && (
+          <ConfigVersionsTab />
+        )}
       </div>
+
+      <SaveVersionModal
+        isOpen={showSaveModal}
+        title="Config verzió mentése"
+        onConfirm={(name) => { setShowSaveModal(false); handleSaveAll(name); }}
+        onCancel={() => setShowSaveModal(false)}
+      />
     </div>
   );
 }

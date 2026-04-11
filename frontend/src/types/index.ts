@@ -516,3 +516,12 @@ export interface StartRunResponse {
   status: string;
   message: string;
 }
+
+export interface ConfigVersion {
+  id: number;
+  version: number;
+  name: string;
+  source: string;       // "manual" | "optimizer:42"
+  saved_at: string;     // "YYYY-MM-DDTHH:MM"
+  is_active: boolean;
+}
