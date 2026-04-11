@@ -171,12 +171,14 @@ class ApiClient {
   // ==========================================
   
   async getSignals(params: {
-    status?: 'active' | 'expired' | 'archived';
+    status?: 'active' | 'expired' | 'archived' | 'all';
     limit?: number;
+    latest_per_ticker?: boolean;
   } = {}): Promise<{ signals: Signal[]; total: number }> {
     const query = new URLSearchParams();
     if (params.status) query.append('status', params.status);
     if (params.limit) query.append('limit', params.limit.toString());
+    if (params.latest_per_ticker) query.append('latest_per_ticker', 'true');
 
     return this.request(`/signals?${query}`);
   }

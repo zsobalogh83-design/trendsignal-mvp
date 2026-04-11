@@ -49,7 +49,7 @@ class FinBERTAnalyzer:
         Args:
             device: 'cuda', 'cpu', or None (auto-detect)
         """
-        print("🧠 Loading FinBERT model...")
+        print("[FinBERT] Loading model...")
         
         # Auto-detect device
         if device is None:
@@ -68,10 +68,10 @@ class FinBERTAnalyzer:
             self.model.to(self.device)
             self.model.eval()  # Set to evaluation mode
             
-            print(f"   ✅ FinBERT loaded successfully!")
-            
+            print(f"   [OK] FinBERT loaded successfully!")
+
         except Exception as e:
-            print(f"   ❌ Error loading FinBERT: {e}")
+            print(f"   [ERROR] Loading FinBERT: {e}")
             raise
     
     def analyze(self, text: str, max_length: int = 512) -> Dict[str, float]:

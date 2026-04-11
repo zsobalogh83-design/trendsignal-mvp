@@ -11,6 +11,7 @@ type TechnicalData = any;
 interface SignalsParams {
   status?: string;
   limit?: number;
+  latest_per_ticker?: boolean;
 }
 
 interface NewsParams {
