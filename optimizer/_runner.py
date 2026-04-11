@@ -540,11 +540,18 @@ def main():
             conn.close()
 
         print("\n[Runner] Done.")
-        sys.exit(0)
 
-    except BaseException as exc:
-        # BaseException-t kezelünk, hogy a KeyboardInterrupt (SIGINT / külső kill)
-        # is FAILED-re állítsa a futást a DB-ben, ne maradjon RUNNING-ban.
+    except KeyboardInterrupt:
+        # Külső kill / SIGINT — STOPPED-nak jelöljük, nem FAILED
+        elapsed = time.time() - t_start
+        print(f"\n[Runner] KeyboardInterrupt after {elapsed:.0f}s — marking STOPPED.", file=sys.stderr)
+        try:
+            _mark_run_stopped(run_id, elapsed, total_saved, db_path)
+        except Exception as db_exc:
+            print(f"[Runner] Failed to mark run as STOPPED: {db_exc}", file=sys.stderr)
+        sys.exit(1)
+
+    except Exception as exc:
         elapsed = time.time() - t_start
         tb = traceback.format_exc()
         print(f"\n[Runner] FATAL ERROR after {elapsed:.0f}s:\n{tb}", file=sys.stderr)
