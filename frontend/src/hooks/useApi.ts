@@ -197,14 +197,17 @@ export function useStopOptimizer() {
   });
 }
 
-/** Approve proposal mutation. */
+/** Approve proposal mutation. Accepts optional versionName for config versioning. */
 export function useApproveProposal() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (proposalId: number) => apiClient.approveProposal(proposalId),
+    mutationFn: ({ proposalId, versionName }: { proposalId: number; versionName?: string }) =>
+      apiClient.approveProposal(proposalId, versionName),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['optimizer-proposals'] });
       queryClient.invalidateQueries({ queryKey: ['optimizer-status'] });
+      queryClient.invalidateQueries({ queryKey: ['config-versions'] });
+      queryClient.invalidateQueries({ queryKey: ['config-version-active'] });
     },
   });
 }
@@ -216,6 +219,49 @@ export function useRejectProposal() {
     mutationFn: (proposalId: number) => apiClient.rejectProposal(proposalId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['optimizer-proposals'] });
+    },
+  });
+}
+
+/** Config versions list. */
+export function useConfigVersions() {
+  return useQuery({
+    queryKey: ['config-versions'],
+    queryFn: () => apiClient.getConfigVersions(),
+    staleTime: 5_000,
+  });
+}
+
+/** Currently active config version. */
+export function useActiveConfigVersion() {
+  return useQuery({
+    queryKey: ['config-version-active'],
+    queryFn: () => apiClient.getActiveConfigVersion(),
+    staleTime: 0,
+  });
+}
+
+/** Create config version mutation. */
+export function useCreateConfigVersion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, source }: { name: string; source?: string }) =>
+      apiClient.createConfigVersion(name, source),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config-versions'] });
+      queryClient.invalidateQueries({ queryKey: ['config-version-active'] });
+    },
+  });
+}
+
+/** Restore config version mutation. */
+export function useRestoreConfigVersion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiClient.restoreConfigVersion(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config-versions'] });
+      queryClient.invalidateQueries({ queryKey: ['config-version-active'] });
     },
   });
 }
