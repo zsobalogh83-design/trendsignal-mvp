@@ -388,6 +388,25 @@ class SignalGenerator:
                 "trend_strength":    round(trend_strength_score,    2),
                 "rr_quality":        round(rr_quality_score,        2),
             },
+            # Csoportonkénti tényleges hozzájárulás a combined_score-hoz
+            # (sub-score × COMPONENT_WEIGHT szorzat-összegek, ~= combined_score - alignment_bonus)
+            "group_contributions": {
+                "sentiment": round(
+                    sentiment_signal_score  * cw["sentiment_signal"] +
+                    sentiment_recency_score * cw["sentiment_recency"], 2),
+                "technical": round(
+                    sma_trend_score      * cw["sma_trend"]      +
+                    rsi_momentum_score   * cw["rsi_momentum"]   +
+                    macd_signal_score    * cw["macd_signal"]    +
+                    bb_position_score    * cw["bb_position"]    +
+                    stoch_cross_score    * cw["stoch_cross"]    +
+                    volume_confirm_score * cw["volume_confirm"], 2),
+                "risk": round(
+                    volatility_risk_score * cw["volatility_risk"] +
+                    sr_proximity_score    * cw["sr_proximity"]    +
+                    trend_strength_score  * cw["trend_strength"]  +
+                    rr_quality_score      * cw["rr_quality"],      2),
+            },
             "reasoning": {
                 "sentiment": {
                     "score": sentiment_score,

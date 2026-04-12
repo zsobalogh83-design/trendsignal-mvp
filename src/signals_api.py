@@ -785,6 +785,11 @@ async def get_signal_history(
                 "take_profit": float(signal.take_profit) if signal.take_profit else 0.0,
                 "risk_reward_ratio": float(signal.risk_reward_ratio) if signal.risk_reward_ratio else 1.0,
                 "reasoning": reasoning,
+                **({
+                    "sentiment_contribution": gc["sentiment"],
+                    "technical_contribution": gc["technical"],
+                    "risk_contribution":      gc["risk"],
+                } if (gc := reasoning.get("group_contributions")) else {}),
                 "created_at": signal.created_at.isoformat() + "Z",
                 "expires_at": signal.expires_at.isoformat() + "Z" if signal.expires_at else None,
                 "status": signal.status,
