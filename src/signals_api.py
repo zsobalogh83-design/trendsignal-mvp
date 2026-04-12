@@ -891,11 +891,18 @@ async def get_signals(
                 "sentiment_score": float(signal.sentiment_score),
                 "technical_score": float(signal.technical_score),
                 "risk_score": float(signal.risk_score),
+                "sentiment_confidence": float(signal.sentiment_confidence) if signal.sentiment_confidence else 0.0,
+                "technical_confidence": float(signal.technical_confidence) if signal.technical_confidence else 0.0,
                 "entry_price": float(signal.entry_price) if signal.entry_price else 0.0,
                 "stop_loss": float(signal.stop_loss) if signal.stop_loss else 0.0,
                 "take_profit": float(signal.take_profit) if signal.take_profit else 0.0,
                 "risk_reward_ratio": float(signal.risk_reward_ratio) if signal.risk_reward_ratio else 1.0,
                 "reasoning": reasoning,
+                **({
+                    "sentiment_contribution": gc["sentiment"],
+                    "technical_contribution": gc["technical"],
+                    "risk_contribution":      gc["risk"],
+                } if (gc := reasoning.get("group_contributions")) else {}),
                 "created_at": signal.created_at.isoformat() + "Z",
                 "expires_at": signal.expires_at.isoformat() + "Z" if signal.expires_at else None,
                 "status": signal.status

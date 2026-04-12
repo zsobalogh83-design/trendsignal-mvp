@@ -247,25 +247,28 @@ export function SignalDetail() {
               // Csoportonkénti tényleges hozzájárulás (12-component architektúra).
               // Ha jelen van (új signalok), ezeket mutatjuk; régi signalokon a raw score-t.
               const hasContrib = signal.sentiment_contribution != null;
+              const gw = (signal.reasoning as any)?.group_weights;
+              const toWeight = (v: number | undefined, fallback: number) =>
+                hasContrib ? (v != null ? Math.round(v * 100) : fallback) : null;
               return [
                 {
                   label: 'Sentiment',
                   score: signal.sentiment_score,
-                  weight: hasContrib ? 40 : null,   // sentiment_signal(30%) + sentiment_recency(10%)
+                  weight: toWeight(gw?.sentiment, 40),
                   contribution: hasContrib ? signal.sentiment_contribution! : null,
                   color: '#10b981',
                 },
                 {
                   label: 'Technical',
                   score: signal.technical_score,
-                  weight: hasContrib ? 38 : null,   // sma+rsi+macd+bb+stoch+volume = 38%
+                  weight: toWeight(gw?.technical, 38),
                   contribution: hasContrib ? signal.technical_contribution! : null,
                   color: '#3b82f6',
                 },
                 {
                   label: 'Risk',
                   score: signal.risk_score,
-                  weight: hasContrib ? 22 : null,   // volatility+sr_prox+trend+rr = 22%
+                  weight: toWeight(gw?.risk, 22),
                   contribution: hasContrib ? signal.risk_contribution! : null,
                   color: '#f59e0b',
                 },
@@ -296,12 +299,6 @@ export function SignalDetail() {
                 </div>
                 {item.weight !== null && (
                   <div style={{ fontSize: '13px', color: '#94a3b8' }}>Weight: {item.weight}%</div>
-                )}
-                {/* Raw score másodlagos infoként — megmutatja a nyers irányjelzést */}
-                {item.contribution !== null && (
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px' }}>
-                    Raw: {item.score > 0 ? '+' : ''}{item.score.toFixed(1)}
-                  </div>
                 )}
               </div>
             ))}
