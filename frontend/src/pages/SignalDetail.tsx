@@ -232,34 +232,45 @@ export function SignalDetail() {
           icon="📊"
           title="Score Breakdown"
           badge={`${signal.combined_score.toFixed(1)}`}
-          summary={`Sentiment: ${signal.sentiment_score.toFixed(1)} · Technical: ${signal.technical_score.toFixed(1)} · Risk: ${signal.risk_score.toFixed(1)}`}
+          summary={(() => {
+            const hasC = signal.sentiment_contribution != null;
+            if (hasC) {
+              return `Sentiment: ${signal.sentiment_contribution!.toFixed(1)} · Technical: ${signal.technical_contribution!.toFixed(1)} · Risk: ${signal.risk_contribution!.toFixed(1)}`;
+            }
+            return `Sentiment: ${signal.sentiment_score.toFixed(1)} · Technical: ${signal.technical_score.toFixed(1)} · Risk: ${signal.risk_score.toFixed(1)}`;
+          })()}
           isOpen={openSections.includes('overview')}
           onToggle={() => toggleSection('overview')}
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', margin: '20px 0' }}>
-            {[
-              { 
-                label: 'Sentiment', 
-                score: signal.sentiment_score, 
-                weight: signal.reasoning.components?.sentiment?.weight ? Math.round(signal.reasoning.components.sentiment.weight * 100) : null,
-                contribution: signal.reasoning.components?.sentiment?.contribution || (signal.sentiment_score * 0.7),
-                color: '#10b981' 
-              },
-              { 
-                label: 'Technical', 
-                score: signal.technical_score, 
-                weight: signal.reasoning.components?.technical?.weight ? Math.round(signal.reasoning.components.technical.weight * 100) : null,
-                contribution: signal.reasoning.components?.technical?.contribution || (signal.technical_score * 0.2),
-                color: '#3b82f6' 
-              },
-              { 
-                label: 'Risk', 
-                score: signal.risk_score, 
-                weight: signal.reasoning.components?.risk?.weight ? Math.round(signal.reasoning.components.risk.weight * 100) : null,
-                contribution: signal.reasoning.components?.risk?.contribution || (signal.risk_score * 0.1),
-                color: '#f59e0b' 
-              }
-            ].map((item, idx) => (
+            {(() => {
+              // Csoportonkénti tényleges hozzájárulás (12-component architektúra).
+              // Ha jelen van (új signalok), ezeket mutatjuk; régi signalokon a raw score-t.
+              const hasContrib = signal.sentiment_contribution != null;
+              return [
+                {
+                  label: 'Sentiment',
+                  score: signal.sentiment_score,
+                  weight: hasContrib ? 40 : null,   // sentiment_signal(30%) + sentiment_recency(10%)
+                  contribution: hasContrib ? signal.sentiment_contribution! : null,
+                  color: '#10b981',
+                },
+                {
+                  label: 'Technical',
+                  score: signal.technical_score,
+                  weight: hasContrib ? 38 : null,   // sma+rsi+macd+bb+stoch+volume = 38%
+                  contribution: hasContrib ? signal.technical_contribution! : null,
+                  color: '#3b82f6',
+                },
+                {
+                  label: 'Risk',
+                  score: signal.risk_score,
+                  weight: hasContrib ? 22 : null,   // volatility+sr_prox+trend+rr = 22%
+                  contribution: hasContrib ? signal.risk_contribution! : null,
+                  color: '#f59e0b',
+                },
+              ];
+            })().map((item, idx) => (
               <div key={idx} style={{
                 background: 'rgba(15, 23, 42, 0.5)',
                 borderRadius: '10px',
@@ -281,9 +292,11 @@ export function SignalDetail() {
                 {item.weight !== null && (
                   <div style={{ fontSize: '13px', color: '#94a3b8' }}>Weight: {item.weight}%</div>
                 )}
-                <div style={{ fontSize: '14px', color: '#10b981', fontWeight: '600', marginTop: '8px' }}>
-                  Contributes: {item.contribution > 0 ? '+' : ''}{item.contribution.toFixed(1)}
-                </div>
+                {item.contribution !== null && (
+                  <div style={{ fontSize: '14px', color: '#10b981', fontWeight: '600', marginTop: '8px' }}>
+                    Contributes: {item.contribution > 0 ? '+' : ''}{item.contribution.toFixed(1)}
+                  </div>
+                )}
               </div>
             ))}
           </div>

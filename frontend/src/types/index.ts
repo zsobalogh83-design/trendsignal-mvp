@@ -144,6 +144,9 @@ export interface Signal {
   technical_score: number;
   risk_score: number;
 
+  sentiment_confidence: number;
+  technical_confidence: number;
+
   /** Csoportonkénti tényleges hozzájárulás a combined_score-hoz (12-component architektúra).
    *  Csak új (12-component) signalokon van jelen; régi signalokon undefined. */
   sentiment_contribution?: number | null;
