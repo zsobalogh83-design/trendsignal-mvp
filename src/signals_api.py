@@ -949,6 +949,8 @@ async def get_signal_by_id_endpoint(
             "sentiment_score": float(signal.sentiment_score),
             "technical_score": float(signal.technical_score),
             "risk_score": float(signal.risk_score),
+            "sentiment_confidence": float(signal.sentiment_confidence) if signal.sentiment_confidence else 0.5,
+            "technical_confidence": float(signal.technical_confidence) if signal.technical_confidence else 0.5,
             "entry_price": float(signal.entry_price) if signal.entry_price else 0.0,
             "stop_loss": float(signal.stop_loss) if signal.stop_loss else 0.0,
             "take_profit": float(signal.take_profit) if signal.take_profit else 0.0,
@@ -956,7 +958,12 @@ async def get_signal_by_id_endpoint(
             "reasoning": reasoning,
             "created_at": signal.created_at.isoformat() + "Z",
             "expires_at": signal.expires_at.isoformat() + "Z" if signal.expires_at else None,
-            "status": signal.status
+            "status": signal.status,
+            **({
+                "sentiment_contribution": gc["sentiment"],
+                "technical_contribution": gc["technical"],
+                "risk_contribution":      gc["risk"],
+            } if (gc := reasoning.get("group_contributions")) else {}),
         }
         
     except HTTPException:
