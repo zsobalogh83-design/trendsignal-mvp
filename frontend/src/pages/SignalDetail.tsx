@@ -278,6 +278,8 @@ export function SignalDetail() {
                 borderLeft: `4px solid ${item.color}`
               }}>
                 <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '8px' }}>{item.label}</div>
+                {/* Nagy szám: contribution (ha elérhető) — ez adja ki a combined score-t.
+                    Ha nincs contribution (régi signal), a raw score kerül ide. */}
                 <div style={{
                   fontSize: '32px',
                   fontWeight: '700',
@@ -287,14 +289,18 @@ export function SignalDetail() {
                   backgroundClip: 'text',
                   marginBottom: '6px'
                 }}>
-                  {item.score > 0 ? '+' : ''}{item.score.toFixed(1)}
+                  {item.contribution !== null
+                    ? <>{item.contribution > 0 ? '+' : ''}{item.contribution.toFixed(1)}</>
+                    : <>{item.score > 0 ? '+' : ''}{item.score.toFixed(1)}</>
+                  }
                 </div>
                 {item.weight !== null && (
                   <div style={{ fontSize: '13px', color: '#94a3b8' }}>Weight: {item.weight}%</div>
                 )}
+                {/* Raw score másodlagos infoként — megmutatja a nyers irányjelzést */}
                 {item.contribution !== null && (
-                  <div style={{ fontSize: '14px', color: '#10b981', fontWeight: '600', marginTop: '8px' }}>
-                    Contributes: {item.contribution > 0 ? '+' : ''}{item.contribution.toFixed(1)}
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px' }}>
+                    Raw: {item.score > 0 ? '+' : ''}{item.score.toFixed(1)}
                   </div>
                 )}
               </div>
