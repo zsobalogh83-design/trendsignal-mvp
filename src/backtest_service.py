@@ -222,6 +222,14 @@ class BacktestService:
             return 'newly_closed' if was_closed else 'still_open'
         
         # Case 3: No trade - create new
+        # Superseded/filtered signalokra ne nyissunk új trade-et.
+        # (archived = generator által felváltott, de még nem migrált;
+        #  *_filtered = entry gate kizárta; ezekre soha nem kell új trade.)
+        _skip_statuses = ('archived', 'macd_filtered', 'rsi_filtered',
+                          'sma200_filtered', 'sma50_filtered')
+        if signal.status in _skip_statuses:
+            return 'skipped_invalid'
+
         # Meghatározzuk, hogy valódi alert-szintű signal-e
         is_real = abs(signal.combined_score) >= self.ALERT_THRESHOLD
 
@@ -1050,6 +1058,9 @@ class BacktestService:
         # Csak live signalok:
         # - 'migrated': már archive-ban van, nincs live feladata
         # - 'nogo': HOLD döntés (régi kód) vagy problémás signal, soha nem nyit trade-et
+        # Megjegyzés: 'archived' és *_filtered státuszú signalokra _process_signal
+        # Case 3-ban van guard (nem nyit új trade-et), de OPEN trade-ek exit-jét
+        # még mindig ellenőrzi. Ezért ezeket nem zárjuk ki itt.
         query = query.filter(Signal.status.notin_(['migrated', 'nogo']))
 
         # Minden nem-neutral signal (HOLD zone határán túl)
