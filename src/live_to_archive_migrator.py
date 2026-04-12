@@ -316,6 +316,9 @@ def migrate_closed_trade_to_archive(
                 (trade["entry_signal_id"],),
             )
 
+        # Híreket is átmásoljuk archive_news_items-be
+        _migrate_news(conn, ticker_symbol, signal_ts)
+
         conn.commit()
         logger.info(
             f"[Migrator] ✅ Trade {trade_id} "
@@ -576,6 +579,9 @@ def migrate_signal_without_trade(
             (signal_id,),
         )
 
+        # Híreket is átmásoljuk archive_news_items-be
+        _migrate_news(conn, ticker_symbol, signal_ts)
+
         conn.commit()
         logger.info(
             f"[Migrator] ✅ Signal {signal_id} "
@@ -597,6 +603,58 @@ def migrate_signal_without_trade(
 
     finally:
         conn.close()
+
+
+def _migrate_news(conn: sqlite3.Connection, ticker_symbol: str, signal_ts: str) -> int:
+    """
+    A signal_timestamp előtti 24 órában publikált, ticker-hez tartozó news_items
+    rekordjait átmásolja archive_news_items-be (INSERT OR IGNORE — idempotent).
+
+    Returns: beszúrt sorok száma
+    """
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO archive_news_items (
+            url_hash, ticker_symbol, queried_ticker,
+            title, url, published_at, fetched_at,
+            source, full_text, language,
+            is_relevant, sentiment_confidence,
+            is_duplicate, duplicate_of, cluster_id,
+            av_relevance_score,
+            finbert_score, llm_score, llm_price_impact,
+            llm_impact_level, llm_impact_duration,
+            llm_catalyst_type, llm_priced_in, llm_confidence,
+            llm_reason, llm_latency_ms,
+            active_score, active_score_source,
+            llm_score_worthy, llm_is_first_report, llm_surprise_dir
+        )
+        SELECT
+            ni.url_hash,
+            t.symbol,
+            t.symbol,
+            ni.title, ni.url, ni.published_at, ni.fetched_at,
+            ns.name,
+            ni.full_text, ni.language,
+            ni.is_relevant, ni.sentiment_confidence,
+            ni.is_duplicate, ni.duplicate_of, ni.cluster_id,
+            nt.relevance_score,
+            ni.finbert_score, ni.llm_score, ni.llm_price_impact,
+            ni.llm_impact_level, ni.llm_impact_duration,
+            ni.llm_catalyst_type, ni.llm_priced_in, ni.llm_confidence,
+            ni.llm_reason, ni.llm_latency_ms,
+            ni.active_score, ni.active_score_source,
+            ni.llm_score_worthy, ni.llm_is_first_report, ni.llm_surprise_dir
+        FROM news_items ni
+        JOIN news_tickers nt ON nt.news_id = ni.id
+        JOIN tickers t ON t.id = nt.ticker_id
+        LEFT JOIN news_sources ns ON ns.id = ni.source_id
+        WHERE t.symbol = ?
+          AND ni.published_at >= datetime(?, '-24 hours')
+          AND ni.published_at <= ?
+        """,
+        (ticker_symbol, signal_ts, signal_ts),
+    )
+    return conn.total_changes
 
 
 def _avg3(a, b, c) -> Optional[float]:
