@@ -371,6 +371,7 @@ def migrate_signal_without_trade(
             'expired', 'archived', 'nogo',
             'skip_hours', 'parallel_skip', 'no_sl_tp',
             'no_data', 'invalid_levels',
+            'macd_filtered', 'rsi_filtered',
         )
         sig = conn.execute(
             f"""

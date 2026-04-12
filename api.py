@@ -63,7 +63,8 @@ def run_daily_simulate_and_migrate():
             # nem vesznek el azonnal (következő szimulációs körben újra próbálhatók).
             _MIGRATABLE = ['expired', 'archived',
                            'skip_hours', 'parallel_skip', 'no_sl_tp',
-                           'no_data', 'invalid_levels']
+                           'no_data', 'invalid_levels',
+                           'nogo', 'macd_filtered', 'rsi_filtered']
             orphan_ids = [
                 s.id for s in db.query(Signal).filter(
                     (Signal.status.in_(_MIGRATABLE)) |
