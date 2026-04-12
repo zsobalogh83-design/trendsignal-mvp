@@ -311,28 +311,38 @@ export function Dashboard() {
                     📊 Breakdown
                   </div>
                   
-                  {[
-                    { label: 'Sentiment', value: signal.sentiment_score },
-                    { label: 'Technical', value: signal.technical_score },
-                    { label: 'Risk', value: signal.risk_score }
-                  ].map((item, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>{item.label}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontWeight: '600', color: '#e0e7ff', fontSize: '12px' }}>
-                          {item.value > 0 ? '+' : ''}{item.value.toFixed(1)}
-                        </span>
-                        <div style={{ width: '60px', height: '3px', background: 'rgba(51, 65, 85, 0.5)', borderRadius: '2px', overflow: 'hidden' }}>
-                          <div style={{
-                            height: '100%',
-                            width: `${scoreToPercentage(item.value)}%`,
-                            background: 'linear-gradient(90deg, #10b981 0%, #3b82f6 100%)',
-                            borderRadius: '2px'
-                          }}></div>
+                  {(() => {
+                    // Ha elérhetők a 12-component hozzájárulások, azokat mutatjuk;
+                    // régi signalokon fallback a nyers aggregált értékekre.
+                    const hasContrib = signal.sentiment_contribution != null;
+                    const items = [
+                      { label: 'Sentiment', value: hasContrib ? signal.sentiment_contribution! : signal.sentiment_score },
+                      { label: 'Technical', value: hasContrib ? signal.technical_contribution! : signal.technical_score },
+                      { label: 'Risk',      value: hasContrib ? signal.risk_contribution!      : signal.risk_score      },
+                    ];
+                    // Contribution skálája ~±50, raw score skálája ±100 — mindkettőt kezeljük
+                    const toBar = (v: number) => hasContrib
+                      ? Math.min(100, Math.max(0, (v + 50) / 100 * 100))
+                      : scoreToPercentage(v);
+                    return items.map((item, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>{item.label}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontWeight: '600', color: '#e0e7ff', fontSize: '12px' }}>
+                            {item.value > 0 ? '+' : ''}{item.value.toFixed(1)}
+                          </span>
+                          <div style={{ width: '60px', height: '3px', background: 'rgba(51, 65, 85, 0.5)', borderRadius: '2px', overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%',
+                              width: `${toBar(item.value)}%`,
+                              background: 'linear-gradient(90deg, #10b981 0%, #3b82f6 100%)',
+                              borderRadius: '2px'
+                            }}></div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
 
                 {/* Levels - COMPACT */}
