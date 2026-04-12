@@ -577,6 +577,7 @@ def _load_archive_signal_rows(
           AND a.risk_score      IS NOT NULL
           AND a.combined_score  IS NOT NULL
           AND a.decision NOT IN ('HOLD', 'NEUTRAL')
+          AND a.news_count > 0
           AND EXISTS (
               SELECT 1 FROM price_data p
               WHERE p.ticker_symbol = a.ticker_symbol
